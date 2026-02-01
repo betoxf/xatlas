@@ -3465,6 +3465,14 @@ export class DashboardPanel {
 
           // Re-enable fit operations after initial fit is complete
           windowState.suppressFit = false;
+
+          // Force a refresh after fit to redraw any content that arrived
+          // before the terminal was properly sized (fixes invisible prompt issue)
+          setTimeout(() => {
+            if (windowState.term) {
+              windowState.term.refresh(0, windowState.term.rows - 1);
+            }
+          }, 50);
         });
       });
 
