@@ -160,12 +160,13 @@ private struct ProjectItemView: View {
     }
 
     private func syncProject() {
-        guard !isSyncing else { return }
+        guard !isSyncing, let status = gitStatus else { return }
         isSyncing = true
         let path = project.path
+        let message = GitService.shared.generateCommitMessage(for: status)
         Task.detached {
             GitService.shared.stageAll(at: path)
-            GitService.shared.commit(at: path, message: "Auto-sync from xatlas")
+            GitService.shared.commit(at: path, message: message)
             GitService.shared.push(at: path)
             await MainActor.run {
                 isSyncing = false
@@ -196,7 +197,7 @@ private struct GitInlineButton: View {
                         .controlSize(.mini)
                         .scaleEffect(0.6)
                 } else {
-                    Image(systemName: "arrow.triangle.branch")
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
                         .font(.system(size: 10, weight: .medium))
                 }
 
