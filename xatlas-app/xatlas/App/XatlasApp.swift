@@ -5,11 +5,9 @@ struct XatlasApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        WindowGroup {
-            MainView()
-                .frame(minWidth: 800, minHeight: 500)
+        // Window is created manually in AppDelegate for custom corner radius
+        Settings {
+            EmptyView()
         }
-        .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1100, height: 700)
     }
 }

@@ -19,8 +19,13 @@ struct CommandBarView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
-        .padding(.horizontal, 10)
+        .background(
+            Capsule()
+                .fill(.white.opacity(0.75))
+                .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+                .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+        )
+        .padding(.horizontal, 12)
         .padding(.bottom, 10)
         .onChange(of: state.isCommandBarFocused) { _, focused in
             isFocused = focused

@@ -30,8 +30,14 @@ struct StyledTerminalView: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
         }
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.white.opacity(0.75))
+                .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+                .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .padding(10)
     }
 
     private var displayPath: String {
