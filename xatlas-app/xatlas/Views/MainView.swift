@@ -32,15 +32,11 @@ struct MainView: View {
         }
         .background(windowBg)
         .onAppear {
-            if state.tabs.isEmpty {
-                let session = TerminalService.shared.createSession(
-                    projectID: state.selectedProject?.id
-                )
-                let tab = TabItem(
-                    id: session.id,
-                    title: session.title,
-                    kind: .terminal(sessionID: session.id)
-                )
+            if let project = state.selectedProject {
+                state.switchToProject(project)
+            } else if state.tabs.isEmpty {
+                let session = TerminalService.shared.createSession()
+                let tab = TabItem(id: session.id, title: "Terminal", kind: .terminal(sessionID: session.id))
                 state.openTab(tab)
             }
         }

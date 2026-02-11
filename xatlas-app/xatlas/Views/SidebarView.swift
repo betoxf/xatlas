@@ -20,14 +20,14 @@ struct SidebarView: View {
             // Section header
             SectionHeader(title: "Projects")
 
-            // Project list with inline file tree
+            // Project list
             ScrollView {
                 VStack(spacing: 1) {
                     ForEach(state.projects) { project in
                         ProjectItemView(
                             project: project,
                             isSelected: state.selectedProject?.id == project.id,
-                            onSelect: { state.selectedProject = project },
+                            onSelect: { state.switchToProject(project) },
                             onFileSelect: { path in
                                 let tab = TabItem(
                                     id: path,
@@ -81,40 +81,62 @@ private struct ProjectItemView: View {
     let onRemove: () -> Void
     @State private var isExpanded = false
     @State private var isHovered = false
+    @State private var gitStatus: GitStatus?
+    @State private var isSyncing = false
 
     var body: some View {
         VStack(spacing: 0) {
             // Project row
-            Button {
-                onSelect()
-                withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(isSelected ? .white : .blue.opacity(0.6))
+                    .frame(width: 20, alignment: .center)
+
+                Text(project.name)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .foregroundStyle(isSelected ? .white : .primary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                // Git status button
+                if let status = gitStatus, status.isRepo {
+                    GitInlineButton(
+                        status: status,
+                        isSelected: isSelected,
+                        isSyncing: isSyncing,
+                        onSync: { syncProject() },
+                        projectPath: project.path
+                    )
+                }
+
+                // Chevron
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+                } label: {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 12)
-
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(isSelected ? .white : .blue.opacity(0.6))
-                        .frame(width: 20, alignment: .center)
-
-                    Text(project.name)
-                        .font(.system(size: 13, weight: isSelected ? .medium : .regular))
-                        .foregroundStyle(isSelected ? .white : .primary)
-                        .lineLimit(1)
-
-                    Spacer()
+                        .foregroundStyle(isSelected ? Color.white.opacity(0.7) : Color.gray.opacity(0.5))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isSelected ? Color.accentColor : Color.primary.opacity(isHovered ? 0.05 : 0))
-                )
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : Color.primary.opacity(isHovered ? 0.05 : 0))
+            )
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                onSelect()
+                withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+            }
+            .onTapGesture(count: 1) {
+                onSelect()
+            }
             .onHover { isHovered = $0 }
             .contextMenu {
                 Button("Remove") { onRemove() }
@@ -126,6 +148,106 @@ private struct ProjectItemView: View {
                     .padding(.leading, 4)
             }
         }
+        .onAppear { refreshGit() }
+        .onChange(of: isSelected) { _, sel in if sel { refreshGit() } }
+    }
+
+    private func refreshGit() {
+        Task.detached { [path = project.path] in
+            let s = GitService.shared.status(at: path)
+            await MainActor.run { gitStatus = s }
+        }
+    }
+
+    private func syncProject() {
+        guard !isSyncing else { return }
+        isSyncing = true
+        let path = project.path
+        Task.detached {
+            GitService.shared.stageAll(at: path)
+            GitService.shared.commit(at: path, message: "Auto-sync from xatlas")
+            GitService.shared.push(at: path)
+            await MainActor.run {
+                isSyncing = false
+                refreshGit()
+            }
+        }
+    }
+}
+
+// MARK: - Git inline button
+
+private struct GitInlineButton: View {
+    let status: GitStatus
+    let isSelected: Bool
+    let isSyncing: Bool
+    let onSync: () -> Void
+    let projectPath: String
+    @State private var isGitHovered = false
+
+    private var changeCount: Int { status.changes.count }
+    private var hasChanges: Bool { changeCount > 0 }
+
+    var body: some View {
+        Button(action: onSync) {
+            HStack(spacing: 3) {
+                if isSyncing {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.6)
+                } else {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 10, weight: .medium))
+                }
+
+                if hasChanges {
+                    Text("\(changeCount)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                }
+            }
+            .foregroundStyle(badgeColor)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(badgeBgColor)
+            )
+            .scaleEffect(isGitHovered ? 1.1 : 1.0)
+        }
+        .buttonStyle(.plain)
+        .onHover { isGitHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isGitHovered)
+        .help(hasChanges ? "Commit & push \(changeCount) change\(changeCount == 1 ? "" : "s")" : "Up to date — \(status.branch)")
+        .contextMenu {
+            Text(status.branch).font(.headline)
+            Divider()
+            Button("Commit & Push") { onSync() }
+            Button("Pull") {
+                Task.detached { GitService.shared.pull(at: projectPath) }
+            }
+            Button("Push") {
+                Task.detached { GitService.shared.push(at: projectPath) }
+            }
+            Divider()
+            if hasChanges {
+                Text("\(changeCount) changed file\(changeCount == 1 ? "" : "s")")
+                    .font(.caption)
+            }
+        }
+    }
+
+    private var badgeColor: Color {
+        if isSelected {
+            return .white.opacity(0.9)
+        }
+        return hasChanges ? .orange.opacity(0.85) : .green.opacity(0.65)
+    }
+
+    private var badgeBgColor: Color {
+        if isSelected {
+            return .white.opacity(0.15)
+        }
+        return hasChanges ? .orange.opacity(0.1) : .green.opacity(0.06)
     }
 }
 
