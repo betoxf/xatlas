@@ -2,8 +2,6 @@ import SwiftUI
 
 struct SidebarView: View {
     @Bindable var state: AppState
-    @State private var showAddProject = false
-    @State private var newProjectPath = ""
 
     var body: some View {
         List(selection: $state.selectedProject) {
@@ -21,7 +19,7 @@ struct SidebarView: View {
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Button {
-                    showAddProject = true
+                    openFolderPicker()
                 } label: {
                     Label("Add Project", systemImage: "plus")
                         .font(XatlasFont.sidebarCaption)
@@ -32,8 +30,21 @@ struct SidebarView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .sheet(isPresented: $showAddProject) {
-            AddProjectSheet(state: state, isPresented: $showAddProject)
+    }
+
+    private func openFolderPicker() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a project folder"
+        panel.prompt = "Open"
+
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                let name = url.lastPathComponent
+                state.addProject(name: name, path: url.path)
+            }
         }
     }
 }
@@ -52,43 +63,5 @@ private struct ProjectRow: View {
                 .lineLimit(1)
         }
         .padding(.vertical, 2)
-    }
-}
-
-private struct AddProjectSheet: View {
-    @Bindable var state: AppState
-    @Binding var isPresented: Bool
-    @State private var path = ""
-
-    var body: some View {
-        VStack(spacing: 16) {
-            Text("Add Project").font(XatlasFont.title)
-            TextField("Project path", text: $path)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                Button("Browse...") { browseForFolder() }
-                Spacer()
-                Button("Cancel") { isPresented = false }
-                Button("Add") {
-                    let name = URL(fileURLWithPath: path).lastPathComponent
-                    state.addProject(name: name, path: path)
-                    isPresented = false
-                }
-                .disabled(path.isEmpty)
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 400)
-    }
-
-    private func browseForFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            path = url.path
-        }
     }
 }

@@ -15,11 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func configureMainWindow() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
         guard let window = NSApplication.shared.windows.first else { return }
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.backgroundColor = .clear
         window.titleVisibility = .hidden
         window.toolbar = nil
+        window.makeKeyAndOrderFront(nil)
     }
 }
