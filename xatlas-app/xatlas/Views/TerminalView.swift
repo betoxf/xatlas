@@ -30,7 +30,7 @@ struct StyledTerminalView: View {
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
         }
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(8)
     }
 

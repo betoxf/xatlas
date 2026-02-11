@@ -2,13 +2,17 @@ import SwiftUI
 
 struct MainView: View {
     @State private var state = AppState.shared
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        HStack(spacing: 0) {
+            // Sidebar
             SidebarView(state: state)
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 300)
-        } detail: {
+                .frame(width: 220)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .padding(.leading, 8)
+                .padding(.vertical, 8)
+
+            // Main content
             ContentAreaView(state: state)
         }
         .onAppear {
