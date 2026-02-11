@@ -34,6 +34,9 @@ struct CommandBarView: View {
 
         if command.hasPrefix(":") {
             handleAppCommand(String(command.dropFirst()))
+        } else {
+            // Send to active terminal
+            state.pendingTerminalCommand = command
         }
     }
 

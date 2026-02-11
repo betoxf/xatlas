@@ -6,6 +6,7 @@ import SwiftTerm
 struct StyledTerminalView: View {
     let sessionID: String
     var workingDirectory: String?
+    @Bindable var appState: AppState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -25,7 +26,7 @@ struct StyledTerminalView: View {
             .padding(.top, 10)
             .padding(.bottom, 6)
 
-            InteractiveTerminal(workingDirectory: workingDirectory ?? NSHomeDirectory())
+            InteractiveTerminal(workingDirectory: workingDirectory ?? NSHomeDirectory(), appState: appState)
                 .padding(.horizontal, 6)
                 .padding(.bottom, 6)
         }
@@ -43,6 +44,7 @@ struct StyledTerminalView: View {
 
 struct InteractiveTerminal: View {
     let workingDirectory: String
+    @Bindable var appState: AppState
 
     @State private var outputLines: [OutputLine] = []
     @State private var currentInput = ""
@@ -51,10 +53,9 @@ struct InteractiveTerminal: View {
     @State private var isRunning = false
     @FocusState private var isFocused: Bool
 
-    // Dark gray text color
-    private let textColor = Color(white: 0.25)
-    private let promptColor = Color.blue.opacity(0.6)
-    private let dimColor = Color(white: 0.45)
+    private let textColor = SwiftUI.Color(white: 0.25)
+    private let promptColor = SwiftUI.Color.blue.opacity(0.6)
+    private let dimColor = SwiftUI.Color(white: 0.45)
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -91,6 +92,13 @@ struct InteractiveTerminal: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .defaultFocus($isFocused, true)
+        .onChange(of: appState.pendingTerminalCommand) { _, cmd in
+            if let cmd {
+                currentInput = cmd
+                appState.pendingTerminalCommand = nil
+                executeCommand()
+            }
+        }
     }
 
     private var promptString: String {
@@ -192,8 +200,10 @@ struct FocusableTextField: NSViewRepresentable {
         field.cell?.wraps = false
         field.cell?.isScrollable = true
 
-        // Become first responder on next run loop
-        DispatchQueue.main.async {
+        // Aggressively grab focus once the window is ready
+        context.coordinator.field = field
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            field.window?.makeKeyAndOrderFront(nil)
             field.window?.makeFirstResponder(field)
         }
         return field
@@ -207,7 +217,13 @@ struct FocusableTextField: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: FocusableTextField
+        weak var field: NSTextField?
         init(_ parent: FocusableTextField) { self.parent = parent }
+
+        func refocus() {
+            guard let field else { return }
+            field.window?.makeFirstResponder(field)
+        }
 
         func controlTextDidChange(_ obj: Notification) {
             guard let field = obj.object as? NSTextField else { return }
@@ -217,6 +233,11 @@ struct FocusableTextField: NSViewRepresentable {
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 parent.onSubmit()
+                // Clear and refocus after submit
+                DispatchQueue.main.async { [weak self] in
+                    self?.field?.stringValue = ""
+                    self?.refocus()
+                }
                 return true
             }
             return false

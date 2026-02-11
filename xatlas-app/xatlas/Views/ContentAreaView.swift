@@ -47,7 +47,8 @@ struct ContentAreaView: View {
         case .terminal(let sessionID):
             StyledTerminalView(
                 sessionID: sessionID,
-                workingDirectory: state.selectedProject?.path
+                workingDirectory: state.selectedProject?.path,
+                appState: state
             )
         case .editor(let filePath):
             EditorView(filePath: filePath)

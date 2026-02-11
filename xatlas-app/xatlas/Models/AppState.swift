@@ -10,6 +10,7 @@ final class AppState {
     var tabs: [TabItem] = []
     var isCommandBarFocused = false
     var sidebarWidth: CGFloat = 220
+    var pendingTerminalCommand: String?
 
     private init() {
         loadProjects()
