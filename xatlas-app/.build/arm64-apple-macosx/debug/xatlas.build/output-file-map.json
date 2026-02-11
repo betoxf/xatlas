@@ -1,0 +1,166 @@
+{
+  "": {
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/master.swiftdeps"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/App/AppDelegate.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppDelegate.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppDelegate.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppDelegate~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppDelegate.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppDelegate.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/App/XatlasApp.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/XatlasApp.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/XatlasApp.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/XatlasApp~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/XatlasApp.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/XatlasApp.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/MCP/MCPHandler.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPHandler.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPHandler.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPHandler~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPHandler.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPHandler.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/MCP/MCPServer.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPServer.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPServer.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPServer~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPServer.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPServer.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/MCP/MCPTypes.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPTypes.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPTypes.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPTypes~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPTypes.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MCPTypes.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/MCP/Tools/FileTools.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileTools.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileTools.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileTools~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileTools.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileTools.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/MCP/Tools/TerminalTools.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalTools.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalTools.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalTools~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalTools.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalTools.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/MCP/Tools/ToolRegistry.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ToolRegistry.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ToolRegistry.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ToolRegistry~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ToolRegistry.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ToolRegistry.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Models/AppState.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppState.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppState.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppState~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppState.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/AppState.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Models/Project.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Project.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Project.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Project~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Project.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Project.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Models/Session.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Session.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Session.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Session~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Session.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Session.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Services/FileService.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileService.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileService.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileService~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileService.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/FileService.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Services/ProjectManager.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ProjectManager.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ProjectManager.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ProjectManager~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ProjectManager.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ProjectManager.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Services/TerminalService.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalService.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalService.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalService~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalService.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalService.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Services/TmuxService.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TmuxService.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TmuxService.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TmuxService~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TmuxService.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TmuxService.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Theme/GlassEffects.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/GlassEffects.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/GlassEffects.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/GlassEffects~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/GlassEffects.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/GlassEffects.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Theme/Typography.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Typography.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Typography.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Typography~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Typography.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/Typography.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Views/CommandBarView.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/CommandBarView.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/CommandBarView.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/CommandBarView~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/CommandBarView.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/CommandBarView.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Views/ContentAreaView.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ContentAreaView.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ContentAreaView.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ContentAreaView~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ContentAreaView.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/ContentAreaView.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Views/EditorView.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/EditorView.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/EditorView.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/EditorView~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/EditorView.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/EditorView.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Views/MainView.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MainView.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MainView.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MainView~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MainView.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/MainView.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Views/SidebarView.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/SidebarView.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/SidebarView.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/SidebarView~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/SidebarView.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/SidebarView.dia"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/xatlas/Views/TerminalView.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalView.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalView.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalView~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalView.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/xatlas.build/TerminalView.dia"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/SwiftTermFuzz.build/master.swiftdeps"
+  },
+  "/Users/iPrado/xatlas/xatlas-app/.build/checkouts/SwiftTerm/Sources/SwiftTermFuzz/main.swift": {
+    "dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/SwiftTermFuzz.build/main.d",
+    "object": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/SwiftTermFuzz.build/main.swift.o",
+    "swiftmodule": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/SwiftTermFuzz.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/SwiftTermFuzz.build/main.swiftdeps",
+    "diagnostics": "/Users/iPrado/xatlas/xatlas-app/.build/arm64-apple-macosx/debug/SwiftTermFuzz.build/main.dia"
+  }
+}
