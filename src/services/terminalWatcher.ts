@@ -80,6 +80,8 @@ export class TerminalWatcher {
   private static instance: TerminalWatcher;
   private terminals = new Map<number, TerminalInfo>();
   private outputBuffers = new Map<number, string>();
+  private terminalPidCache = new WeakMap<vscode.Terminal, number>();
+  private pendingPidLookups = new WeakMap<vscode.Terminal, Promise<number | undefined>>();
   private terminalProjects = new Map<number, string>(); // pid -> projectPath
   private pendingMcpFlags = new Set<number>(); // PIDs to mark as MCP-created when registered
   private pendingTmuxSessions = new Map<number, string>(); // PIDs to set tmux session when registered
@@ -124,6 +126,8 @@ export class TerminalWatcher {
           this.terminals.delete(pid);
           this.outputBuffers.delete(pid);
         }
+        this.terminalPidCache.delete(terminal);
+        this.pendingPidLookups.delete(terminal);
       })
     );
 
@@ -168,26 +172,17 @@ export class TerminalWatcher {
       this.disposables.push(
         onDidWriteTerminalData((event) => {
           const terminal = event.terminal;
-          terminal.processId.then((pid: number | undefined) => {
-            if (pid) {
-              const existing = this.outputBuffers.get(pid) || '';
-              const newData = existing + event.data;
-              // Keep only last MAX_BUFFER_SIZE characters
-              const trimmed =
-                newData.length > TerminalWatcher.MAX_BUFFER_SIZE
-                  ? newData.slice(-TerminalWatcher.MAX_BUFFER_SIZE)
-                  : newData;
-              this.outputBuffers.set(pid, trimmed);
+          const cachedPid = this.terminalPidCache.get(terminal);
+          if (cachedPid) {
+            this.recordTerminalOutput(cachedPid, event.data);
+            return;
+          }
 
-              // Update terminal info with last output preview
-              const info = this.terminals.get(pid);
-              if (info) {
-                info.lastOutput = this.getLastLines(trimmed, TerminalWatcher.MAX_PREVIEW_LINES);
-                info.lastOutputAt = Date.now();
-                // Try to detect agent type from output
-                this.detectAgentFromOutput(pid, event.data);
-              }
+          void this.resolveTerminalPid(terminal).then((pid) => {
+            if (!pid) {
+              return;
             }
+            this.recordTerminalOutput(pid, event.data);
           });
         })
       );
@@ -198,12 +193,67 @@ export class TerminalWatcher {
     }
   }
 
+  private async resolveTerminalPid(terminal: vscode.Terminal): Promise<number | undefined> {
+    const cached = this.terminalPidCache.get(terminal);
+    if (cached) {
+      return cached;
+    }
+
+    const pending = this.pendingPidLookups.get(terminal);
+    if (pending) {
+      return pending;
+    }
+
+    const lookup = terminal.processId
+      .then((pid) => {
+        if (pid) {
+          this.terminalPidCache.set(terminal, pid);
+        }
+        return pid;
+      })
+      .finally(() => {
+        this.pendingPidLookups.delete(terminal);
+      });
+
+    this.pendingPidLookups.set(terminal, lookup);
+    return lookup;
+  }
+
+  private recordTerminalOutput(pid: number, chunk: string): void {
+    if (!chunk) {
+      return;
+    }
+
+    const existing = this.outputBuffers.get(pid) || '';
+    const merged = existing + chunk;
+    const trimmed =
+      merged.length > TerminalWatcher.MAX_BUFFER_SIZE
+        ? merged.slice(-TerminalWatcher.MAX_BUFFER_SIZE)
+        : merged;
+    this.outputBuffers.set(pid, trimmed);
+
+    const info = this.terminals.get(pid);
+    if (!info) {
+      return;
+    }
+
+    info.lastOutput = this.updatePreviewLines(info.lastOutput, chunk, TerminalWatcher.MAX_PREVIEW_LINES);
+    info.lastOutputAt = Date.now();
+    this.detectAgentFromOutput(pid, chunk);
+  }
+
+  private updatePreviewLines(previous: string, delta: string, lines: number): string {
+    const combined = previous ? `${previous}${delta}` : delta;
+    return this.getLastLines(combined, lines);
+  }
+
   /**
    * Register a terminal for watching
    */
   private async registerTerminal(terminal: vscode.Terminal): Promise<void> {
     const pid = await terminal.processId;
     if (!pid) return;
+    this.terminalPidCache.set(terminal, pid);
 
     const cwd = this.getTerminalCwd(terminal);
 
@@ -302,8 +352,21 @@ export class TerminalWatcher {
    * Preserves ANSI escape codes for color rendering in dashboard
    */
   private getLastLines(text: string, lines: number): string {
-    const allLines = text.split('\n');
-    return allLines.slice(-lines).join('\n');
+    if (!text || lines <= 0) {
+      return '';
+    }
+
+    let seen = 0;
+    for (let i = text.length - 1; i >= 0; i -= 1) {
+      if (text.charCodeAt(i) === 10) {
+        seen += 1;
+        if (seen >= lines) {
+          return text.slice(i + 1);
+        }
+      }
+    }
+
+    return text;
   }
 
   /**

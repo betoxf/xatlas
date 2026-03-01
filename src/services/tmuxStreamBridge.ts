@@ -39,7 +39,7 @@ interface StreamInfo {
  */
 export class TmuxStreamBridge {
   private static readonly SNAPSHOT_SCROLLBACK_LINES = 6000;
-  private static readonly SNAPSHOT_MAX_RENDER_LINES = 1800;
+  private static readonly SNAPSHOT_MAX_RENDER_LINES = 900;
   private static readonly SNAPSHOT_MAX_CONSECUTIVE_BLANKS = 2;
   private static readonly MAX_CAPTURE_LINES = 50000;
   private static readonly CAPTURE_MAX_BUFFER = 32 * 1024 * 1024;

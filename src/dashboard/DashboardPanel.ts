@@ -2431,6 +2431,7 @@ export class DashboardPanel {
     const livePreviewHoldMs = 1500;
     const previewThrottleMs = 500; // Increased from 120ms to reduce flickering
     const previewUpdateDebounceMs = 800; // Wait for terminal to be idle before updating preview
+    const activitySignalThrottleMs = 220;
     const notificationThrottleMs = 3000;
     const previewFontSizing = {
       min: 5,
@@ -3608,7 +3609,8 @@ export class DashboardPanel {
     function noteOutput(windowState, data) {
       if (!windowState) return;
 
-      windowState.lastOutputAt = Date.now();
+      const now = Date.now();
+      windowState.lastOutputAt = now;
       const rawData = data || '';
       const strippedText = stripAnsi(rawData);
       const session = getActiveSession(windowState);
@@ -3626,8 +3628,16 @@ export class DashboardPanel {
         // Use debounced preview update to reduce flickering
         schedulePreviewUpdate(windowState);
 
-        const signal = classifyActivitySignal(windowState.outputTail);
-        reportActivity(windowState, signal.activity, signal.detail);
+        const shouldAnalyzeActivity =
+          !windowState.lastActivityCheckAt ||
+          now - windowState.lastActivityCheckAt >= activitySignalThrottleMs ||
+          /[\r\n]/.test(rawData);
+
+        if (shouldAnalyzeActivity) {
+          windowState.lastActivityCheckAt = now;
+          const signal = classifyActivitySignal(windowState.outputTail);
+          reportActivity(windowState, signal.activity, signal.detail);
+        }
       }
 
       scheduleIdleAttention(windowState);

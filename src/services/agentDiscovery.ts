@@ -99,7 +99,7 @@ export class AgentDiscovery {
   private static readonly STORAGE_KEY = 'operador.trackedProjects';
   private static readonly ORDER_KEY = 'operador.projectOrder';
   private static readonly COLOR_KEY = 'operador.projectColors';
-  private static readonly DISCOVERY_CACHE_TTL_MS = 2500;
+  private static readonly DISCOVERY_CACHE_TTL_MS = 8000;
   private static readonly REMOTE_DISCOVERY_TTL_MS = 15000;
 
   // Track added projects (path -> project info)
@@ -236,7 +236,18 @@ export class AgentDiscovery {
         }
       }
     }
-    this.discoveryCache = null;
+
+    // Keep cached project list hot by updating activity in place instead of
+    // forcing a full rediscovery on every activity signal.
+    if (this.discoveryCache) {
+      for (const project of this.discoveryCache.projects) {
+        if (project.path === path) {
+          project.activity = activity;
+          break;
+        }
+      }
+      this.discoveryCache.timestamp = Date.now();
+    }
   }
 
   public clearProjectActivity(path: string): void {
@@ -614,7 +625,7 @@ export class AgentDiscovery {
           port,
           path: '/dashboard/info',
           method: 'GET',
-          timeout: 500,
+          timeout: 180,
         },
         (res) => {
           let data = '';
