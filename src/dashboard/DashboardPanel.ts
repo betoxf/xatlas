@@ -4381,6 +4381,8 @@ export class DashboardPanel {
 
       cardState.fitAddon = null;
       cardState.isReady = false;
+      cardState.restoringSnapshot = false;
+      cardState.pendingSnapshotData = '';
     }
 
     function restoreExpandedCardTerminals() {
@@ -4460,12 +4462,15 @@ export class DashboardPanel {
           clientId: null,
           isExpanded: false,
           isReady: false,
+          restoringSnapshot: false,
+          pendingSnapshotData: '',
           sessions: [],
           activeSessionIndex: 0,
           outputTail: '',
           lastOutputAt: 0,
           activity: project.activity || 'idle',
-          lastActivitySentAt: 0
+          lastActivitySentAt: 0,
+          lastActivityCheckAt: 0
         };
         cardTerminals.set(projectPath, cardState);
       }
@@ -4474,6 +4479,15 @@ export class DashboardPanel {
       cardState.project = project;
       if (!cardState.activity) {
         cardState.activity = project.activity || 'idle';
+      }
+      if (typeof cardState.restoringSnapshot !== 'boolean') {
+        cardState.restoringSnapshot = false;
+      }
+      if (typeof cardState.pendingSnapshotData !== 'string') {
+        cardState.pendingSnapshotData = '';
+      }
+      if (typeof cardState.lastActivityCheckAt !== 'number') {
+        cardState.lastActivityCheckAt = 0;
       }
 
       // Only initialize from project data when we do not already have local card sessions.
@@ -4773,6 +4787,8 @@ export class DashboardPanel {
       cardState.term = term;
       cardState.fitAddon = fitAddon;
       cardState.isReady = false;
+      cardState.restoringSnapshot = false;
+      cardState.pendingSnapshotData = '';
 
       // Set up resize observer for the card terminal container
       const resizeObserver = new ResizeObserver(() => {
@@ -4885,23 +4901,27 @@ export class DashboardPanel {
       if (!cardState || !cardState.term || !cardState.isExpanded) return;
 
       if (message.full) {
+        cardState.restoringSnapshot = true;
+        cardState.pendingSnapshotData = '';
         cardState.term.reset();
         cardState.outputTail = '';
         cardState.lastOutputAt = Date.now();
         cardState.outputTail = updateOutputTail(cardState.outputTail, stripAnsi(message.data));
         writeTerminalChunked(cardState.term, message.data, () => {
-          if (cardState.term) {
-            cardState.term.scrollToBottom();
-            if (cardState.isExpanded) {
-              cardState.term.focus();
-            }
-          }
+          flushCardSnapshotBuffer(cardState);
         });
-      } else {
-        cardState.term.write(message.data);
-        cardState.lastOutputAt = Date.now();
-        cardState.outputTail = updateOutputTail(cardState.outputTail, stripAnsi(message.data));
+        return;
       }
+
+      if (cardState.restoringSnapshot) {
+        const next = (cardState.pendingSnapshotData || '') + (message.data || '');
+        cardState.pendingSnapshotData = next.length > 256000 ? next.slice(-256000) : next;
+        return;
+      }
+
+      cardState.term.write(message.data);
+      cardState.lastOutputAt = Date.now();
+      cardState.outputTail = updateOutputTail(cardState.outputTail, stripAnsi(message.data));
 
       const now = Date.now();
       const shouldAnalyze =
@@ -4924,6 +4944,8 @@ export class DashboardPanel {
         if (cardState.ptyId === message.id) {
           cardState.ptyId = null;
           cardState.isReady = false;
+          cardState.restoringSnapshot = false;
+          cardState.pendingSnapshotData = '';
         }
         cardState.sessions.forEach((session) => {
           if (session.ptyId === message.id) {
@@ -4943,6 +4965,8 @@ export class DashboardPanel {
       if (cardState) {
         cardState.isReady = false;
         cardState.clientId = null;
+        cardState.restoringSnapshot = false;
+        cardState.pendingSnapshotData = '';
         const session = cardState.sessions.find(s => s.clientId === message.clientId);
         if (session) {
           session.clientId = null;
@@ -5311,7 +5335,9 @@ export class DashboardPanel {
         lastActivitySentAt: 0,
         pendingResize: null,
         lastSentSize: null,
-        previewUpdateTimer: null
+        previewUpdateTimer: null,
+        restoringSnapshot: false,
+        pendingSnapshotData: ''
       };
 
       positionWindow(windowState);
@@ -5720,6 +5746,8 @@ export class DashboardPanel {
       windowState.pendingResize = null;
       windowState.lastSentSize = null;
       windowState.isReady = false;
+      windowState.restoringSnapshot = false;
+      windowState.pendingSnapshotData = '';
       setWindowStatus(windowState, 'disconnected', 'Disconnected');
     }
 
@@ -5739,6 +5767,8 @@ export class DashboardPanel {
       windowState.lastUserInputAt = 0;
       windowState.lastAttentionAt = 0;
       windowState.connectAttempts = 0;
+      windowState.restoringSnapshot = false;
+      windowState.pendingSnapshotData = '';
 
       const session = windowState.sessions[windowState.activeSessionIndex];
       if (!session) {
@@ -5911,6 +5941,51 @@ export class DashboardPanel {
       writeNext();
     }
 
+    function flushWindowSnapshotBuffer(windowState) {
+      if (!windowState || !windowState.term) {
+        return;
+      }
+
+      const buffered = typeof windowState.pendingSnapshotData === 'string'
+        ? windowState.pendingSnapshotData
+        : '';
+      windowState.pendingSnapshotData = '';
+      windowState.restoringSnapshot = false;
+
+      if (buffered) {
+        windowState.term.write(buffered);
+        noteOutput(windowState, buffered);
+      }
+
+      windowState.term.scrollToBottom();
+      if (windowState.id === activeWindowId) {
+        windowState.term.focus();
+      }
+    }
+
+    function flushCardSnapshotBuffer(cardState) {
+      if (!cardState || !cardState.term) {
+        return;
+      }
+
+      const buffered = typeof cardState.pendingSnapshotData === 'string'
+        ? cardState.pendingSnapshotData
+        : '';
+      cardState.pendingSnapshotData = '';
+      cardState.restoringSnapshot = false;
+
+      if (buffered) {
+        cardState.term.write(buffered);
+        cardState.lastOutputAt = Date.now();
+        cardState.outputTail = updateOutputTail(cardState.outputTail, stripAnsi(buffered));
+      }
+
+      cardState.term.scrollToBottom();
+      if (cardState.isExpanded) {
+        cardState.term.focus();
+      }
+    }
+
     function handlePtyCreated(message) {
       if (!message.clientId) {
         return;
@@ -6011,19 +6086,22 @@ export class DashboardPanel {
       }
 
       if (message.full) {
+        windowState.restoringSnapshot = true;
+        windowState.pendingSnapshotData = '';
         windowState.term.reset();
         windowState.outputTail = '';
         windowState.outputTailRaw = '';
         windowState.isReconnect = false;
         noteOutput(windowState, message.data);
         writeTerminalChunked(windowState.term, message.data, () => {
-          if (windowState.term) {
-            windowState.term.scrollToBottom();
-            if (windowState.id === activeWindowId) {
-              windowState.term.focus();
-            }
-          }
+          flushWindowSnapshotBuffer(windowState);
         });
+        return;
+      }
+
+      if (windowState.restoringSnapshot) {
+        const next = (windowState.pendingSnapshotData || '') + (message.data || '');
+        windowState.pendingSnapshotData = next.length > 256000 ? next.slice(-256000) : next;
         return;
       }
 
@@ -6041,6 +6119,8 @@ export class DashboardPanel {
         if (windowState.currentPtyId === message.id) {
           windowState.currentPtyId = null;
           windowState.isReady = false;
+          windowState.restoringSnapshot = false;
+          windowState.pendingSnapshotData = '';
           setWindowStatus(windowState, 'disconnected', 'Disconnected');
         }
         windowState.sessions.forEach((session) => {
@@ -6075,6 +6155,8 @@ export class DashboardPanel {
       }
 
       windowState.isReady = false;
+      windowState.restoringSnapshot = false;
+      windowState.pendingSnapshotData = '';
       setWindowStatus(windowState, 'disconnected', 'Disconnected');
       reportActivity(windowState, 'error', 'connection');
       pendingPty.delete(message.clientId);

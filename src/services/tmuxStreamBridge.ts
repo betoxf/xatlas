@@ -331,6 +331,20 @@ export class TmuxStreamBridge {
     const target = this.shellEscape(sessionName);
     const safeLines = Math.max(200, Math.min(Math.floor(lines), TmuxStreamBridge.MAX_CAPTURE_LINES));
 
+    // Prefer alternate-screen capture when available. This avoids restoring stale
+    // primary-screen prompts while the real app is in the alternate screen.
+    try {
+      const { stdout } = await execAsync(
+        `tmux capture-pane -t ${target} -a -p -q -J`,
+        { maxBuffer: TmuxStreamBridge.CAPTURE_MAX_BUFFER }
+      );
+      if (stdout && stdout.trim().length > 0) {
+        return stdout;
+      }
+    } catch {
+      // Fall back to primary screen capture.
+    }
+
     try {
       const { stdout } = await execAsync(
         // Do not use -e here: escape/control sequences in snapshots can move the
