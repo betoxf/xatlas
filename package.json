@@ -2,7 +2,7 @@
   "name": "xerebro-vscode",
   "displayName": "Operator",
   "description": "MCP server that enables AI assistants to control VS Code",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "publisher": "xerebro",
   "repository": {
     "type": "git",
