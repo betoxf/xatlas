@@ -8,6 +8,7 @@ export class DashboardLauncherViewProvider implements vscode.WebviewViewProvider
   public static readonly viewType = 'xerebroLauncherView';
 
   private lastOpenAt = 0;
+  private lastAddAt = 0;
   private openInFlight = false;
 
   public resolveWebviewView(
@@ -24,6 +25,8 @@ export class DashboardLauncherViewProvider implements vscode.WebviewViewProvider
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (message?.command === 'openDashboard') {
         await this.openDashboard();
+      } else if (message?.command === 'addProject') {
+        await this.addProject();
       }
     });
 
@@ -47,6 +50,15 @@ export class DashboardLauncherViewProvider implements vscode.WebviewViewProvider
     } finally {
       this.openInFlight = false;
     }
+  }
+
+  private async addProject(): Promise<void> {
+    const now = Date.now();
+    if (this.openInFlight || now - this.lastAddAt < 400) {
+      return;
+    }
+    this.lastAddAt = now;
+    await vscode.commands.executeCommand('vscode-mcp-server.addProject');
   }
 
   private getHtml(webview: vscode.Webview): string {
@@ -92,14 +104,21 @@ export class DashboardLauncherViewProvider implements vscode.WebviewViewProvider
 <body>
   <div class="wrap">
     <button id="openBtn">Open Full Dashboard</button>
+    <button id="addBtn">Add Project</button>
     <div class="hint">This sidebar icon is a launcher. The full Xerebro dashboard opens in an editor panel.</div>
   </div>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-    const btn = document.getElementById('openBtn');
-    if (btn) {
-      btn.addEventListener('click', () => {
+    const openBtn = document.getElementById('openBtn');
+    const addBtn = document.getElementById('addBtn');
+    if (openBtn) {
+      openBtn.addEventListener('click', () => {
         vscode.postMessage({ command: 'openDashboard' });
+      });
+    }
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        vscode.postMessage({ command: 'addProject' });
       });
     }
   </script>
@@ -116,4 +135,3 @@ export class DashboardLauncherViewProvider implements vscode.WebviewViewProvider
     return value;
   }
 }
-

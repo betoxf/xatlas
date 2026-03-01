@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as http from 'http';
 import * as path from 'path';
+import * as fs from 'fs';
 import { AgentDiscovery, ProjectInfo, AgentInstance } from '../services/agentDiscovery';
 import { TerminalWatcher } from '../services/terminalWatcher';
 import { TmuxManager } from '../services/tmuxManager';
@@ -120,6 +121,13 @@ export class DashboardPanel {
 
     DashboardPanel.currentPanel = new DashboardPanel(panel, extensionUri);
     return DashboardPanel.currentPanel;
+  }
+
+  /**
+   * Open folder picker and add a project from outside the webview context.
+   */
+  public async promptAddProject(): Promise<void> {
+    await this.addProject();
   }
 
   private isMirrorMode(): boolean {
@@ -1435,6 +1443,7 @@ export class DashboardPanel {
    */
   private async addProject(): Promise<void> {
     try {
+      vscode.window.setStatusBarMessage('Xerebro: choose a project folder', 1500);
       const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
       const folderUri = await vscode.window.showOpenDialog({
         canSelectFolders: true,
@@ -1445,11 +1454,43 @@ export class DashboardPanel {
         title: 'Add Project Folder',
       });
 
-      if (!folderUri || !folderUri[0]) {
-        return;
+      let folderPath: string | undefined;
+
+      if (folderUri && folderUri[0]) {
+        folderPath = folderUri[0].fsPath;
+      } else {
+        const manualPath = await vscode.window.showInputBox({
+          title: 'Add Project Folder',
+          placeHolder: '/absolute/path/to/project',
+          prompt: 'Folder picker was canceled or unavailable. Enter a project folder path.',
+          value: defaultUri?.fsPath || '',
+          ignoreFocusOut: true,
+          validateInput: (value) => {
+            const candidate = value.trim();
+            if (!candidate) {
+              return 'Enter a folder path';
+            }
+            if (!fs.existsSync(candidate)) {
+              return 'Path does not exist';
+            }
+            try {
+              const stat = fs.statSync(candidate);
+              if (!stat.isDirectory()) {
+                return 'Path is not a directory';
+              }
+            } catch {
+              return 'Unable to read path';
+            }
+            return null;
+          },
+        });
+
+        if (!manualPath) {
+          return;
+        }
+        folderPath = manualPath.trim();
       }
 
-      const folderPath = folderUri[0].fsPath;
       if (!folderPath) {
         return;
       }

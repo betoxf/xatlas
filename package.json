@@ -36,6 +36,11 @@
         "command": "vscode-mcp-server.openDashboard",
         "title": "Open Operator",
         "icon": "$(layout)"
+      },
+      {
+        "command": "vscode-mcp-server.addProject",
+        "title": "Xerebro: Add Project",
+        "icon": "$(new-folder)"
       }
     ],
     "viewsContainers": {
@@ -51,8 +56,7 @@
       "xerebroOperator": [
         {
           "id": "xerebroLauncherView",
-          "name": "Open Dashboard",
-          "type": "webview"
+          "name": "Open Dashboard"
         }
       ]
     },

@@ -90,6 +90,14 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
+  const addProjectCommand = vscode.commands.registerCommand(
+    'vscode-mcp-server.addProject',
+    async () => {
+      const panel = DashboardPanel.createOrShow(context.extensionUri);
+      await panel.promptAddProject();
+    }
+  );
+
   // Lightweight sidebar launcher (Activity Bar icon -> open full dashboard)
   const dashboardLauncherProvider = new DashboardLauncherViewProvider();
   const dashboardLauncherRegistration = vscode.window.registerWebviewViewProvider(
@@ -102,6 +110,7 @@ export function activate(context: vscode.ExtensionContext) {
     stopCommand,
     toggleCommand,
     dashboardCommand,
+    addProjectCommand,
     dashboardLauncherRegistration
   );
 
