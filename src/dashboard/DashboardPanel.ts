@@ -1434,100 +1434,39 @@ export class DashboardPanel {
    * Add a new project to monitor
    */
   private async addProject(): Promise<void> {
-    interface FolderItem extends vscode.QuickPickItem {
-      folderPath?: string;
-      action?: 'browse';
-    }
-
-    const items: FolderItem[] = [];
-
-    // Add currently open workspace folders
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (workspaceFolders && workspaceFolders.length > 0) {
-      items.push({
-        label: '$(folder-opened) Open Workspaces',
-        kind: vscode.QuickPickItemKind.Separator,
-      });
-
-      for (const folder of workspaceFolders) {
-        items.push({
-          label: `$(folder) ${folder.name}`,
-          description: folder.uri.fsPath,
-          folderPath: folder.uri.fsPath,
-        });
-      }
-    }
-
-    // Try to get recent folders from VS Code
     try {
-      const recentlyOpened = await vscode.commands.executeCommand<{
-        workspaces?: Array<{ folderUri?: vscode.Uri; workspace?: { configPath: vscode.Uri } }>;
-      }>('_workbench.getRecentlyOpened');
-
-      if (recentlyOpened?.workspaces && recentlyOpened.workspaces.length > 0) {
-        items.push({
-          label: '$(history) Recent',
-          kind: vscode.QuickPickItemKind.Separator,
-        });
-
-        const openPaths = new Set(workspaceFolders?.map(f => f.uri.fsPath) || []);
-
-        for (const workspace of recentlyOpened.workspaces.slice(0, 10)) {
-          const uri = workspace.folderUri || workspace.workspace?.configPath;
-          if (uri && !openPaths.has(uri.fsPath)) {
-            const name = uri.fsPath.split('/').pop() || uri.fsPath;
-            items.push({
-              label: `$(folder) ${name}`,
-              description: uri.fsPath,
-              folderPath: uri.fsPath,
-            });
-          }
-        }
-      }
-    } catch {
-      // Recent workspaces API not available, continue without it
-    }
-
-    // Add browse option
-    items.push({
-      label: '$(search) Browse...',
-      kind: vscode.QuickPickItemKind.Separator,
-    });
-    items.push({
-      label: '$(folder-opened) Open Folder...',
-      description: 'Select a folder from your filesystem',
-      action: 'browse',
-    });
-
-    const selected = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Select a project folder',
-      title: 'Add Project',
-    });
-
-    if (!selected) return;
-
-    let folderPath: string | undefined;
-
-    if (selected.action === 'browse') {
+      const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
       const folderUri = await vscode.window.showOpenDialog({
         canSelectFolders: true,
         canSelectFiles: false,
         canSelectMany: false,
-        openLabel: 'Select Project Folder',
+        defaultUri,
+        openLabel: 'Add Project',
+        title: 'Add Project Folder',
       });
-      if (folderUri && folderUri[0]) {
-        folderPath = folderUri[0].fsPath;
+
+      if (!folderUri || !folderUri[0]) {
+        return;
       }
-    } else if (selected.folderPath) {
-      folderPath = selected.folderPath;
-    }
 
-    if (folderPath) {
+      const folderPath = folderUri[0].fsPath;
+      if (!folderPath) {
+        return;
+      }
+
+      const tracked = this.agentDiscovery.getTrackedProjects();
+      if (tracked.some(project => project.path === folderPath)) {
+        vscode.window.showInformationMessage(`Project already added: ${folderPath}`);
+        return;
+      }
+
       const projectName = path.basename(folderPath);
-
-      // Add to tracked projects
       this.agentDiscovery.addProject(folderPath, projectName);
       await this.refreshData();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[DashboardPanel] addProject failed:', error);
+      vscode.window.showErrorMessage(`Failed to add project: ${message}`);
     }
   }
 
@@ -2602,24 +2541,34 @@ export class DashboardPanel {
       }, 2600);
     }
 
+    let lastAddProjectAt = 0;
+    function requestAddProject() {
+      if (mirrorMode) {
+        showMirrorModeNotice();
+        return;
+      }
+      const now = Date.now();
+      if (now - lastAddProjectAt < 250) {
+        return;
+      }
+      lastAddProjectAt = now;
+      vscode.postMessage({ command: 'addProject' });
+    }
+
     // Event Listeners
     if (addProjectBtn) {
-      addProjectBtn.addEventListener('click', () => {
-        if (mirrorMode) {
-          showMirrorModeNotice();
-          return;
-        }
-        vscode.postMessage({ command: 'addProject' });
+      addProjectBtn.addEventListener('click', requestAddProject);
+      addProjectBtn.addEventListener('pointerup', (event) => {
+        if (event.button !== 0) return;
+        requestAddProject();
       });
     }
 
     if (addCard) {
-      addCard.addEventListener('click', () => {
-        if (mirrorMode) {
-          showMirrorModeNotice();
-          return;
-        }
-        vscode.postMessage({ command: 'addProject' });
+      addCard.addEventListener('click', requestAddProject);
+      addCard.addEventListener('pointerup', (event) => {
+        if (event.button !== 0) return;
+        requestAddProject();
       });
     }
 
@@ -2633,8 +2582,10 @@ export class DashboardPanel {
 
     document.addEventListener('mousedown', (event) => {
       if (event.button !== 0) return;
-      if (event.target.closest('.window')) return;
-      if (event.target.closest('.window-dock')) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest('.window')) return;
+      if (target.closest('.window-dock')) return;
       if (!activeWindowId) return;
       minimizeWindow(activeWindowId);
     });
