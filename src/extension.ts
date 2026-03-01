@@ -8,6 +8,7 @@ import {
 } from './server';
 import { registerAllTools } from './tools';
 import { DashboardPanel } from './dashboard/DashboardPanel';
+import { DashboardLauncherViewProvider } from './dashboard/DashboardLauncherViewProvider';
 import { AgentDiscovery } from './services/agentDiscovery';
 import { TmuxManager } from './services/tmuxManager';
 import { NotificationService } from './services/notificationService';
@@ -89,7 +90,20 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  context.subscriptions.push(startCommand, stopCommand, toggleCommand, dashboardCommand);
+  // Lightweight sidebar launcher (Activity Bar icon -> open full dashboard)
+  const dashboardLauncherProvider = new DashboardLauncherViewProvider();
+  const dashboardLauncherRegistration = vscode.window.registerWebviewViewProvider(
+    DashboardLauncherViewProvider.viewType,
+    dashboardLauncherProvider
+  );
+
+  context.subscriptions.push(
+    startCommand,
+    stopCommand,
+    toggleCommand,
+    dashboardCommand,
+    dashboardLauncherRegistration
+  );
 
   // Listen for configuration changes
   context.subscriptions.push(

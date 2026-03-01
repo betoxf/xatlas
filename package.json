@@ -38,6 +38,24 @@
         "icon": "$(layout)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "xerebroOperator",
+          "title": "Xerebro",
+          "icon": "resources/ai-agent-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "xerebroOperator": [
+        {
+          "id": "xerebroLauncherView",
+          "name": "Open Dashboard",
+          "type": "webview"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "vscode-mcp-server.openDashboard",
