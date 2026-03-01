@@ -31,6 +31,13 @@ interface StreamInfo {
   flushTimer?: NodeJS.Timeout;
 }
 
+interface PaneCursorPosition {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /**
  * TmuxStreamBridge - Bridges tmux sessions to webviews using pipe-pane
  *
@@ -250,16 +257,76 @@ export class TmuxStreamBridge {
   private async sendSnapshot(streamInfo: StreamInfo): Promise<void> {
     if (!streamInfo.isActive) return;
 
-    const snapshot = await this.capturePaneWithHistory(
-      streamInfo.sessionName,
-      TmuxStreamBridge.SNAPSHOT_SCROLLBACK_LINES
-    );
+    const [snapshot, pendingPrefix, cursor] = await Promise.all([
+      this.capturePaneWithHistory(
+        streamInfo.sessionName,
+        TmuxStreamBridge.SNAPSHOT_SCROLLBACK_LINES
+      ),
+      this.captureIncompleteEscapePrefix(streamInfo.sessionName),
+      this.getPaneCursorPosition(streamInfo.sessionName),
+    ]);
+
     if (snapshot) {
-      const normalized = this.normalizeSnapshot(snapshot);
+      let normalized = this.normalizeSnapshot(snapshot);
+
+      // Restore parser state if tmux currently has an incomplete escape sequence.
+      // Without this, the remainder delivered by pipe-pane can be interpreted as
+      // plain text and cause cursor/prompt desync.
+      if (pendingPrefix) {
+        normalized += pendingPrefix;
+      }
+
+      // Force cursor position to tmux's current cursor coordinates so typing
+      // resumes on the same logical row/column as the pane.
+      if (cursor) {
+        const row = Math.max(1, Math.min(cursor.height || 1, cursor.y + 1));
+        const col = Math.max(1, Math.min(cursor.width || 1, cursor.x + 1));
+        normalized += `\x1b[${row};${col}H`;
+      }
 
       // For reconnect/open flows we want scrollback restoration. Sending pane history
       // directly gives xterm real scroll depth per terminal tab.
       streamInfo.callbacks.onData({ text: normalized, full: true });
+    }
+  }
+
+  private async captureIncompleteEscapePrefix(sessionName: string): Promise<string> {
+    const target = this.shellEscape(sessionName);
+    try {
+      const { stdout } = await execAsync(
+        `tmux capture-pane -t ${target} -p -P`,
+        { maxBuffer: 64 * 1024 }
+      );
+      return stdout || '';
+    } catch {
+      return '';
+    }
+  }
+
+  private async getPaneCursorPosition(sessionName: string): Promise<PaneCursorPosition | null> {
+    const target = this.shellEscape(sessionName);
+    try {
+      const { stdout } = await execAsync(
+        `tmux list-panes -t ${target} -F '#{cursor_x},#{cursor_y},#{pane_width},#{pane_height}'`,
+        { maxBuffer: 16 * 1024 }
+      );
+      const first = (stdout || '').split('\n').find(Boolean);
+      if (!first) {
+        return null;
+      }
+
+      const [xRaw, yRaw, wRaw, hRaw] = first.split(',');
+      const x = Number.parseInt(xRaw || '', 10);
+      const y = Number.parseInt(yRaw || '', 10);
+      const width = Number.parseInt(wRaw || '', 10);
+      const height = Number.parseInt(hRaw || '', 10);
+      if (![x, y, width, height].every((n) => Number.isFinite(n))) {
+        return null;
+      }
+
+      return { x, y, width, height };
+    } catch {
+      return null;
     }
   }
 
