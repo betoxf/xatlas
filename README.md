@@ -1,9 +1,190 @@
 # Xerebro VS Code MCP Server
 
-A VS Code extension that exposes VS Code's capabilities via the Model Context Protocol (MCP), enabling AI assistants like Claude Code to fully control VS Code.
+A VS Code extension that enables AI assistants to **control multiple projects simultaneously** through embedded card terminals.
+
+## Primary Use Case: Multi-Project AI Orchestration
+
+Control Claude Code (or other AI agents) running in **different projects** from a single terminal. This is the killer feature - orchestrate multiple AI sessions across your workspace.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Dashboard with Project Cards                                    │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │ cerebroapp   │  │   Postura    │  │ bullfighter  │          │
+│  │ [Claude]     │  │   [zai]      │  │   [idle]     │          │
+│  │ ▶ Running    │  │   ▶ Running  │  │              │          │
+│  │ Terminal 1 ◀─┼──┼── Control ───┼──┼── from here  │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Quick Start: Control Another Project's Terminal
+
+**Step 1: List your projects**
+```bash
+curl -s -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
+  "jsonrpc":"2.0","id":1,"method":"tools/call",
+  "params":{"name":"vscode_dashboard_list_projects","arguments":{}}
+}'
+```
+
+**Step 2: List active card terminals**
+```bash
+curl -s -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
+  "jsonrpc":"2.0","id":1,"method":"tools/call",
+  "params":{"name":"vscode_card_terminals_list","arguments":{}}
+}'
+```
+Returns terminals with their `clientId` - this is how you target them.
+
+**Step 3: Send a command to another project's terminal**
+```bash
+curl -s -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
+  "jsonrpc":"2.0","id":1,"method":"tools/call",
+  "params":{"name":"vscode_card_terminal_send","arguments":{
+    "clientId":"client-2-1769939250969",
+    "text":"echo Hello from another project!"
+  }}
+}'
+```
+
+**Step 4: Read the response**
+```bash
+curl -s -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
+  "jsonrpc":"2.0","id":1,"method":"tools/call",
+  "params":{"name":"vscode_card_terminal_read","arguments":{
+    "clientId":"client-2-1769939250969",
+    "lines":50
+  }}
+}'
+```
+
+### Real Example: Control Another Claude Instance
+
+From your current Claude Code terminal, you can control Claude running in another project:
+
+```bash
+# 1. Start Claude in another project's terminal
+vscode_card_terminal_send(clientId="client-2-xxx", text="zai")
+
+# 2. Wait for it to start, then send a message
+vscode_card_terminal_send(clientId="client-2-xxx", text="hi")
+
+# 3. Read the response
+vscode_card_terminal_read(clientId="client-2-xxx", lines=30)
+
+# Result: You can see the other Claude's response!
+# "Hi! How can I help you with Postura today?"
+```
+
+This enables **multi-agent orchestration** - one AI coordinating work across multiple projects!
+
+---
+
+## Card Terminal Tools (Primary)
+
+These are the main tools for multi-project control:
+
+| Tool | Description |
+|------|-------------|
+| `vscode_card_terminals_list` | List all open card terminals with their clientIds |
+| `vscode_card_terminal_open` | Open a card terminal for a project (by name or path) |
+| `vscode_card_terminal_send` | Send command/text to any card terminal |
+| `vscode_card_terminal_read` | Read output from any card terminal |
+
+### Tool Details
+
+#### `vscode_card_terminals_list`
+List all active card terminals. Each terminal has a unique `clientId`.
+
+```json
+{
+  "name": "vscode_card_terminals_list",
+  "arguments": {
+    "includeOutput": true,
+    "outputLines": 30
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "count": 2,
+  "terminals": [
+    {
+      "clientId": "client-1-1769939219124",
+      "sessionName": "xvsc_2292df_1769939219125",
+      "projectPath": "/Users/user/cerebroapp-monorepo",
+      "terminalId": 1769939219125,
+      "output": "..."
+    },
+    {
+      "clientId": "client-2-1769939250969",
+      "sessionName": "xvsc_2292df_1769939250970",
+      "projectPath": "/Users/user/Postura",
+      "terminalId": 1769939250970,
+      "output": "..."
+    }
+  ]
+}
+```
+
+#### `vscode_card_terminal_open`
+Open a card terminal for a project. Use this to ensure a terminal exists before sending commands.
+
+```json
+{
+  "name": "vscode_card_terminal_open",
+  "arguments": {
+    "projectName": "Postura"
+  }
+}
+```
+Or by path:
+```json
+{
+  "name": "vscode_card_terminal_open",
+  "arguments": {
+    "projectPath": "/Users/user/my-project"
+  }
+}
+```
+
+#### `vscode_card_terminal_send`
+Send text/command to a card terminal. Enter is automatically added.
+
+```json
+{
+  "name": "vscode_card_terminal_send",
+  "arguments": {
+    "clientId": "client-2-1769939250969",
+    "text": "npm run build"
+  }
+}
+```
+
+#### `vscode_card_terminal_read`
+Read output from a card terminal.
+
+```json
+{
+  "name": "vscode_card_terminal_read",
+  "arguments": {
+    "clientId": "client-2-1769939250969",
+    "lines": 100
+  }
+}
+```
+
+---
 
 ## Features
 
+- **Multi-Project Control** - Send commands to any project's terminal
 - **50+ MCP Tools** across 9 categories
 - **HTTP Server** on localhost:9002
 - **AI Agent Dashboard** with real-time terminal rendering
@@ -25,46 +206,20 @@ These AI coding agents run in VS Code terminals with webview-rendered UI:
 | **Codex** | `codex` | `--full-auto` | Purple |
 | **Aider** | `aider` | `--yes` | Yellow |
 
-### Starting Agents in Autonomous Mode
-
-```bash
-# Claude Code - full autonomous mode (no permission prompts)
-claude --dangerously-skip-permissions
-
-# Zed AI - full autonomous mode
-zai --dangerously-skip-permissions
-
-# OpenCode - autonomous coding (auto-approve built-in)
-opencode
-
-# Codex (OpenAI) - full auto mode
-codex --full-auto
-
-# Aider - auto-confirm all changes
-aider --yes
-```
-
 ## Installation
-
-### From Source
-
-```bash
-# Clone the repository
-cd packages/vscode-extension
-
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Install in VS Code (press F5 to test, or package for production)
-```
 
 ### From VSIX
 
 ```bash
 code --install-extension xerebro-0.1.6.vsix
+```
+
+### From Source
+
+```bash
+cd packages/vscode-extension
+npm install
+npm run build
 ```
 
 ## Usage
@@ -81,39 +236,9 @@ code --install-extension xerebro-0.1.6.vsix
 - Command Palette: `Xerebro: Open Dashboard`
 - Or click the Xerebro icon in the Activity Bar
 
-### Connect from Claude Code
+## All Available Tools (50+)
 
-Add to your MCP configuration (`~/.claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "vscode": {
-      "command": "node",
-      "args": ["/path/to/extension/dist/mcp-stdio-bridge.js"]
-    }
-  }
-}
-```
-
-## Available Tools (50+)
-
-### Terminal Tools (10)
-
-| Tool | Description |
-|------|-------------|
-| `vscode_terminal_create` | Create terminal (tmux-backed for 50K scrollback) |
-| `vscode_terminal_send` | Send command to terminal |
-| `vscode_terminal_execute` | Execute & capture output with exit code |
-| `vscode_terminal_run_quick` | Quick command execution |
-| `vscode_terminal_read_buffer` | Read terminal output buffer |
-| `vscode_terminal_read_output` | Read output file with pagination |
-| `vscode_terminal_list` | List all terminals |
-| `vscode_terminal_close` | Close terminal |
-| `vscode_terminal_show` | Show/activate terminal |
-| `vscode_terminal_rename` | AI-based terminal naming |
-
-### Dashboard Tools (9)
+### Dashboard Tools (10)
 
 | Tool | Description |
 |------|-------------|
@@ -121,86 +246,36 @@ Add to your MCP configuration (`~/.claude/claude_desktop_config.json`):
 | `vscode_dashboard_add_project` | Add project to dashboard |
 | `vscode_dashboard_remove_project` | Remove project |
 | `vscode_dashboard_get_project` | Get project details |
-| `vscode_dashboard_create_terminal` | Create terminal for project (VS Code tab or floating window) |
+| `vscode_dashboard_create_terminal` | Create terminal for project |
 | `vscode_dashboard_reorder_projects` | Reorder projects |
 | `vscode_dashboard_set_project_color` | Set project color |
 | `vscode_dashboard_get_state` | Get full dashboard state |
 | `vscode_get_webviews` | List active webviews |
+| `vscode_open_xerebro_dashboard` | Open the dashboard |
 
-### Dashboard Floating Window Tools (3)
-
-Control terminals in dashboard floating windows (opened by clicking project cards):
+### Card Terminal Tools (4) - PRIMARY
 
 | Tool | Description |
 |------|-------------|
-| `vscode_card_terminals_list` | List all open floating window terminals |
-| `vscode_card_terminal_read` | Read output from a floating window terminal |
-| `vscode_card_terminal_send` | Send commands to a floating window terminal |
+| `vscode_card_terminals_list` | List all card terminals |
+| `vscode_card_terminal_open` | Open terminal for a project |
+| `vscode_card_terminal_read` | Read terminal output |
+| `vscode_card_terminal_send` | Send command to terminal |
 
-#### Using Floating Windows via MCP
+### Terminal Tools (10)
 
-**1. Open a floating window for a project:**
-```bash
-# Use embedded: true to open a floating window instead of VS Code terminal tab
-curl -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "vscode_dashboard_create_terminal",
-    "arguments": {
-      "projectPath": "/path/to/project",
-      "name": "My Terminal",
-      "embedded": true
-    }
-  }
-}'
-```
-
-**2. List open floating windows:**
-```bash
-curl -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "vscode_card_terminals_list",
-    "arguments": {"includeOutput": true}
-  }
-}'
-```
-
-**3. Send a command to a floating window:**
-```bash
-curl -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "vscode_card_terminal_send",
-    "arguments": {
-      "clientId": "client-1-xxxxx",
-      "text": "npm run build"
-    }
-  }
-}'
-```
-
-**4. Read terminal output:**
-```bash
-curl -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "vscode_card_terminal_read",
-    "arguments": {
-      "clientId": "client-1-xxxxx",
-      "lines": 50
-    }
-  }
-}'
-```
+| Tool | Description |
+|------|-------------|
+| `vscode_terminal_create` | Create terminal (tmux-backed) |
+| `vscode_terminal_send` | Send command to terminal |
+| `vscode_terminal_execute` | Execute & capture output |
+| `vscode_terminal_run_quick` | Quick command execution |
+| `vscode_terminal_read_buffer` | Read terminal buffer |
+| `vscode_terminal_read_output` | Read output with pagination |
+| `vscode_terminal_list` | List all terminals |
+| `vscode_terminal_close` | Close terminal |
+| `vscode_terminal_show` | Show/activate terminal |
+| `vscode_terminal_rename` | AI-based terminal naming |
 
 ### AI Activity Tracking (5)
 
@@ -266,43 +341,6 @@ curl -X POST http://localhost:9002/mcp -H "Content-Type: application/json" -d '{
 | `vscode_set_breakpoint` | Set breakpoint |
 | `vscode_get_breakpoints` | List breakpoints |
 
-## AI Activity Tracking ("Conversation" View)
-
-When AI uses MCP to control terminals, all actions are tracked:
-
-### What Gets Tracked
-
-- **Terminal Creation**: Which terminals AI created (`createdByMcp: true`)
-- **Commands Sent**: Every command with timestamp and source
-- **Command Output**: Captured output with exit codes
-- **Execution Status**: pending, completed, error
-
-### View AI Activity
-
-```bash
-# List AI-created terminals
-curl -s http://localhost:9002/dashboard/terminals/mcp | jq
-
-# Get command history for a terminal
-curl -s http://localhost:9002/dashboard/terminal/12345/history | jq
-
-# Get all MCP tool calls
-curl -s http://localhost:9002/action-log | jq
-```
-
-### Via MCP Tools
-
-```json
-// List AI-created terminals
-{"method": "tools/call", "params": {"name": "vscode_mcp_created_terminals"}}
-
-// Get command history
-{"method": "tools/call", "params": {"name": "vscode_terminal_command_history", "arguments": {"processId": 12345}}}
-
-// Get action log
-{"method": "tools/call", "params": {"name": "vscode_action_log_get", "arguments": {"limit": 50}}}
-```
-
 ## API Endpoints
 
 ### Core
@@ -310,94 +348,15 @@ curl -s http://localhost:9002/action-log | jq
 - `POST /mcp` or `POST /` - MCP JSON-RPC endpoint
 
 ### Dashboard
-- `GET /dashboard/info` - Workspace info with terminal summary
-- `GET /dashboard/terminals` - All terminals with output
-- `GET /dashboard/terminals/mcp` - Only AI-created terminals
+- `GET /dashboard/info` - Workspace info
+- `GET /dashboard/terminals` - All terminals
+- `GET /dashboard/terminals/mcp` - AI-created terminals
 - `GET /dashboard/terminal/{pid}/history` - Command history
 - `POST /dashboard/terminal/{pid}/send` - Send command
 
 ### Activity
 - `GET /action-log` - Full action history
 - `GET /action-log/stats` - Statistics only
-
-## MCP Automation Examples
-
-### 1) Create AI Terminal and Run Build
-
-```bash
-# Create terminal
-curl -s -X POST http://localhost:9002/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
-    "name":"vscode_dashboard_create_terminal",
-    "arguments":{"projectPath":"/path/to/project","name":"AI Builder"}}}'
-
-# Run build
-curl -s -X POST http://localhost:9002/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
-    "name":"vscode_terminal_execute",
-    "arguments":{"name":"AI Builder","command":"npm run build","maxWait":120000}}}'
-```
-
-### 2) Launch Claude Code in Terminal
-
-```bash
-# Create terminal and start Claude
-curl -s -X POST http://localhost:9002/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
-    "name":"vscode_terminal_send",
-    "arguments":{"name":"Claude","text":"claude --dangerously-skip-permissions","addNewLine":true}}}'
-```
-
-### 3) Check What AI Has Done
-
-```bash
-# Get all AI-created terminals
-curl -s -X POST http://localhost:9002/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
-    "name":"vscode_mcp_created_terminals",
-    "arguments":{"includeHistory":true}}}'
-
-# Get command history for specific terminal
-curl -s -X POST http://localhost:9002/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{
-    "name":"vscode_terminal_command_history",
-    "arguments":{"processId":12345,"includeOutput":true}}}'
-```
-
-### 4) Monitor Terminal States
-
-```bash
-# Get status of all terminals
-curl -s -X POST http://localhost:9002/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{
-    "name":"vscode_terminal_monitor_status",
-    "arguments":{}}}'
-```
-
-## Tmux Integration
-
-Dashboard terminals are tmux-backed for enhanced features:
-
-```bash
-# List all dashboard sessions
-tmux list-sessions | grep xvsc
-
-# Read terminal content
-tmux capture-pane -t SESSION_NAME -p | tail -20
-
-# Send command
-tmux send-keys -t SESSION_NAME 'your command' Enter
-
-# Send special keys
-tmux send-keys -t SESSION_NAME C-c    # Ctrl+C
-tmux send-keys -t SESSION_NAME Escape # Escape
-```
 
 ## Configuration
 
@@ -421,31 +380,10 @@ tmux send-keys -t SESSION_NAME Escape # Escape
 - No authentication (relies on localhost security)
 - Be cautious with terminal commands
 
-## Development
+## Documentation
 
-```bash
-# Watch mode
-npm run watch
-
-# Debug in VS Code
-Press F5
-
-# Build for production
-npm run build
-```
-
-## Comprehensive Documentation
-
-See [CLAUDE.md](CLAUDE.md) for:
-- Full system prompt for AI agents
-- Complete MCP tool reference
-- Detailed usage examples
-- Architecture overview
-
-See [AI_GUIDE.md](AI_GUIDE.md) for:
-- AI assistant capabilities
-- Common workflows
-- Tips for effective assistance
+- [CLAUDE.md](CLAUDE.md) - Full system prompt and MCP reference
+- [AI_GUIDE.md](AI_GUIDE.md) - AI assistant capabilities guide
 
 ## License
 

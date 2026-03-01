@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { registerTool } from '../server/mcpHandler';
 import { MCPTool, ToolResult } from '../types';
 import { AgentDiscovery, ProjectInfo, ProjectActivity } from '../services/agentDiscovery';
@@ -13,9 +14,9 @@ import { actionLog } from '../services/actionLog';
  *
  * These tools enable AI agents to fully control the dashboard via MCP:
  * - List, add, remove, reorder projects
- * - Create tmux-backed terminals for projects
+ * - Create and control collaborative project terminals
  * - Get project details with terminal info
- * - All operations are headless and don't interrupt the user
+ * - Collaboration-first defaults (visual card terminals), with optional headless paths
  */
 
 /**
@@ -45,12 +46,542 @@ export function registerDashboardTools(): void {
   registerMcpCreatedTerminals();
   // Card embedded terminal tools
   registerCardTerminalsList();
+  registerCardTerminalOpen();
   registerCardTerminalRead();
   registerCardTerminalSend();
+  registerProjectTerminalsList();
+  registerProjectTerminalsClose();
+  registerProjectTerminalSend();
+  registerProjectTerminalRead();
   // Direct tmux access (survives restarts)
   registerTmuxSessionsList();
   registerTmuxSessionRead();
   registerTmuxSessionSend();
+}
+
+async function ensureDashboardPanelOpen(): Promise<import('../dashboard/DashboardPanel').DashboardPanel | null> {
+  const { DashboardPanel } = await import('../dashboard/DashboardPanel');
+  if (!DashboardPanel.currentPanel) {
+    await vscode.commands.executeCommand('vscode-mcp-server.openDashboard');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  }
+  return DashboardPanel.currentPanel || null;
+}
+
+function ensureProjectTracked(
+  agentDiscovery: AgentDiscovery,
+  projectPath: string,
+  autoAddProject: boolean
+): { tracked: boolean; projectName: string } {
+  const existing = agentDiscovery.getTrackedProjects().find((p) => p.path === projectPath);
+  if (existing) {
+    return { tracked: true, projectName: existing.name };
+  }
+
+  const projectName = path.basename(projectPath) || 'Project';
+  if (!autoAddProject) {
+    return { tracked: false, projectName };
+  }
+
+  agentDiscovery.addProject(projectPath, projectName);
+  return { tracked: true, projectName };
+}
+
+function isSameProjectPath(left: string, right: string): boolean {
+  try {
+    return path.resolve(left) === path.resolve(right);
+  } catch {
+    return left === right;
+  }
+}
+
+async function resolveProjectPath(
+  projectPath: string | undefined,
+  projectName: string | undefined,
+  agentDiscovery: AgentDiscovery
+): Promise<{ projectPath?: string; projectName?: string; project?: ProjectInfo }> {
+  const normalizedProjectPath = typeof projectPath === 'string' && projectPath.trim() ? projectPath.trim() : undefined;
+  const normalizedProjectName = typeof projectName === 'string' && projectName.trim() ? projectName.trim() : undefined;
+
+  const projects = await agentDiscovery.discoverProjects();
+
+  if (normalizedProjectPath) {
+    const found = projects.find((p) => isSameProjectPath(p.path, normalizedProjectPath));
+    return {
+      projectPath: normalizedProjectPath,
+      projectName: found?.name || normalizedProjectName || path.basename(normalizedProjectPath) || 'Project',
+      project: found,
+    };
+  }
+
+  if (!normalizedProjectName) {
+    return {};
+  }
+
+  const lowered = normalizedProjectName.toLowerCase();
+  const found = projects.find((p) => p.name.toLowerCase() === lowered);
+  if (!found) {
+    return {};
+  }
+
+  return {
+    projectPath: found.path,
+    projectName: found.name,
+    project: found,
+  };
+}
+
+type OpenProjectTerminalOptions = {
+  clientId?: string;
+  terminalId?: number;
+  terminalName?: string;
+  createNewTerminal?: boolean;
+  visibilityMode?: VisibilityMode;
+};
+
+type ProjectTerminalTarget = {
+  clientId?: string;
+  sessionName?: string;
+  terminalId?: number;
+  created: boolean;
+  source: 'attached' | 'detached' | 'opened';
+  error?: string;
+};
+
+type VisibilityMode = 'background' | 'foreground' | 'card_open';
+type UiAction = 'none' | 'opened_card' | 'opened_window' | 'focused_window';
+
+function normalizeVisibilityMode(
+  value: unknown,
+  fallback: VisibilityMode = 'background'
+): VisibilityMode {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'background' || normalized === 'foreground' || normalized === 'card_open') {
+    return normalized;
+  }
+  return fallback;
+}
+
+function resolveCreateVisibilityMode(args: Record<string, unknown>): VisibilityMode {
+  const explicit = normalizeVisibilityMode(args.visibilityMode, 'background');
+  if (typeof args.visibilityMode === 'string') {
+    return explicit;
+  }
+
+  const headless = args.headless === true || args.headless === 'true';
+  if (headless) {
+    return 'background';
+  }
+  // Default to non-disruptive behavior unless visibilityMode is explicitly provided.
+  return 'background';
+}
+
+function deriveUiAction(target: ProjectTerminalTarget, visibilityMode: VisibilityMode): UiAction {
+  if (target.source === 'attached' || target.source === 'detached') {
+    return 'none';
+  }
+  if (visibilityMode === 'foreground') {
+    return 'focused_window';
+  }
+  if (visibilityMode === 'card_open') {
+    return 'opened_card';
+  }
+  return 'opened_window';
+}
+
+async function createDetachedTmuxTerminal(
+  tmux: TmuxManager,
+  projectPath: string,
+  terminalName?: string
+): Promise<{ sessionName: string; terminalId: number }> {
+  const terminalId = Date.now();
+  const requestedName =
+    typeof terminalName === 'string' && terminalName.trim()
+      ? terminalName.trim()
+      : path.basename(projectPath) || 'Terminal';
+  const sessionName = await tmux.createSession(terminalId, requestedName, projectPath);
+  return { sessionName, terminalId };
+}
+
+async function ensureProjectTerminalClient(
+  panel: import('../dashboard/DashboardPanel').DashboardPanel | null,
+  projectPath: string,
+  options?: OpenProjectTerminalOptions
+): Promise<ProjectTerminalTarget> {
+  const visibilityMode = options?.visibilityMode ?? 'background';
+  const tmux = TmuxManager.getInstance();
+  try {
+    await tmux.refreshTrackedSessions();
+  } catch {
+    // Best-effort refresh only.
+  }
+
+  const trackedSessionNames = new Set(tmux.getAllSessions().map((session) => session.sessionName));
+  const allTerminals = panel ? panel.getFloatingWindowTerminals() : [];
+  const projectTerminals = allTerminals
+    .filter((terminal) => isSameProjectPath(terminal.projectPath, projectPath))
+    .filter((terminal) => trackedSessionNames.has(terminal.sessionName))
+    .sort((a, b) => (b.terminalId || 0) - (a.terminalId || 0));
+  const attachedSessionKeys = new Set(
+    projectTerminals.map((terminal) => `${terminal.sessionName}:${terminal.terminalId}`)
+  );
+  const detachedSessions = tmux
+    .getAllSessions()
+    .filter(
+      (session) =>
+        typeof session.cwd === 'string' &&
+        session.cwd.length > 0 &&
+        isSameProjectPath(session.cwd, projectPath) &&
+        !attachedSessionKeys.has(`${session.sessionName}:${session.terminalId}`)
+    )
+    .sort((a, b) => (b.terminalId || 0) - (a.terminalId || 0));
+
+  const requestedClientId = typeof options?.clientId === 'string' && options.clientId.trim() ? options.clientId.trim() : undefined;
+
+  if (requestedClientId) {
+    if (!panel) {
+      return {
+        created: false,
+        source: 'attached',
+        error: 'clientId targeting requires dashboard panel to be open',
+      };
+    }
+
+    const explicit = projectTerminals.find((terminal) => terminal.clientId === requestedClientId);
+    if (explicit) {
+      return { clientId: explicit.clientId, terminalId: explicit.terminalId, created: false, source: 'attached' };
+    }
+    return {
+      created: false,
+      source: 'attached',
+      error: `Terminal clientId "${requestedClientId}" is not attached to project ${projectPath}`,
+    };
+  }
+
+  const requestedTerminalId =
+    typeof options?.terminalId === 'number' && Number.isFinite(options.terminalId)
+      ? options.terminalId
+      : undefined;
+
+  const requestedName =
+    typeof options?.terminalName === 'string' && options.terminalName.trim()
+      ? options.terminalName.trim()
+      : undefined;
+  const createNewTerminal = options?.createNewTerminal ?? false;
+
+  let resolvedTerminalId =
+    requestedTerminalId !== undefined
+      ? requestedTerminalId
+      : requestedName
+        ? panel?.resolveCardTerminalId(projectPath, requestedName)
+        : undefined;
+
+  if (resolvedTerminalId === undefined && requestedName) {
+    const byName = tmux.getSessionByName(requestedName);
+    if (
+      byName &&
+      typeof byName.cwd === 'string' &&
+      byName.cwd.length > 0 &&
+      isSameProjectPath(byName.cwd, projectPath)
+    ) {
+      resolvedTerminalId = byName.terminalId;
+    }
+  }
+
+  // First preference: already attached collaborative terminal.
+  if (resolvedTerminalId !== undefined) {
+    const byTerminalId = projectTerminals.find((terminal) => terminal.terminalId === resolvedTerminalId);
+    if (byTerminalId && !createNewTerminal) {
+      return {
+        clientId: byTerminalId.clientId,
+        terminalId: byTerminalId.terminalId,
+        created: false,
+        source: 'attached',
+      };
+    }
+  } else if (requestedName && !createNewTerminal) {
+    const normalizedRequestedName = requestedName.toLowerCase();
+    const byAttachedName = projectTerminals.find((terminal) => {
+      const tmuxInfo = tmux.getSessionByTerminalId(terminal.terminalId);
+      const tmuxName = (tmuxInfo?.terminalName || '').trim().toLowerCase();
+      return tmuxName.length > 0 && tmuxName === normalizedRequestedName;
+    });
+
+    if (byAttachedName) {
+      return {
+        clientId: byAttachedName.clientId,
+        terminalId: byAttachedName.terminalId,
+        created: false,
+        source: 'attached',
+      };
+    }
+  } else if (!requestedName && !createNewTerminal && projectTerminals.length > 0) {
+    return {
+      clientId: projectTerminals[0].clientId,
+      terminalId: projectTerminals[0].terminalId,
+      created: false,
+      source: 'attached',
+    };
+  }
+
+  if (visibilityMode === 'background') {
+    if (!createNewTerminal) {
+      let detachedCandidate:
+        | ReturnType<TmuxManager['getAllSessions']>[number]
+        | undefined;
+
+      if (resolvedTerminalId !== undefined) {
+        detachedCandidate = detachedSessions.find((session) => session.terminalId === resolvedTerminalId);
+      } else if (requestedName) {
+        const normalizedName = requestedName.toLowerCase();
+        detachedCandidate = detachedSessions.find(
+          (session) => (session.terminalName || '').trim().toLowerCase() === normalizedName
+        );
+      } else {
+        detachedCandidate = detachedSessions[0];
+      }
+
+      if (detachedCandidate) {
+        return {
+          sessionName: detachedCandidate.sessionName,
+          terminalId: detachedCandidate.terminalId,
+          created: false,
+          source: 'detached',
+        };
+      }
+    }
+
+    const createdDetached = await createDetachedTmuxTerminal(tmux, projectPath, requestedName);
+    return {
+      sessionName: createdDetached.sessionName,
+      terminalId: createdDetached.terminalId,
+      created: true,
+      source: 'detached',
+    };
+  }
+
+  // Fallback: open/attach visually in dashboard.
+  if (!panel) {
+    return {
+      created: false,
+      source: 'opened',
+      error: 'Dashboard panel is required for non-background visibility modes',
+    };
+  }
+
+  const opened = await panel.openCardTerminal(projectPath, {
+    terminalName: requestedName,
+    terminalId: resolvedTerminalId,
+    createNewTerminal: createNewTerminal,
+  });
+
+  if (!opened.success || !opened.clientId) {
+    return {
+      created: false,
+      source: 'opened',
+      error: opened.error || `Unable to open collaborative terminal for ${projectPath}`,
+    };
+  }
+
+  return { clientId: opened.clientId, terminalId: resolvedTerminalId, created: true, source: 'opened' };
+}
+
+type CollaborationState =
+  | 'idle'
+  | 'processing'
+  | 'waiting_input'
+  | 'completed'
+  | 'error'
+  | 'unknown';
+
+type OutputObservation = {
+  state: CollaborationState;
+  stateReason: string;
+  commandEchoed: boolean;
+  observedMs: number;
+  outputTail: string;
+};
+
+function lastNonEmptyLine(text: string): string {
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i].trim();
+    if (line) {
+      return line;
+    }
+  }
+  return '';
+}
+
+function classifyCollaborativeOutput(raw: string): { state: CollaborationState; reason: string } {
+  const text = raw || '';
+  const lastLine = lastNonEmptyLine(text);
+
+  // High-priority: obvious errors
+  if (/(traceback|exception|fatal|command not found|no such file|permission denied|error:)/i.test(text)) {
+    return { state: 'error', reason: 'error_pattern' };
+  }
+
+  // Waiting for user input / selection
+  if (
+    /(\?\s*$)|(\[Y\/n\])|(\[y\/N\])|(select.*:)|(choose.*:)|(pick.*:)|(enter.*:)|(confirm.*:)|(what would you like)|(should i)/im.test(
+      text
+    )
+  ) {
+    return { state: 'waiting_input', reason: 'input_prompt' };
+  }
+
+  // Ongoing work indicators
+  if (/(thinking|processing|loading|analyzing|running|executing|working)/i.test(text)) {
+    return { state: 'processing', reason: 'processing_pattern' };
+  }
+  if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/.test(text)) {
+    return { state: 'processing', reason: 'spinner' };
+  }
+
+  // Completion hints from common tools
+  if (/(completed|done|finished|success|all set|ran )/i.test(text)) {
+    return { state: 'completed', reason: 'completion_pattern' };
+  }
+
+  // Prompt visible -> terminal is currently idle/ready.
+  if (/[$#%>❯]\s*$/.test(lastLine)) {
+    return { state: 'idle', reason: 'prompt_visible' };
+  }
+
+  return { state: 'unknown', reason: 'no_match' };
+}
+
+function toOutputTail(output: string, maxChars: number): string {
+  if (!output) {
+    return '';
+  }
+  return output.length > maxChars ? output.slice(-maxChars) : output;
+}
+
+async function observeCollaborativeSend(
+  panel: import('../dashboard/DashboardPanel').DashboardPanel,
+  clientId: string,
+  commandText: string,
+  options?: {
+    observeMs?: number;
+    pollMs?: number;
+    lines?: number;
+    waitForFinalState?: boolean;
+    maxTailChars?: number;
+  }
+): Promise<OutputObservation> {
+  const observeMs = Math.max(0, Math.min((options?.observeMs ?? 1800), 15000));
+  const pollMs = Math.max(100, Math.min((options?.pollMs ?? 250), 1000));
+  const lines = Math.max(20, Math.min((options?.lines ?? 120), 1000));
+  const waitForFinalState = (options?.waitForFinalState as boolean) ?? false;
+  const maxTailChars = Math.max(500, Math.min((options?.maxTailChars ?? 6000), 40000));
+
+  const startedAt = Date.now();
+  let lastOutput = (await panel.readFloatingWindowOutput(clientId, lines)) || '';
+  let lastState = classifyCollaborativeOutput(lastOutput);
+  let echoed = commandText.trim().length === 0;
+
+  // Fast path when no observation is requested.
+  if (observeMs === 0) {
+    return {
+      state: lastState.state,
+      stateReason: lastState.reason,
+      commandEchoed: echoed,
+      observedMs: 0,
+      outputTail: toOutputTail(lastOutput, maxTailChars),
+    };
+  }
+
+  while (Date.now() - startedAt < observeMs) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const current = (await panel.readFloatingWindowOutput(clientId, lines)) || '';
+    if (current) {
+      lastOutput = current;
+      lastState = classifyCollaborativeOutput(current);
+      if (!echoed && commandText.trim()) {
+        echoed = current.includes(commandText.trim());
+      }
+      if (
+        waitForFinalState &&
+        (lastState.state === 'idle' || lastState.state === 'completed' || lastState.state === 'waiting_input' || lastState.state === 'error')
+      ) {
+        break;
+      }
+    }
+  }
+
+  return {
+    state: lastState.state,
+    stateReason: lastState.reason,
+    commandEchoed: echoed,
+    observedMs: Date.now() - startedAt,
+    outputTail: toOutputTail(lastOutput, maxTailChars),
+  };
+}
+
+async function observeTmuxSend(
+  tmux: TmuxManager,
+  sessionName: string,
+  commandText: string,
+  options?: {
+    observeMs?: number;
+    pollMs?: number;
+    lines?: number;
+    waitForFinalState?: boolean;
+    maxTailChars?: number;
+  }
+): Promise<OutputObservation> {
+  const observeMs = Math.max(0, Math.min((options?.observeMs ?? 1800), 15000));
+  const pollMs = Math.max(100, Math.min((options?.pollMs ?? 250), 1000));
+  const lines = Math.max(20, Math.min((options?.lines ?? 120), 1000));
+  const waitForFinalState = (options?.waitForFinalState as boolean) ?? false;
+  const maxTailChars = Math.max(500, Math.min((options?.maxTailChars ?? 6000), 40000));
+
+  const startedAt = Date.now();
+  let lastOutput = (await tmux.readBuffer(sessionName, lines)) || '';
+  let lastState = classifyCollaborativeOutput(lastOutput);
+  let echoed = commandText.trim().length === 0;
+
+  if (observeMs === 0) {
+    return {
+      state: lastState.state,
+      stateReason: lastState.reason,
+      commandEchoed: echoed,
+      observedMs: 0,
+      outputTail: toOutputTail(lastOutput, maxTailChars),
+    };
+  }
+
+  while (Date.now() - startedAt < observeMs) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const current = (await tmux.readBuffer(sessionName, lines)) || '';
+    if (current) {
+      lastOutput = current;
+      lastState = classifyCollaborativeOutput(current);
+      if (!echoed && commandText.trim()) {
+        echoed = current.includes(commandText.trim());
+      }
+      if (
+        waitForFinalState &&
+        (lastState.state === 'idle' || lastState.state === 'completed' || lastState.state === 'waiting_input' || lastState.state === 'error')
+      ) {
+        break;
+      }
+    }
+  }
+
+  return {
+    state: lastState.state,
+    stateReason: lastState.reason,
+    commandEchoed: echoed,
+    observedMs: Date.now() - startedAt,
+    outputTail: toOutputTail(lastOutput, maxTailChars),
+  };
 }
 
 /**
@@ -451,13 +982,13 @@ function registerDashboardGetProject(): void {
 }
 
 /**
- * vscode_dashboard_create_terminal - Create a tmux-backed terminal for a project
+ * vscode_dashboard_create_terminal - Create a project terminal (collaborative by default)
  */
 function registerDashboardCreateTerminal(): void {
   const definition: MCPTool = {
     name: 'vscode_dashboard_create_terminal',
     description:
-      'Create a new tmux-backed terminal for a project. The terminal is associated with the project and can be controlled headlessly via MCP.',
+      'Create a terminal for a project. Defaults to background collaborative mode (non-disruptive). Use visibilityMode to open/focus visually.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -469,15 +1000,36 @@ function registerDashboardCreateTerminal(): void {
           type: 'string',
           description: 'Name for the terminal (defaults to project name)',
         },
+        createNewTerminal: {
+          type: 'boolean',
+          description: 'When using embedded mode, create a new terminal tab in that project before attaching (default: true)',
+          default: true,
+        },
         show: {
           type: 'boolean',
-          description: 'Show the terminal after creation (default: false for headless operation)',
-          default: false,
+          description: 'Show the VS Code terminal tab after creation (only applies when embedded=false, default: true)',
+          default: true,
         },
         embedded: {
           type: 'boolean',
-          description: 'Create terminal embedded in dashboard card instead of VS Code terminal tab (default: false)',
+          description: 'Create/use terminal embedded in dashboard project card (default: true for collaborative behavior)',
+          default: true,
+        },
+        headless: {
+          type: 'boolean',
+          description: 'Force headless/non-visual behavior (default: false). When true, creates regular VS Code terminal tab and does not auto-open card terminal.',
           default: false,
+        },
+        visibilityMode: {
+          type: 'string',
+          enum: ['background', 'foreground', 'card_open'],
+          description: 'How visible the terminal should be: background (default, non-disruptive), foreground (focus), card_open (open card/window without focus steal where possible).',
+          default: 'background',
+        },
+        autoAddProject: {
+          type: 'boolean',
+          description: 'Automatically add project to dashboard tracking if missing (default: true)',
+          default: true,
         },
         env: {
           type: 'object',
@@ -493,9 +1045,15 @@ function registerDashboardCreateTerminal(): void {
     console.log('[dashboardTools] args.embedded raw value:', args.embedded, '| type:', typeof args.embedded);
     const projectPath = args.projectPath as string;
     const name = args.name as string | undefined;
-    const show = (args.show as boolean) ?? false;
-    // Handle both boolean true and string 'true' for robustness
-    const embedded = args.embedded === true || args.embedded === 'true';
+    const show = (args.show as boolean) ?? true;
+    const createNewTerminal = (args.createNewTerminal as boolean) ?? true;
+    const headless = args.headless === true || args.headless === 'true';
+    const autoAddProject = (args.autoAddProject as boolean) ?? true;
+    const visibilityMode = resolveCreateVisibilityMode(args);
+    // Embedded defaults to true unless explicitly set false.
+    const embedded = args.embedded === undefined
+      ? true
+      : args.embedded === true || args.embedded === 'true';
     console.log('[dashboardTools] embedded resolved to:', embedded);
     const env = args.env as Record<string, string> | undefined;
 
@@ -526,34 +1084,96 @@ function registerDashboardCreateTerminal(): void {
         };
       }
 
-      // Get project name for terminal naming
-      const projects = await agentDiscovery.discoverProjects();
-      const project = projects.find((p) => p.path === projectPath);
-      const projectName = project?.name || projectPath.split('/').pop() || 'Terminal';
-      const terminalName = name || projectName;
+      // Ensure project is tracked so it appears in dashboard flows.
+      const tracked = ensureProjectTracked(agentDiscovery, projectPath, autoAddProject);
+      if (!tracked.tracked) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  created: false,
+                  error: 'Project is not tracked in dashboard',
+                  projectPath,
+                  hint: 'Enable autoAddProject=true or add it first with vscode_dashboard_add_project',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+          isError: true,
+        };
+      }
 
-      // If embedded mode, send message to dashboard webview instead of creating VS Code terminal
-      if (embedded) {
-        console.log('[dashboardTools] embedded=true, checking DashboardPanel');
-        const { DashboardPanel } = await import('../dashboard/DashboardPanel');
-        console.log('[dashboardTools] DashboardPanel.currentPanel:', !!DashboardPanel.currentPanel);
-        if (DashboardPanel.currentPanel) {
-          DashboardPanel.currentPanel.sendCreateEmbeddedTerminalMessage(projectPath, terminalName);
+      const terminalName = name || tracked.projectName;
+      const collaborative = !headless && embedded;
+
+      // Collaborative path supports both non-disruptive background and visible modes.
+      if (collaborative) {
+        if (visibilityMode === 'background') {
+          try {
+            await tmux.refreshTrackedSessions();
+          } catch {
+            // Best-effort refresh only.
+          }
+
+          let detachedSession:
+            | ReturnType<TmuxManager['getAllSessions']>[number]
+            | undefined;
+
+          if (!createNewTerminal) {
+            const allProjectSessions = tmux
+              .getAllSessions()
+              .filter(
+                (session) =>
+                  typeof session.cwd === 'string' &&
+                  session.cwd.length > 0 &&
+                  isSameProjectPath(session.cwd, projectPath)
+              )
+              .sort((a, b) => (b.terminalId || 0) - (a.terminalId || 0));
+
+            const normalizedRequestedName = terminalName.trim().toLowerCase();
+            detachedSession = allProjectSessions.find(
+              (session) => (session.terminalName || '').trim().toLowerCase() === normalizedRequestedName
+            ) || allProjectSessions[0];
+          }
+
+          const detached = detachedSession
+            ? {
+                sessionName: detachedSession.sessionName,
+                terminalId: detachedSession.terminalId,
+                terminalName: detachedSession.terminalName || terminalName,
+                created: false,
+              }
+            : {
+                ...(await createDetachedTmuxTerminal(tmux, projectPath, terminalName)),
+                terminalName,
+                created: true,
+              };
+
           return {
             content: [
               {
                 type: 'text',
                 text: JSON.stringify(
                   {
-                    created: true,
+                    created: detached.created,
                     embedded: true,
+                    collaborative: true,
+                    visibilityModeApplied: visibilityMode,
+                    uiAction: 'none' as UiAction,
                     terminal: {
-                      name: terminalName,
+                      name: detached.terminalName,
                       projectPath,
                       backend: 'tmux',
-                      location: 'dashboard-card',
+                      location: 'background-session',
+                      clientId: null,
+                      terminalId: detached.terminalId,
+                      sessionName: detached.sessionName,
                     },
-                    hint: 'Terminal is embedded in the dashboard card. The card will expand to show the terminal.',
+                    hint: 'Running in background. Open the project card/window any time to watch and collaborate live.',
                   },
                   null,
                   2
@@ -561,7 +1181,10 @@ function registerDashboardCreateTerminal(): void {
               },
             ],
           };
-        } else {
+        }
+
+        const panel = await ensureDashboardPanelOpen();
+        if (!panel) {
           return {
             content: [
               {
@@ -569,8 +1192,8 @@ function registerDashboardCreateTerminal(): void {
                 text: JSON.stringify(
                   {
                     created: false,
-                    error: 'Dashboard panel is not open',
-                    hint: 'Open the dashboard first with the "Xerebro: Open Dashboard" command, then retry with embedded=true',
+                    error: 'Dashboard panel could not be opened',
+                    hint: 'Open dashboard manually with vscode_open_xerebro_dashboard and retry',
                   },
                   null,
                   2
@@ -580,9 +1203,61 @@ function registerDashboardCreateTerminal(): void {
             isError: true,
           };
         }
+
+        const opened = await panel.openCardTerminal(projectPath, {
+          terminalName: terminalName,
+          createNewTerminal: createNewTerminal,
+        });
+
+        if (!opened.success || !opened.clientId) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    created: false,
+                    error: opened.error || 'Failed to open collaborative card terminal',
+                    projectPath,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  created: true,
+                  embedded: true,
+                  collaborative: true,
+                  visibilityModeApplied: visibilityMode,
+                  uiAction: visibilityMode === 'foreground' ? 'focused_window' : 'opened_card',
+                  terminal: {
+                    name: terminalName,
+                    projectPath,
+                    backend: 'tmux',
+                    location: 'dashboard-card',
+                    clientId: opened.clientId,
+                  },
+                  hint: 'Collaborative terminal is visible in the project card. Use vscode_project_terminal_send/read or vscode_card_terminal_send/read with clientId.',
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
       }
 
-      // Create tmux-backed terminal (standard VS Code terminal tab)
+      // Headless/explicit non-embedded path: create tmux-backed VS Code terminal tab.
       const result = await tmux.createTerminal(terminalName, projectPath, env);
       const terminal = result.terminal;
       const tmuxSession = result.sessionName;
@@ -610,6 +1285,7 @@ function registerDashboardCreateTerminal(): void {
               {
                 created: true,
                 embedded: false,
+                collaborative: false,
                 terminal: {
                   name: terminal.name,
                   processId: pid,
@@ -618,7 +1294,7 @@ function registerDashboardCreateTerminal(): void {
                   backend: 'tmux',
                   location: 'vscode-terminal-tab',
                 },
-                hint: 'Use vscode_terminal_send to send commands, vscode_terminal_read_buffer to read output',
+                hint: 'Headless/non-embedded mode. For collaborative visible control, use embedded=true (default) and vscode_project_terminal_send/read.',
               },
               null,
               2
@@ -1893,7 +2569,7 @@ function registerTmuxSessionRead(): void {
 function registerTmuxSessionSend(): void {
   const definition: MCPTool = {
     name: 'vscode_tmux_session_send',
-    description: 'Send text/command to a tmux session.',
+    description: 'Send and submit text/command to a tmux session. Just provide the text - Enter is handled automatically for reliable submission.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1903,11 +2579,11 @@ function registerTmuxSessionSend(): void {
         },
         text: {
           type: 'string',
-          description: 'Text to send to the session',
+          description: 'Text/command to send and submit. Enter is sent automatically.',
         },
         addNewLine: {
           type: 'boolean',
-          description: 'Add newline after text (default: true)',
+          description: 'Submit after text (default: true). Set false to just type without submitting.',
           default: true,
         },
       },
@@ -1922,8 +2598,25 @@ function registerTmuxSessionSend(): void {
 
     try {
       const tmux = TmuxManager.getInstance();
-      const textToSend = addNewLine ? text + '\n' : text;
-      await tmux.sendKeys(sessionName, textToSend);
+
+      // Two-step approach for reliable submission:
+      // 1. Send text without Enter (types the text)
+      // 2. Send Enter separately (submits)
+      // This works for both regular shells and Claude Code terminals
+      if (addNewLine && text.length > 0) {
+        // Step 1: Send text without newline
+        await tmux.sendKeys(sessionName, text, false);
+        // Small delay to ensure text is received
+        await new Promise(resolve => setTimeout(resolve, 50));
+        // Step 2: Send Enter to submit
+        await tmux.sendKeys(sessionName, '', true);
+      } else if (addNewLine) {
+        // Just send Enter
+        await tmux.sendKeys(sessionName, '', true);
+      } else {
+        // Just send text without Enter
+        await tmux.sendKeys(sessionName, text, false);
+      }
 
       return {
         content: [{
@@ -1948,15 +2641,24 @@ function registerTmuxSessionSend(): void {
 }
 
 /**
- * vscode_card_terminals_list - List all active floating window terminals in the dashboard
+ * vscode_card_terminals_list - List all active collaborative terminals in the dashboard
  */
 function registerCardTerminalsList(): void {
   const definition: MCPTool = {
     name: 'vscode_card_terminals_list',
-    description: 'List all active floating window terminals in the dashboard. These are terminals inside dashboard floating windows (opened by clicking project cards).',
+    description:
+      'List all active collaborative dashboard terminals (floating windows and project-card embedded terminals).',
     inputSchema: {
       type: 'object',
       properties: {
+        projectPath: {
+          type: 'string',
+          description: 'Optional project path to filter terminals to a single project',
+        },
+        projectName: {
+          type: 'string',
+          description: 'Optional project name to filter terminals when projectPath is not provided',
+        },
         includeOutput: {
           type: 'boolean',
           description: 'Include recent output from each terminal (default: false)',
@@ -1972,38 +2674,85 @@ function registerCardTerminalsList(): void {
   };
 
   const handler = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const projectPathArg = args.projectPath as string | undefined;
+    const projectNameArg = args.projectName as string | undefined;
     const includeOutput = (args.includeOutput as boolean) ?? false;
     const outputLines = (args.outputLines as number) ?? 30;
 
     try {
-      const { DashboardPanel } = await import('../dashboard/DashboardPanel');
-
-      if (!DashboardPanel.currentPanel) {
+      const panel = await ensureDashboardPanelOpen();
+      if (!panel) {
         return {
           content: [{
             type: 'text',
             text: JSON.stringify({
               count: 0,
               terminals: [],
-              hint: 'Dashboard panel is not open. Open it first with vscode_open_xerebro_dashboard.',
+              hint: 'Dashboard panel could not be opened.',
             }, null, 2),
           }],
         };
       }
 
-      const floatingTerminals = DashboardPanel.currentPanel.getFloatingWindowTerminals();
+      const agentDiscovery = AgentDiscovery.getInstance();
+      const resolved = await resolveProjectPath(projectPathArg, projectNameArg, agentDiscovery);
+
+      if ((projectPathArg || projectNameArg) && !resolved.projectPath) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Project not found',
+              projectPath: projectPathArg || null,
+              projectName: projectNameArg || null,
+              hint: 'Use vscode_dashboard_list_projects to inspect available projects.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const filteredTerminals = panel
+        .getFloatingWindowTerminals()
+        .filter((terminal) => !resolved.projectPath || isSameProjectPath(terminal.projectPath, resolved.projectPath));
+
+      const tmux = TmuxManager.getInstance();
+      try {
+        await tmux.refreshTrackedSessions();
+      } catch {
+        // Best-effort refresh only.
+      }
+      const trackedTmuxSessions = tmux
+        .getAllSessions()
+        .filter((session) => {
+          if (typeof session.cwd !== 'string' || session.cwd.length === 0) {
+            return false;
+          }
+          if (!resolved.projectPath) {
+            return true;
+          }
+          return isSameProjectPath(session.cwd, resolved.projectPath);
+        });
+
+      const activeSessionKeys = new Set(
+        filteredTerminals.map((terminal) => `${terminal.sessionName}:${terminal.terminalId}`)
+      );
 
       const terminalDetails = await Promise.all(
-        floatingTerminals.map(async (t) => {
+        filteredTerminals.map(async (t) => {
+          const tmuxInfo = tmux.getSessionByTerminalId(t.terminalId);
           const detail: Record<string, unknown> = {
             clientId: t.clientId,
             sessionName: t.sessionName,
             projectPath: t.projectPath,
             terminalId: t.terminalId,
+            terminalName: tmuxInfo?.terminalName || null,
+            attached: true,
+            source: 'card-client',
           };
 
           if (includeOutput) {
-            const output = await DashboardPanel.currentPanel!.readFloatingWindowOutput(t.clientId, outputLines);
+            const output = await panel.readFloatingWindowOutput(t.clientId, outputLines);
             detail.output = output || '';
           }
 
@@ -2011,19 +2760,184 @@ function registerCardTerminalsList(): void {
         })
       );
 
+      const detachedDetails = await Promise.all(
+        trackedTmuxSessions
+          .filter((session) => !activeSessionKeys.has(`${session.sessionName}:${session.terminalId}`))
+          .map(async (session) => {
+            const detail: Record<string, unknown> = {
+              clientId: null,
+              sessionName: session.sessionName,
+              projectPath: session.cwd || null,
+              terminalId: session.terminalId,
+              terminalName: session.terminalName || null,
+              attached: false,
+              source: 'tmux-detached',
+            };
+
+            if (includeOutput) {
+              const output = await tmux.readBuffer(session.sessionName, outputLines);
+              detail.output = output || '';
+            }
+
+            return detail;
+          })
+      );
+
+      const allTerminalDetails = [...terminalDetails, ...detachedDetails];
+
       return {
         content: [{
           type: 'text',
           text: JSON.stringify({
-            count: floatingTerminals.length,
-            terminals: terminalDetails,
-            hint: 'Use vscode_card_terminal_read to read terminal output, vscode_card_terminal_send to send commands',
+            count: allTerminalDetails.length,
+            projectPath: resolved.projectPath || null,
+            terminals: allTerminalDetails,
+            hint: 'Use vscode_card_terminal_read/send or vscode_project_terminal_read/send.',
           }, null, 2),
         }],
       };
     } catch (error) {
       return {
-        content: [{ type: 'text', text: `Error listing floating window terminals: ${error}` }],
+        content: [{ type: 'text', text: `Error listing collaborative terminals: ${error}` }],
+        isError: true,
+      };
+    }
+  };
+
+  registerTool(definition, handler);
+}
+
+/**
+ * vscode_card_terminal_open - Open/expand a project's embedded card terminal visually
+ */
+function registerCardTerminalOpen(): void {
+  const definition: MCPTool = {
+    name: 'vscode_card_terminal_open',
+    description:
+      'Open and expand a project card terminal in the dashboard. Supports selecting an existing terminal tab or creating a new one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: {
+          type: 'string',
+          description: 'The full path to the project (from vscode_dashboard_list_projects)',
+        },
+        projectName: {
+          type: 'string',
+          description: 'Alternative: the project name (if projectPath not provided)',
+        },
+        terminalName: {
+          type: 'string',
+          description: 'Optional card terminal tab name to activate (or set when creating a new terminal)',
+        },
+        terminalId: {
+          type: 'number',
+          description: 'Optional terminal process id to activate if known',
+        },
+        createNewTerminal: {
+          type: 'boolean',
+          description: 'Create a new card terminal tab before opening (default: false)',
+          default: false,
+        },
+        autoAddProject: {
+          type: 'boolean',
+          description: 'Automatically add project to dashboard tracking if missing (default: true)',
+          default: true,
+        },
+      },
+    },
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const projectPathArg = args.projectPath as string | undefined;
+    const projectNameArg = args.projectName as string | undefined;
+    const terminalName = args.terminalName as string | undefined;
+    const terminalId =
+      typeof args.terminalId === 'number' && Number.isFinite(args.terminalId) ? (args.terminalId as number) : undefined;
+    const createNewTerminal = (args.createNewTerminal as boolean) ?? false;
+    const autoAddProject = (args.autoAddProject as boolean) ?? true;
+
+    try {
+      const panel = await ensureDashboardPanelOpen();
+      if (!panel) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Dashboard panel could not be opened',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const agentDiscovery = AgentDiscovery.getInstance();
+      const resolved = await resolveProjectPath(projectPathArg, projectNameArg, agentDiscovery);
+
+      if (!resolved.projectPath) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'No project path or name specified',
+              hint: 'Use vscode_dashboard_list_projects to see available projects',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const tracked = ensureProjectTracked(agentDiscovery, resolved.projectPath, autoAddProject);
+      if (!tracked.tracked) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Project is not tracked in dashboard',
+              projectPath: resolved.projectPath,
+              hint: 'Enable autoAddProject=true or call vscode_dashboard_add_project first.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const result = await panel.openCardTerminal(resolved.projectPath, {
+        terminalName,
+        terminalId,
+        createNewTerminal,
+      });
+
+      if (!result.success) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: result.error || 'Failed to open card terminal',
+              projectPath: resolved.projectPath,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            opened: true,
+            projectPath: resolved.projectPath,
+            clientId: result.clientId,
+            createNewTerminal,
+            terminalName: terminalName || null,
+            terminalId: terminalId ?? null,
+            hint: 'Card terminal is ready. Use vscode_project_terminal_send/read or vscode_card_terminal_send/read.',
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `Error opening card terminal: ${error}` }],
         isError: true,
       };
     }
@@ -2118,21 +3032,21 @@ function registerCardTerminalRead(): void {
 function registerCardTerminalSend(): void {
   const definition: MCPTool = {
     name: 'vscode_card_terminal_send',
-    description: 'Send text/command to a floating window terminal in the dashboard.',
+    description: 'Send and submit text/command to a card terminal. Just provide the text - Enter is handled automatically for reliable submission to both shells and Claude Code terminals.',
     inputSchema: {
       type: 'object',
       properties: {
         clientId: {
           type: 'string',
-          description: 'The clientId of the floating window terminal (from vscode_card_terminals_list)',
+          description: 'The clientId of the card terminal (from vscode_card_terminals_list)',
         },
         text: {
           type: 'string',
-          description: 'Text to send to the terminal',
+          description: 'Text/command to send and submit. Enter is sent automatically.',
         },
         addNewLine: {
           type: 'boolean',
-          description: 'Add newline after text (default: true)',
+          description: 'Submit after text (default: true). Set false to just type without submitting.',
           default: true,
         },
       },
@@ -2190,6 +3104,969 @@ function registerCardTerminalSend(): void {
     } catch (error) {
       return {
         content: [{ type: 'text', text: `Error sending to floating window terminal: ${error}` }],
+        isError: true,
+      };
+    }
+  };
+
+  registerTool(definition, handler);
+}
+
+/**
+ * vscode_project_terminals_list - List terminals for a specific project
+ */
+function registerProjectTerminalsList(): void {
+  const definition: MCPTool = {
+    name: 'vscode_project_terminals_list',
+    description:
+      'List terminals for a project with both collaborative dashboard clients and detected VS Code terminal processes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: {
+          type: 'string',
+          description: 'Project path to inspect terminals for',
+        },
+        projectName: {
+          type: 'string',
+          description: 'Alternative project name when projectPath is not provided',
+        },
+        includeOutput: {
+          type: 'boolean',
+          description: 'Include recent output snippets (default: false)',
+          default: false,
+        },
+        outputLines: {
+          type: 'number',
+          description: 'Number of output lines when includeOutput=true (default: 50)',
+          default: 50,
+        },
+      },
+    },
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const projectPathArg = args.projectPath as string | undefined;
+    const projectNameArg = args.projectName as string | undefined;
+    const includeOutput = (args.includeOutput as boolean) ?? false;
+    const outputLines = (args.outputLines as number) ?? 50;
+
+    try {
+      const agentDiscovery = AgentDiscovery.getInstance();
+      const resolved = await resolveProjectPath(projectPathArg, projectNameArg, agentDiscovery);
+
+      if (!resolved.projectPath) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Project path or name is required',
+              hint: 'Provide projectPath or projectName. Use vscode_dashboard_list_projects to discover options.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const panel = await ensureDashboardPanelOpen();
+      if (!panel) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Dashboard panel could not be opened',
+              projectPath: resolved.projectPath,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const tmux = TmuxManager.getInstance();
+      try {
+        await tmux.refreshTrackedSessions();
+      } catch {
+        // Best-effort refresh only.
+      }
+      const trackedSessionNames = new Set(tmux.getAllSessions().map((session) => session.sessionName));
+
+      const collaborativeClients = panel
+        .getFloatingWindowTerminals()
+        .filter((terminal) => isSameProjectPath(terminal.projectPath, resolved.projectPath))
+        .filter((terminal) => trackedSessionNames.has(terminal.sessionName));
+
+      const trackedTmuxSessions = tmux
+        .getAllSessions()
+        .filter(
+          (session) =>
+            typeof session.cwd === 'string' &&
+            session.cwd.length > 0 &&
+            isSameProjectPath(session.cwd, resolved.projectPath)
+        );
+
+      const activeSessionKeys = new Set(
+        collaborativeClients.map((terminal) => `${terminal.sessionName}:${terminal.terminalId}`)
+      );
+
+      const terminalWatcher = TerminalWatcher.getInstance();
+      const backendTerminals = terminalWatcher
+        .getTerminalsForProject(resolved.projectPath)
+        .map((terminal) => ({
+          terminalId: terminal.id,
+          name: terminal.name,
+          agentType: terminal.agentType,
+          isActive: terminal.isActive,
+          state: terminal.state,
+          tmuxSession: terminal.tmuxSession || null,
+          createdByMcp: terminal.createdByMcp,
+          lastOutputAt: terminal.lastOutputAt || null,
+          projectPath: terminal.projectPath || terminal.cwd || resolved.projectPath,
+        }));
+
+      const collaborative = await Promise.all(
+        collaborativeClients.map(async (client) => {
+          const tmuxInfo = tmux.getSessionByTerminalId(client.terminalId);
+          const detail: Record<string, unknown> = {
+            clientId: client.clientId,
+            sessionName: client.sessionName,
+            terminalId: client.terminalId,
+            projectPath: client.projectPath,
+            terminalName: tmuxInfo?.terminalName || null,
+            attached: true,
+            source: 'card-client',
+          };
+          if (includeOutput) {
+            detail.output = (await panel.readFloatingWindowOutput(client.clientId, outputLines)) || '';
+          }
+          return detail;
+        })
+      );
+
+      const detachedCollaborative = await Promise.all(
+        trackedTmuxSessions
+          .filter((session) => !activeSessionKeys.has(`${session.sessionName}:${session.terminalId}`))
+          .map(async (session) => {
+            const detail: Record<string, unknown> = {
+              clientId: null,
+              sessionName: session.sessionName,
+              terminalId: session.terminalId,
+              projectPath: session.cwd || resolved.projectPath,
+              terminalName: session.terminalName || null,
+              attached: false,
+              source: 'tmux-detached',
+            };
+            if (includeOutput) {
+              detail.output = (await tmux.readBuffer(session.sessionName, outputLines)) || '';
+            }
+            return detail;
+          })
+      );
+
+      const allCollaborative = [...collaborative, ...detachedCollaborative];
+
+      const backend = await Promise.all(
+        backendTerminals.map(async (terminal) => {
+          const detail: Record<string, unknown> = { ...terminal };
+          if (includeOutput) {
+            detail.output = await terminalWatcher.getLastOutput(terminal.terminalId, outputLines);
+          }
+          return detail;
+        })
+      );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            projectPath: resolved.projectPath,
+            projectName: resolved.projectName || path.basename(resolved.projectPath),
+            collaborativeTerminalCount: allCollaborative.length,
+            backendTerminalCount: backend.length,
+            collaborativeTerminals: allCollaborative,
+            backendTerminals: backend,
+            hint: 'Use vscode_project_terminal_send/read for collaboration-first control.',
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `Error listing project terminals: ${error}` }],
+        isError: true,
+      };
+    }
+  };
+
+  registerTool(definition, handler);
+}
+
+/**
+ * vscode_project_terminals_close - Close project terminals by selector or all
+ */
+function registerProjectTerminalsClose(): void {
+  const definition: MCPTool = {
+    name: 'vscode_project_terminals_close',
+    description:
+      'Close terminals for a project. Supports closeAll, or targeting by clientId, terminalId, or terminalName.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: {
+          type: 'string',
+          description: 'Project path to close terminals for',
+        },
+        projectName: {
+          type: 'string',
+          description: 'Alternative project name when projectPath is not provided',
+        },
+        closeAll: {
+          type: 'boolean',
+          description: 'Close all terminals for the project (default: false)',
+          default: false,
+        },
+        includeDetached: {
+          type: 'boolean',
+          description: 'When closeAll=true, include detached tmux sessions (default: true)',
+          default: true,
+        },
+        clientId: {
+          type: 'string',
+          description: 'Close a specific attached collaborative terminal by clientId',
+        },
+        terminalId: {
+          type: 'number',
+          description: 'Close a specific terminal by terminal process id',
+        },
+        terminalName: {
+          type: 'string',
+          description: 'Close a specific terminal by terminal name',
+        },
+      },
+    },
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const projectPathArg = args.projectPath as string | undefined;
+    const projectNameArg = args.projectName as string | undefined;
+    const closeAll = (args.closeAll as boolean) ?? false;
+    const includeDetached = (args.includeDetached as boolean) ?? true;
+    const clientId = typeof args.clientId === 'string' ? args.clientId.trim() : '';
+    const terminalId =
+      typeof args.terminalId === 'number' && Number.isFinite(args.terminalId)
+        ? (args.terminalId as number)
+        : undefined;
+    const terminalName = typeof args.terminalName === 'string' ? args.terminalName.trim() : '';
+
+    try {
+      const agentDiscovery = AgentDiscovery.getInstance();
+      const resolved = await resolveProjectPath(projectPathArg, projectNameArg, agentDiscovery);
+
+      if (!resolved.projectPath) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Project path or name is required',
+              hint: 'Provide projectPath or projectName. Use vscode_dashboard_list_projects to discover options.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const panel = await ensureDashboardPanelOpen();
+      if (!panel) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Dashboard panel could not be opened',
+              projectPath: resolved.projectPath,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const tmux = TmuxManager.getInstance();
+      try {
+        await tmux.refreshTrackedSessions();
+      } catch {
+        // Best-effort refresh only.
+      }
+
+      const attached = panel
+        .getFloatingWindowTerminals()
+        .filter((terminal) => isSameProjectPath(terminal.projectPath, resolved.projectPath))
+        .map((terminal) => {
+          const tmuxInfo = tmux.getSessionByTerminalId(terminal.terminalId);
+          return {
+            clientId: terminal.clientId,
+            sessionName: terminal.sessionName,
+            terminalId: terminal.terminalId,
+            terminalName: tmuxInfo?.terminalName || '',
+            attached: true,
+          };
+        });
+
+      const attachedSessionKeys = new Set(attached.map((item) => `${item.sessionName}:${item.terminalId}`));
+      const detached = tmux
+        .getAllSessions()
+        .filter(
+          (session) =>
+            typeof session.cwd === 'string' &&
+            session.cwd.length > 0 &&
+            isSameProjectPath(session.cwd, resolved.projectPath) &&
+            !attachedSessionKeys.has(`${session.sessionName}:${session.terminalId}`)
+        )
+        .map((session) => ({
+          clientId: '',
+          sessionName: session.sessionName,
+          terminalId: session.terminalId,
+          terminalName: session.terminalName || '',
+          attached: false,
+        }));
+
+      let selected: Array<{
+        clientId: string;
+        sessionName: string;
+        terminalId: number;
+        terminalName: string;
+        attached: boolean;
+      }> = [];
+
+      if (closeAll) {
+        selected = includeDetached ? [...attached, ...detached] : [...attached];
+      } else if (clientId) {
+        selected = attached.filter((item) => item.clientId === clientId);
+      } else if (terminalId !== undefined) {
+        selected = [...attached, ...detached].filter((item) => item.terminalId === terminalId);
+      } else if (terminalName) {
+        const normalized = terminalName.toLowerCase();
+        selected = [...attached, ...detached].filter(
+          (item) => (item.terminalName || '').trim().toLowerCase() === normalized
+        );
+      } else if (attached.length > 0) {
+        selected = [attached[0]];
+      }
+
+      if (selected.length === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              closed: false,
+              projectPath: resolved.projectPath,
+              error: 'No matching terminals found to close',
+              hint: 'Use closeAll=true or provide clientId/terminalId/terminalName from vscode_project_terminals_list.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const uniqueBySession = new Map<string, typeof selected[number]>();
+      selected.forEach((item) => {
+        uniqueBySession.set(item.sessionName, item);
+      });
+      const uniqueTargets = Array.from(uniqueBySession.values());
+
+      const closed: Array<{
+        sessionName: string;
+        terminalId: number;
+        clientId: string | null;
+        terminalName: string | null;
+        attached: boolean;
+      }> = [];
+      const failed: Array<{ sessionName: string; reason: string }> = [];
+
+      for (const target of uniqueTargets) {
+        try {
+          await tmux.killSession(target.sessionName);
+          closed.push({
+            sessionName: target.sessionName,
+            terminalId: target.terminalId,
+            clientId: target.clientId || null,
+            terminalName: target.terminalName || null,
+            attached: target.attached,
+          });
+        } catch (error) {
+          failed.push({
+            sessionName: target.sessionName,
+            reason: String(error),
+          });
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      try {
+        await tmux.refreshTrackedSessions();
+      } catch {
+        // Best-effort refresh only.
+      }
+      const remainingSessionNames = new Set(tmux.getAllSessions().map((session) => session.sessionName));
+
+      const remainingAttached = panel
+        .getFloatingWindowTerminals()
+        .filter((terminal) => isSameProjectPath(terminal.projectPath, resolved.projectPath))
+        .filter((terminal) => remainingSessionNames.has(terminal.sessionName));
+      const remainingDetached = tmux
+        .getAllSessions()
+        .filter(
+          (session) =>
+            typeof session.cwd === 'string' &&
+            session.cwd.length > 0 &&
+            isSameProjectPath(session.cwd, resolved.projectPath)
+        );
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            closed: failed.length === 0,
+            projectPath: resolved.projectPath,
+            requestedCloseAll: closeAll,
+            includeDetached,
+            closedCount: closed.length,
+            failedCount: failed.length,
+            closedTerminals: closed,
+            failed,
+            remainingAttachedCount: remainingAttached.length,
+            remainingTrackedTmuxCount: remainingDetached.length,
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `Error closing project terminals: ${error}` }],
+        isError: true,
+      };
+    }
+  };
+
+  registerTool(definition, handler);
+}
+
+/**
+ * vscode_project_terminal_send - Send text to a project's collaborative terminal
+ */
+function registerProjectTerminalSend(): void {
+  const definition: MCPTool = {
+    name: 'vscode_project_terminal_send',
+    description:
+      'Send text/command to a project terminal with collaboration-first behavior. Defaults to background tmux mode (no UI steal), with optional foreground/card-open visual modes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: {
+          type: 'string',
+          description: 'Project path to send command in',
+        },
+        projectName: {
+          type: 'string',
+          description: 'Alternative project name when projectPath is not provided',
+        },
+        clientId: {
+          type: 'string',
+          description: 'Optional exact collaborative terminal client id',
+        },
+        terminalId: {
+          type: 'number',
+          description: 'Optional terminal process id to target',
+        },
+        terminalName: {
+          type: 'string',
+          description: 'Optional card terminal tab name to target/switch to',
+        },
+        createNewTerminal: {
+          type: 'boolean',
+          description: 'Create a new terminal session before sending (default: false)',
+          default: false,
+        },
+        visibilityMode: {
+          type: 'string',
+          enum: ['background', 'foreground', 'card_open'],
+          description: 'Terminal visibility behavior (default: background). background keeps work headless but visible when user opens the project card.',
+          default: 'background',
+        },
+        autoAddProject: {
+          type: 'boolean',
+          description: 'Automatically add project to dashboard tracking if missing (default: true)',
+          default: true,
+        },
+        text: {
+          type: 'string',
+          description: 'Text/command to send',
+        },
+        addNewLine: {
+          type: 'boolean',
+          description: 'Submit after text (default: true)',
+          default: true,
+        },
+        observeMs: {
+          type: 'number',
+          description: 'After sending, observe output for this many milliseconds to report command/state context (default: 1800, max: 15000)',
+          default: 1800,
+        },
+        pollMs: {
+          type: 'number',
+          description: 'Polling interval while observing output (default: 250)',
+          default: 250,
+        },
+        observeLines: {
+          type: 'number',
+          description: 'How many lines to inspect when observing output (default: 120)',
+          default: 120,
+        },
+        waitForFinalState: {
+          type: 'boolean',
+          description: 'When true, keep observing until a terminal final-ish state is seen (idle/completed/waiting_input/error) or timeout',
+          default: false,
+        },
+      },
+      required: ['text'],
+    },
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const projectPathArg = args.projectPath as string | undefined;
+    const projectNameArg = args.projectName as string | undefined;
+    const clientId = args.clientId as string | undefined;
+    const terminalId =
+      typeof args.terminalId === 'number' && Number.isFinite(args.terminalId) ? (args.terminalId as number) : undefined;
+    const terminalName = args.terminalName as string | undefined;
+    const createNewTerminal = (args.createNewTerminal as boolean) ?? false;
+    const visibilityMode = normalizeVisibilityMode(args.visibilityMode, 'background');
+    const autoAddProject = (args.autoAddProject as boolean) ?? true;
+    const text = (args.text as string) ?? '';
+    const addNewLine = (args.addNewLine as boolean) ?? true;
+    const observeMs = (args.observeMs as number) ?? 1800;
+    const pollMs = (args.pollMs as number) ?? 250;
+    const observeLines = (args.observeLines as number) ?? 120;
+    const waitForFinalState = (args.waitForFinalState as boolean) ?? false;
+
+    try {
+      const agentDiscovery = AgentDiscovery.getInstance();
+      const resolved = await resolveProjectPath(projectPathArg, projectNameArg, agentDiscovery);
+
+      if (!resolved.projectPath) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Project path or name is required',
+              hint: 'Provide projectPath or projectName. Use vscode_dashboard_list_projects to inspect projects.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const tracked = ensureProjectTracked(agentDiscovery, resolved.projectPath, autoAddProject);
+      if (!tracked.tracked) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Project is not tracked in dashboard',
+              projectPath: resolved.projectPath,
+              hint: 'Enable autoAddProject=true or add it with vscode_dashboard_add_project.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      let panel: import('../dashboard/DashboardPanel').DashboardPanel | null = null;
+      const requiresPanel = visibilityMode !== 'background' || Boolean(clientId);
+      if (requiresPanel) {
+        panel = await ensureDashboardPanelOpen();
+        if (!panel) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Dashboard panel could not be opened',
+                projectPath: resolved.projectPath,
+                visibilityMode,
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+      }
+
+      const target = await ensureProjectTerminalClient(panel, resolved.projectPath, {
+        clientId,
+        terminalId,
+        terminalName,
+        createNewTerminal,
+        visibilityMode,
+      });
+
+      if (target.error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: target.error,
+              projectPath: resolved.projectPath,
+              visibilityMode,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const uiAction = deriveUiAction(target, visibilityMode);
+
+      if (target.source === 'detached') {
+        if (!target.sessionName) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Detached terminal session is missing sessionName',
+                projectPath: resolved.projectPath,
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+
+        const tmux = TmuxManager.getInstance();
+        await tmux.sendKeys(target.sessionName, text, addNewLine);
+        const observation = await observeTmuxSend(tmux, target.sessionName, text, {
+          observeMs,
+          pollMs,
+          lines: observeLines,
+          waitForFinalState,
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              sent: true,
+              projectPath: resolved.projectPath,
+              clientId: null,
+              source: target.source,
+              sessionName: target.sessionName,
+              terminalId: target.terminalId,
+              openedOrSwitched: target.created,
+              visibilityModeApplied: visibilityMode,
+              uiAction,
+              text,
+              addNewLine,
+              observation,
+              hint: 'Command ran in background tmux session. Open the project card to watch/collaborate live.',
+            }, null, 2),
+          }],
+        };
+      }
+
+      if (!panel || !target.clientId) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'No attached collaborative terminal available for visual send',
+              projectPath: resolved.projectPath,
+              visibilityMode,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const sent = await panel.sendToFloatingWindow(target.clientId, text, addNewLine);
+      if (!sent) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Failed sending command to collaborative terminal',
+              projectPath: resolved.projectPath,
+              clientId: target.clientId,
+              visibilityMode,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const observation = await observeCollaborativeSend(panel, target.clientId, text, {
+        observeMs,
+        pollMs,
+        lines: observeLines,
+        waitForFinalState,
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            sent: true,
+            projectPath: resolved.projectPath,
+            clientId: target.clientId,
+            source: target.source,
+            openedOrSwitched: target.created,
+            visibilityModeApplied: visibilityMode,
+            uiAction,
+            text,
+            addNewLine,
+            observation,
+            hint: 'Command is visible in dashboard for live collaboration.',
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `Error sending to project terminal: ${error}` }],
+        isError: true,
+      };
+    }
+  };
+
+  registerTool(definition, handler);
+}
+
+/**
+ * vscode_project_terminal_read - Read output from a project's collaborative terminal
+ */
+function registerProjectTerminalRead(): void {
+  const definition: MCPTool = {
+    name: 'vscode_project_terminal_read',
+    description:
+      'Read terminal output from a project with collaboration-first behavior. Defaults to background tmux mode with optional foreground/card-open visual modes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectPath: {
+          type: 'string',
+          description: 'Project path to read terminal output from',
+        },
+        projectName: {
+          type: 'string',
+          description: 'Alternative project name when projectPath is not provided',
+        },
+        clientId: {
+          type: 'string',
+          description: 'Optional exact collaborative terminal client id',
+        },
+        terminalId: {
+          type: 'number',
+          description: 'Optional terminal process id to target',
+        },
+        terminalName: {
+          type: 'string',
+          description: 'Optional card terminal tab name to target/switch to',
+        },
+        createNewTerminal: {
+          type: 'boolean',
+          description: 'Create a new terminal session before reading (default: false)',
+          default: false,
+        },
+        visibilityMode: {
+          type: 'string',
+          enum: ['background', 'foreground', 'card_open'],
+          description: 'Terminal visibility behavior (default: background). background keeps work headless but visible when user opens the project card.',
+          default: 'background',
+        },
+        autoAddProject: {
+          type: 'boolean',
+          description: 'Automatically add project to dashboard tracking if missing (default: true)',
+          default: true,
+        },
+        lines: {
+          type: 'number',
+          description: 'Number of output lines to read (default: 100)',
+          default: 100,
+        },
+      },
+    },
+  };
+
+  const handler = async (args: Record<string, unknown>): Promise<ToolResult> => {
+    const projectPathArg = args.projectPath as string | undefined;
+    const projectNameArg = args.projectName as string | undefined;
+    const clientId = args.clientId as string | undefined;
+    const terminalId =
+      typeof args.terminalId === 'number' && Number.isFinite(args.terminalId) ? (args.terminalId as number) : undefined;
+    const terminalName = args.terminalName as string | undefined;
+    const createNewTerminal = (args.createNewTerminal as boolean) ?? false;
+    const visibilityMode = normalizeVisibilityMode(args.visibilityMode, 'background');
+    const autoAddProject = (args.autoAddProject as boolean) ?? true;
+    const lines = (args.lines as number) ?? 100;
+
+    try {
+      const agentDiscovery = AgentDiscovery.getInstance();
+      const resolved = await resolveProjectPath(projectPathArg, projectNameArg, agentDiscovery);
+
+      if (!resolved.projectPath) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Project path or name is required',
+              hint: 'Provide projectPath or projectName. Use vscode_dashboard_list_projects to inspect projects.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const tracked = ensureProjectTracked(agentDiscovery, resolved.projectPath, autoAddProject);
+      if (!tracked.tracked) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Project is not tracked in dashboard',
+              projectPath: resolved.projectPath,
+              hint: 'Enable autoAddProject=true or add it with vscode_dashboard_add_project.',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      let panel: import('../dashboard/DashboardPanel').DashboardPanel | null = null;
+      const requiresPanel = visibilityMode !== 'background' || Boolean(clientId);
+      if (requiresPanel) {
+        panel = await ensureDashboardPanelOpen();
+        if (!panel) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Dashboard panel could not be opened',
+                projectPath: resolved.projectPath,
+                visibilityMode,
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+      }
+
+      const target = await ensureProjectTerminalClient(panel, resolved.projectPath, {
+        clientId,
+        terminalId,
+        terminalName,
+        createNewTerminal,
+        visibilityMode,
+      });
+
+      if (target.error) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: target.error,
+              projectPath: resolved.projectPath,
+              visibilityMode,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const uiAction = deriveUiAction(target, visibilityMode);
+
+      if (target.source === 'detached') {
+        if (!target.sessionName) {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Detached terminal session is missing sessionName',
+                projectPath: resolved.projectPath,
+              }, null, 2),
+            }],
+            isError: true,
+          };
+        }
+
+        const tmux = TmuxManager.getInstance();
+        const output = await tmux.readBuffer(target.sessionName, lines);
+        const outputState = classifyCollaborativeOutput(output || '');
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              projectPath: resolved.projectPath,
+              clientId: null,
+              source: target.source,
+              sessionName: target.sessionName,
+              terminalId: target.terminalId,
+              openedOrSwitched: target.created,
+              visibilityModeApplied: visibilityMode,
+              uiAction,
+              lines,
+              state: outputState.state,
+              stateReason: outputState.reason,
+              promptLine: lastNonEmptyLine(output || ''),
+              output: output || '',
+            }, null, 2),
+          }],
+        };
+      }
+
+      if (!panel || !target.clientId) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'No attached collaborative terminal available for visual read',
+              projectPath: resolved.projectPath,
+              visibilityMode,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const output = await panel.readFloatingWindowOutput(target.clientId, lines);
+
+      if (output === null) {
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              error: 'Collaborative terminal not found',
+              projectPath: resolved.projectPath,
+              clientId: target.clientId,
+              visibilityMode,
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
+
+      const outputState = classifyCollaborativeOutput(output);
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            projectPath: resolved.projectPath,
+            clientId: target.clientId,
+            source: target.source,
+            openedOrSwitched: target.created,
+            visibilityModeApplied: visibilityMode,
+            uiAction,
+            lines,
+            state: outputState.state,
+            stateReason: outputState.reason,
+            promptLine: lastNonEmptyLine(output),
+            output,
+          }, null, 2),
+        }],
+      };
+    } catch (error) {
+      return {
+        content: [{ type: 'text', text: `Error reading project terminal: ${error}` }],
         isError: true,
       };
     }

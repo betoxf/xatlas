@@ -15,8 +15,8 @@ const SERVER_INFO = {
   version: '0.1.0',
 };
 
-// Protocol version
-const PROTOCOL_VERSION = '2024-11-05';
+// Supported MCP protocol versions (prefer newest first)
+const SUPPORTED_PROTOCOL_VERSIONS = ['2025-03-26', '2024-11-05'] as const;
 
 // Tool registry
 const tools: Map<string, { definition: MCPTool; handler: ToolHandler }> = new Map();
@@ -41,15 +41,24 @@ export function getTools(): MCPTool[] {
  */
 export async function handleMCPRequest(request: MCPRequest): Promise<MCPResponse> {
   const { id, method, params } = request;
+  const responseId = id ?? null;
 
   try {
     switch (method) {
       case 'initialize':
+        const requestedProtocolVersion =
+          typeof params?.protocolVersion === 'string' ? params.protocolVersion : undefined;
+        const negotiatedProtocolVersion =
+          requestedProtocolVersion &&
+          SUPPORTED_PROTOCOL_VERSIONS.includes(requestedProtocolVersion as (typeof SUPPORTED_PROTOCOL_VERSIONS)[number])
+            ? requestedProtocolVersion
+            : SUPPORTED_PROTOCOL_VERSIONS[0];
+
         return {
           jsonrpc: '2.0',
-          id,
+          id: responseId,
           result: {
-            protocolVersion: PROTOCOL_VERSION,
+            protocolVersion: negotiatedProtocolVersion,
             serverInfo: SERVER_INFO,
             capabilities: {
               tools: {},
@@ -60,14 +69,14 @@ export async function handleMCPRequest(request: MCPRequest): Promise<MCPResponse
       case 'initialized':
         return {
           jsonrpc: '2.0',
-          id,
+          id: responseId,
           result: {},
         };
 
       case 'tools/list':
         return {
           jsonrpc: '2.0',
-          id,
+          id: responseId,
           result: {
             tools: getTools(),
           },
@@ -78,7 +87,7 @@ export async function handleMCPRequest(request: MCPRequest): Promise<MCPResponse
         if (!toolParams?.name) {
           return {
             jsonrpc: '2.0',
-            id,
+            id: responseId,
             error: {
               code: MCPErrorCodes.INVALID_PARAMS,
               message: 'Missing tool name',
@@ -97,7 +106,7 @@ export async function handleMCPRequest(request: MCPRequest): Promise<MCPResponse
           );
           return {
             jsonrpc: '2.0',
-            id,
+            id: responseId,
             error: {
               code: MCPErrorCodes.METHOD_NOT_FOUND,
               message: `Tool not found: ${toolParams.name}`,
@@ -118,7 +127,7 @@ export async function handleMCPRequest(request: MCPRequest): Promise<MCPResponse
           actionLog.completeAction(actionId, result);
           return {
             jsonrpc: '2.0',
-            id,
+            id: responseId,
             result,
           };
         } catch (error) {
@@ -136,7 +145,7 @@ export async function handleMCPRequest(request: MCPRequest): Promise<MCPResponse
           };
           return {
             jsonrpc: '2.0',
-            id,
+            id: responseId,
             result: errorResult,
           };
         }
@@ -144,14 +153,14 @@ export async function handleMCPRequest(request: MCPRequest): Promise<MCPResponse
       case 'ping':
         return {
           jsonrpc: '2.0',
-          id,
+          id: responseId,
           result: {},
         };
 
       default:
         return {
           jsonrpc: '2.0',
-          id,
+          id: responseId,
           error: {
             code: MCPErrorCodes.METHOD_NOT_FOUND,
             message: `Method not found: ${method}`,
@@ -161,7 +170,7 @@ export async function handleMCPRequest(request: MCPRequest): Promise<MCPResponse
   } catch (error) {
     return {
       jsonrpc: '2.0',
-      id,
+      id: responseId,
       error: {
         code: MCPErrorCodes.INTERNAL_ERROR,
         message: error instanceof Error ? error.message : 'Internal error',

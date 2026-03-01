@@ -12,6 +12,8 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   private agentDiscovery: AgentDiscovery;
   private terminalWatcher: TerminalWatcher;
   private updateInterval?: NodeJS.Timeout;
+  private isRefreshing = false;
+  private pendingRefresh = false;
 
   constructor(private readonly extensionUri: vscode.Uri) {
     this.terminalWatcher = TerminalWatcher.getInstance();
@@ -48,8 +50,10 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
     });
 
     // Initial refresh
-    this.refreshData();
-    this.startAutoRefresh();
+    if (webviewView.visible) {
+      this.refreshData();
+      this.startAutoRefresh();
+    }
   }
 
   private async handleWebviewMessage(message: any): Promise<void> {
@@ -117,15 +121,29 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   private async refreshData(): Promise<void> {
     if (!this.view) return;
 
-    const projects = await this.agentDiscovery.discoverProjects();
-    const config = vscode.workspace.getConfiguration('vscode-mcp-server');
-    const coloredPreviews = config.get<boolean>('coloredPreviews', true);
+    if (this.isRefreshing) {
+      this.pendingRefresh = true;
+      return;
+    }
 
-    this.view.webview.postMessage({
-      type: 'projectsUpdate',
-      projects,
-      coloredPreviews,
-    });
+    this.isRefreshing = true;
+    try {
+      const projects = await this.agentDiscovery.discoverProjects();
+      const config = vscode.workspace.getConfiguration('vscode-mcp-server');
+      const coloredPreviews = config.get<boolean>('coloredPreviews', true);
+
+      this.view.webview.postMessage({
+        type: 'projectsUpdate',
+        projects,
+        coloredPreviews,
+      });
+    } finally {
+      this.isRefreshing = false;
+      if (this.pendingRefresh) {
+        this.pendingRefresh = false;
+        void this.refreshData();
+      }
+    }
   }
 
   /**
@@ -243,7 +261,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
 
   private startAutoRefresh(): void {
     if (this.updateInterval) return;
-    this.updateInterval = setInterval(() => this.refreshData(), 2000);
+    this.updateInterval = setInterval(() => this.refreshData(), 5000);
   }
 
   private stopAutoRefresh(): void {

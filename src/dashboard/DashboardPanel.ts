@@ -1,9 +1,11 @@
 import * as vscode from 'vscode';
+import * as http from 'http';
 import * as path from 'path';
 import { AgentDiscovery, ProjectInfo, AgentInstance } from '../services/agentDiscovery';
 import { TerminalWatcher } from '../services/terminalWatcher';
 import { TmuxManager } from '../services/tmuxManager';
 import { TmuxStreamBridge } from '../services/tmuxStreamBridge';
+import { getActivePort } from '../server';
 
 /**
  * Manages the AI Agent Dashboard webview panel
@@ -22,9 +24,11 @@ export class DashboardPanel {
 
   private agentDiscovery: AgentDiscovery;
   private terminalWatcher: TerminalWatcher;
-  private updateInterval: NodeJS.Timeout | undefined;
   private refreshDebounceTimer: NodeJS.Timeout | undefined;
+  private eventRefreshTimer: NodeJS.Timeout | undefined;
   private isRefreshing: boolean = false;
+  private mirrorNoticeAt: number = 0;
+  private mirrorHostLabel: string = 'primary';
 
   // Tmux streaming bridge for embedded terminals
   private tmuxBridge: TmuxStreamBridge;
@@ -64,20 +68,22 @@ export class DashboardPanel {
 
     // Update when panel becomes visible
     this.panel.onDidChangeViewState(
-      e => {
+      () => {
         if (this.panel.visible) {
           this.refreshData();
-          this.startAutoRefresh();
-        } else {
-          this.stopAutoRefresh();
         }
       },
       null,
       this.disposables
     );
 
-    // Start auto-refresh
-    this.startAutoRefresh();
+    // Stream/event-driven refreshes: avoid periodic polling.
+    this.disposables.push(
+      vscode.window.onDidOpenTerminal(() => this.scheduleEventRefresh()),
+      vscode.window.onDidCloseTerminal(() => this.scheduleEventRefresh()),
+      vscode.window.onDidChangeActiveTerminal(() => this.scheduleEventRefresh(200)),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.scheduleEventRefresh(300))
+    );
   }
 
   /**
@@ -118,11 +124,161 @@ export class DashboardPanel {
     return DashboardPanel.currentPanel;
   }
 
+  private isMirrorMode(): boolean {
+    return false; // Every window now has its own server
+  }
+
+  private getMirrorConnection(): { host: string; port: number; label: string } {
+    const config = vscode.workspace.getConfiguration('vscode-mcp-server');
+    const host = config.get<string>('host', '127.0.0.1');
+    const port = config.get<number>('port', 9002);
+    return { host, port, label: `${host}:${port}` };
+  }
+
+  private maybeShowMirrorNotice(): void {
+    const now = Date.now();
+    if (now - this.mirrorNoticeAt < 3000) {
+      return;
+    }
+    this.mirrorNoticeAt = now;
+    vscode.window.showInformationMessage(
+      `Xerebro is in mirror mode. Control terminals/projects in the host window (${this.mirrorHostLabel}).`
+    );
+  }
+
+  private async postMirrorRequest(
+    host: string,
+    port: number,
+    payload: unknown,
+    timeoutMs: number = 4000
+  ): Promise<string | null> {
+    return new Promise((resolve) => {
+      const body = JSON.stringify(payload);
+      const req = http.request(
+        {
+          host,
+          port,
+          path: '/mcp',
+          method: 'POST',
+          timeout: timeoutMs,
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(body),
+          },
+        },
+        (res) => {
+          let data = '';
+          res.on('data', (chunk) => {
+            data += chunk.toString();
+          });
+          res.on('end', () => resolve(data || null));
+        }
+      );
+
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => {
+        req.destroy();
+        resolve(null);
+      });
+      req.write(body);
+      req.end();
+    });
+  }
+
+  private normalizeMirrorProjects(rawProjects: any[]): ProjectInfo[] {
+    return rawProjects
+      .map((project) => {
+        const terminalsRaw = Array.isArray(project?.terminals) ? project.terminals : [];
+        const agentsRaw = Array.isArray(project?.agents) ? project.agents : [];
+
+        const terminals = terminalsRaw.map((terminal: any) => ({
+          processId: Number(terminal?.processId || terminal?.terminalId || Date.now()),
+          name: typeof terminal?.name === 'string' ? terminal.name : 'Terminal',
+          agentType: terminal?.agentType || 'generic',
+          isActive: !!terminal?.isActive,
+          lastOutput:
+            typeof terminal?.outputPreview === 'string'
+              ? terminal.outputPreview
+              : typeof terminal?.lastOutput === 'string'
+                ? terminal.lastOutput
+                : '',
+          lastOutputAt: typeof terminal?.lastOutputAt === 'number' ? terminal.lastOutputAt : 0,
+        }));
+
+        const agents: AgentInstance[] = agentsRaw.map((agent: any) => ({
+          type: agent?.type || 'generic',
+          name: typeof agent?.name === 'string' ? agent.name : 'Agent',
+          color: typeof agent?.color === 'string' ? agent.color : '#888888',
+          terminalId: Number(agent?.terminalId || 0),
+          terminalName: '',
+          isActive: !!agent?.isActive,
+          isLocal: project?.isLocal !== false,
+        }));
+
+        return {
+          name: typeof project?.name === 'string' ? project.name : 'Project',
+          path: typeof project?.path === 'string' ? project.path : '',
+          isLocal: project?.isLocal !== false,
+          terminals,
+          agents,
+          activity: project?.activity || 'idle',
+          accentColor: typeof project?.accentColor === 'string' ? project.accentColor : undefined,
+        } as ProjectInfo;
+      })
+      .filter((project) => !!project.path);
+  }
+
+  private async fetchMirrorProjects(): Promise<ProjectInfo[] | null> {
+    const mirror = this.getMirrorConnection();
+    this.mirrorHostLabel = mirror.label;
+
+    const responseRaw = await this.postMirrorRequest(mirror.host, mirror.port, {
+      jsonrpc: '2.0',
+      id: `mirror-state-${Date.now()}`,
+      method: 'tools/call',
+      params: {
+        name: 'vscode_dashboard_get_state',
+        arguments: {
+          includeTerminalOutput: true,
+          outputLines: 30,
+          includeAgentDetails: true,
+        },
+      },
+    });
+
+    if (!responseRaw) {
+      return null;
+    }
+
+    try {
+      const response = JSON.parse(responseRaw);
+      const text = response?.result?.content?.find((item: any) => item?.type === 'text')?.text;
+      if (!text || typeof text !== 'string') {
+        return null;
+      }
+      const parsed = JSON.parse(text);
+      const projects = Array.isArray(parsed?.projects) ? parsed.projects : [];
+      return this.normalizeMirrorProjects(projects);
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Handle messages from the webview
    */
   private async handleWebviewMessage(message: any): Promise<void> {
     console.log(`[DashboardPanel] handleWebviewMessage received:`, message.command || message.type, message);
+
+    if (
+      this.isMirrorMode() &&
+      message.command &&
+      message.command !== 'refresh' &&
+      message.command !== 'debug:log'
+    ) {
+      this.maybeShowMirrorNotice();
+      return;
+    }
 
     switch (message.command) {
       case 'refresh':
@@ -191,7 +347,7 @@ export class DashboardPanel {
       case 'pty:create':
         await this.createProjectTerminal(
           message.cwd,
-          undefined,
+          message.terminalName,
           message.clientId,
           message.cols,
           message.rows,
@@ -213,6 +369,34 @@ export class DashboardPanel {
 
       case 'pty:detach':
         await this.detachTerminalByClientId(message.id);
+        break;
+
+      // Card embedded terminal commands
+      case 'card:pty:create':
+        await this.createCardTerminal(
+          message.projectPath,
+          message.clientId,
+          message.cols,
+          message.rows,
+          message.terminalId,
+          message.terminalName
+        );
+        break;
+
+      case 'card:pty:write':
+        await this.sendToCardTerminal(message.id, message.projectPath, message.data);
+        break;
+
+      case 'card:pty:resize':
+        await this.resizeCardTerminal(message.id, message.projectPath, message.cols, message.rows);
+        break;
+
+      case 'card:pty:detach':
+        await this.detachCardTerminal(message.id, message.projectPath);
+        break;
+
+      case 'card:pty:kill':
+        await this.killCardTerminal(message.id, message.projectPath);
         break;
 
       case 'reorderProjects':
@@ -341,11 +525,16 @@ export class DashboardPanel {
 
         // Notify webview that PTY is ready first
         const reportedTerminalId = sessionTerminalId ?? terminalId;
+        const reportedTerminalName =
+          (typeof reportedTerminalId === 'number'
+            ? tmux.getSessionByTerminalId(reportedTerminalId)?.terminalName
+            : undefined) || projectName;
         this.panel.webview.postMessage({
           type: 'pty:created',
           id: clientId,
           clientId,
           pid: reportedTerminalId,
+          terminalName: reportedTerminalName,
           tmuxSession: sessionName,
           backend: 'tmux',
           reconnect: isReconnecting, // Indicates we're reconnecting to existing session
@@ -357,9 +546,8 @@ export class DashboardPanel {
         console.log(`[DashboardPanel] Starting stream for clientId: ${clientId}, session: ${sessionName}`);
 
         // Start streaming tmux output to webview (pipe-pane)
-        // Always skip the initial snapshot for consistent natural behavior.
-        // Both new and switched terminals will start empty at the top,
-        // and content will stream in naturally as you interact.
+        // Always include an initial snapshot so the current prompt/cwd is visible
+        // even if it rendered before the pipe was attached.
         await this.tmuxBridge.startStream(clientId, sessionName, {
           onData: (payload) => {
             if (!payload || typeof payload.text !== 'string') return;
@@ -382,7 +570,7 @@ export class DashboardPanel {
           onError: (error) => {
             console.error(`[DashboardPanel] Tmux stream error for ${clientId}:`, error);
           },
-        }, { cols, rows }, true); // Always skip snapshot for consistent natural behavior
+        }, { cols, rows }, false);
 
         console.log(`[DashboardPanel] Stream started for clientId: ${clientId}`);
 
@@ -555,34 +743,399 @@ export class DashboardPanel {
     this.clientSessions.delete(clientId);
   }
 
+  // ==========================================
+  // Card Embedded Terminal Backend Methods
+  // ==========================================
+
+  // Track card terminal sessions: clientId -> { sessionName, projectPath, terminalId }
+  private cardClientSessions: Map<string, { sessionName: string; projectPath: string; terminalId: number }> = new Map();
+  // Track card terminal names so MCP can consistently target tabs by name across detach/reattach cycles.
+  private cardTerminalNameIndex: Map<string, Map<string, number>> = new Map();
+
+  private normalizeProjectKey(projectPath: string): string {
+    try {
+      return path.resolve(projectPath);
+    } catch {
+      return projectPath;
+    }
+  }
+
+  private rememberCardTerminalAlias(projectPath: string, terminalName: string | undefined, terminalId?: number): void {
+    if (!terminalName || typeof terminalId !== 'number' || !Number.isFinite(terminalId)) {
+      return;
+    }
+
+    const normalizedName = terminalName.trim().toLowerCase();
+    if (!normalizedName) {
+      return;
+    }
+
+    const projectKey = this.normalizeProjectKey(projectPath);
+    let aliases = this.cardTerminalNameIndex.get(projectKey);
+    if (!aliases) {
+      aliases = new Map<string, number>();
+      this.cardTerminalNameIndex.set(projectKey, aliases);
+    }
+
+    aliases.set(normalizedName, terminalId);
+  }
+
+  public resolveCardTerminalId(projectPath: string, terminalName: string): number | undefined {
+    const normalizedName = terminalName.trim().toLowerCase();
+    if (!normalizedName) {
+      return undefined;
+    }
+
+    const projectKey = this.normalizeProjectKey(projectPath);
+    const aliases = this.cardTerminalNameIndex.get(projectKey);
+    const indexed = aliases?.get(normalizedName);
+    if (typeof indexed === 'number' && Number.isFinite(indexed)) {
+      return indexed;
+    }
+
+    // Fallback to tmux session metadata in case this terminal existed before index warmup.
+    const tmux = TmuxManager.getInstance();
+    const fallback = tmux
+      .getAllSessions()
+      .find((session) => {
+        if (typeof session.cwd !== 'string' || session.cwd.length === 0) {
+          return false;
+        }
+        const sameProject = this.normalizeProjectKey(session.cwd) === projectKey;
+        if (!sameProject) {
+          return false;
+        }
+        return (session.terminalName || '').trim().toLowerCase() === normalizedName;
+      });
+
+    return fallback?.terminalId;
+  }
+
   /**
-   * Send a message to the webview to open a floating terminal window (called by MCP)
+   * Create an embedded terminal for a card (uses same tmux infrastructure as floating windows)
+   */
+  private async createCardTerminal(
+    projectPath: string,
+    clientId: string,
+    cols?: number,
+    rows?: number,
+    terminalId?: number,
+    terminalName?: string
+  ): Promise<void> {
+    try {
+      const tmux = TmuxManager.getInstance();
+      const tmuxAvailable = await tmux.isAvailable();
+
+      console.log(`[DashboardPanel] Creating card terminal for clientId: ${clientId}, projectPath: ${projectPath}`);
+
+      if (!tmuxAvailable) {
+        this.panel.webview.postMessage({
+          type: 'card:pty:error',
+          error: 'tmux is required for embedded terminals. Install with: brew install tmux',
+          clientId,
+        });
+        return;
+      }
+
+      let sessionName: string | undefined;
+      let sessionTerminalId: number | undefined;
+      let isReconnecting = false;
+
+      // Check if reconnecting to existing session
+      if (typeof terminalId === 'number') {
+        const tmuxInfo = tmux.getSessionByTerminalId(terminalId);
+        if (tmuxInfo?.sessionName) {
+          sessionName = tmuxInfo.sessionName;
+          sessionTerminalId = tmuxInfo.terminalId;
+          isReconnecting = true;
+          console.log(`[DashboardPanel] Card reconnecting to existing session: ${sessionName}`);
+        } else {
+          const info = this.terminalWatcher.getTerminal(terminalId);
+          if (info?.tmuxSession) {
+            sessionName = info.tmuxSession;
+            sessionTerminalId = info.id;
+            isReconnecting = true;
+            console.log(`[DashboardPanel] Card reconnecting to session from watcher: ${sessionName}`);
+          }
+        }
+      }
+
+      // Create new session if not reconnecting
+      if (!sessionName) {
+        sessionTerminalId = Date.now();
+        const requestedName =
+          typeof terminalName === 'string' && terminalName.trim()
+            ? terminalName.trim()
+            : projectPath.split('/').pop() || 'Terminal';
+        console.log(`[DashboardPanel] Creating card tmux session with terminalId: ${sessionTerminalId}`);
+        sessionName = await tmux.createSession(sessionTerminalId, requestedName, projectPath);
+        console.log(`[DashboardPanel] Card tmux session created: ${sessionName}`);
+      }
+
+      // Resize if dimensions provided
+      const hasSize = typeof cols === 'number' &&
+        typeof rows === 'number' &&
+        Number.isFinite(cols) &&
+        Number.isFinite(rows) &&
+        cols > 0 &&
+        rows > 0;
+      if (hasSize) {
+        await tmux.resizeSession(sessionName, cols, rows);
+      }
+
+      // Track this session
+      this.cardClientSessions.set(clientId, {
+        sessionName,
+        projectPath,
+        terminalId: sessionTerminalId || Date.now(),
+      });
+
+      const canonicalTerminalId = sessionTerminalId ?? terminalId;
+      const aliasName =
+        typeof terminalName === 'string' && terminalName.trim()
+          ? terminalName.trim()
+          : typeof canonicalTerminalId === 'number'
+            ? tmux.getSessionByTerminalId(canonicalTerminalId)?.terminalName
+            : undefined;
+      this.rememberCardTerminalAlias(projectPath, aliasName, canonicalTerminalId);
+
+      const reportedTerminalId = canonicalTerminalId;
+      const reportedTerminalName =
+        (typeof reportedTerminalId === 'number'
+          ? tmux.getSessionByTerminalId(reportedTerminalId)?.terminalName
+          : undefined) || aliasName || (projectPath.split('/').pop() || 'Terminal');
+
+      // Notify webview that card PTY is ready
+      this.panel.webview.postMessage({
+        type: 'card:pty:created',
+        id: clientId,
+        clientId,
+        pid: reportedTerminalId,
+        terminalName: reportedTerminalName,
+        tmuxSession: sessionName,
+        backend: 'tmux',
+        reconnect: isReconnecting,
+        projectPath,
+      });
+
+      // Give tmux a moment, then start streaming
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      console.log(`[DashboardPanel] Starting card stream for clientId: ${clientId}, session: ${sessionName}`);
+
+      // Start streaming tmux output to webview with an initial snapshot so
+      // new and reconnected card terminals always render prompt/cwd immediately.
+      await this.tmuxBridge.startStream(clientId, sessionName, {
+        onData: (payload) => {
+          if (!payload || typeof payload.text !== 'string') return;
+          this.panel.webview.postMessage({
+            type: 'card:pty:data',
+            id: clientId,
+            data: payload.text,
+            full: payload.full,
+            reconnect: isReconnecting,
+            projectPath,
+          });
+        },
+        onExit: () => {
+          this.panel.webview.postMessage({
+            type: 'card:pty:exit',
+            id: clientId,
+            code: 0,
+            projectPath,
+          });
+          this.cardClientSessions.delete(clientId);
+        },
+        onError: (error) => {
+          console.error(`[DashboardPanel] Card tmux stream error for ${clientId}:`, error);
+        },
+      }, { cols, rows }, false);
+
+      console.log(`[DashboardPanel] Card stream started for clientId: ${clientId}`);
+
+    } catch (error) {
+      console.error('Error creating card terminal:', error);
+      this.panel.webview.postMessage({
+        type: 'card:pty:error',
+        error: error instanceof Error ? error.message : 'Failed to create card terminal',
+        clientId,
+      });
+    }
+  }
+
+  /**
+   * Send data to a card terminal
+   */
+  private async sendToCardTerminal(clientId: string, projectPath: string, data: string): Promise<void> {
+    const session = this.cardClientSessions.get(clientId);
+    if (!session) {
+      return;
+    }
+
+    const tmux = TmuxManager.getInstance();
+    await tmux.sendKeys(session.sessionName, data, false);
+  }
+
+  /**
+   * Resize a card terminal
+   */
+  private async resizeCardTerminal(clientId: string, projectPath: string, cols?: number, rows?: number): Promise<void> {
+    const hasSize = typeof cols === 'number' &&
+      typeof rows === 'number' &&
+      Number.isFinite(cols) &&
+      Number.isFinite(rows) &&
+      cols > 0 &&
+      rows > 0;
+    if (!hasSize) {
+      return;
+    }
+
+    const session = this.cardClientSessions.get(clientId);
+    if (!session) {
+      return;
+    }
+
+    const tmux = TmuxManager.getInstance();
+    await tmux.resizeSession(session.sessionName, cols, rows);
+    this.tmuxBridge.updateSize(clientId, cols, rows);
+  }
+
+  /**
+   * Detach a card terminal (stop streaming but keep session alive)
+   */
+  private async detachCardTerminal(clientId: string, projectPath: string): Promise<void> {
+    const session = this.cardClientSessions.get(clientId);
+    if (!session) {
+      return;
+    }
+
+    await this.tmuxBridge.stopStream(clientId);
+    this.cardClientSessions.delete(clientId);
+    // Note: We don't kill the tmux session - it stays alive for reconnection
+  }
+
+  /**
+   * Kill a card terminal completely (stop streaming AND kill tmux session)
+   */
+  private async killCardTerminal(clientId: string, projectPath: string): Promise<void> {
+    const session = this.cardClientSessions.get(clientId);
+    if (!session) {
+      return;
+    }
+
+    const tmux = TmuxManager.getInstance();
+    await this.tmuxBridge.stopStream(clientId);
+    await tmux.killSession(session.sessionName).catch(() => {});
+    this.cardClientSessions.delete(clientId);
+    console.log(`[DashboardPanel] Killed card terminal session: ${session.sessionName}`);
+  }
+
+  /**
+   * Send a message to the webview to create an embedded terminal in a card (called by MCP)
    */
   public sendCreateEmbeddedTerminalMessage(projectPath: string, name?: string): void {
-    // Opens a floating window for the project (same as clicking the card)
+    console.log('[DashboardPanel] sendCreateEmbeddedTerminalMessage called:', projectPath, name);
+    console.log('[DashboardPanel] Panel visible:', this.panel.visible);
+    console.log('[DashboardPanel] Sending mcp:createEmbeddedTerminal message to webview');
     this.panel.webview.postMessage({
       type: 'mcp:createEmbeddedTerminal',
       projectPath,
       name,
     });
+    console.log('[DashboardPanel] Message posted to webview');
   }
 
   /**
-   * Get list of active floating window terminals (for MCP)
-   * These are terminals embedded in dashboard floating windows
+   * Open a project's card terminal visually (expand the card and show terminal)
+   * This is the main method for programmatically opening card terminals
    */
-  public getFloatingWindowTerminals(): Array<{ clientId: string; sessionName: string; projectPath: string; terminalId: number }> {
-    return Array.from(this.clientSessions.entries()).map(([clientId, session]) => ({
+  public async openCardTerminal(
+    projectPath: string,
+    options?: {
+      terminalName?: string;
+      terminalId?: number;
+      createNewTerminal?: boolean;
+    }
+  ): Promise<{ success: boolean; clientId?: string; error?: string }> {
+    console.log('[DashboardPanel] openCardTerminal called:', projectPath, options);
+
+    // First, make sure the panel is visible and focused
+    this.panel.reveal(vscode.ViewColumn.One);
+
+    // Record existing clientIds so we can detect NEW ones
+    const existingClientIds = new Set(this.getFloatingWindowTerminals().map((terminal) => terminal.clientId));
+    console.log('[DashboardPanel] Existing clientIds:', Array.from(existingClientIds));
+
+    // Send message to expand the card and create terminal
+    this.panel.webview.postMessage({
+      type: 'mcp:openCardTerminal',
+      projectPath,
+      terminalName: options?.terminalName,
+      terminalId: options?.terminalId,
+      createNewTerminal: options?.createNewTerminal,
+    });
+
+    // Wait for a NEW card terminal to be created.
+    // 8s avoids false timeouts when webview/card rendering is still settling.
+    const maxWait = 8000;
+    const pollInterval = 200;
+    let waited = 0;
+
+    while (waited < maxWait) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      waited += pollInterval;
+
+      // Check if a NEW collaborative terminal was created for this project
+      const newTerminal = this.getFloatingWindowTerminals().find(
+        (terminal) => terminal.projectPath === projectPath && !existingClientIds.has(terminal.clientId)
+      );
+
+      if (newTerminal) {
+        console.log('[DashboardPanel] NEW collaborative terminal created:', newTerminal.clientId);
+        return { success: true, clientId: newTerminal.clientId };
+      }
+    }
+
+    // Timeout - check if there's ANY terminal for this project (maybe it was already open visually)
+    const projectTerminals = this.getFloatingWindowTerminals().filter(
+      (terminal) => terminal.projectPath === projectPath
+    );
+    let anyTerminal: ReturnType<DashboardPanel['getFloatingWindowTerminals']>[number] | undefined;
+    if (typeof options?.terminalId === 'number') {
+      anyTerminal = projectTerminals.find(
+        (terminal) => terminal.terminalId === options.terminalId
+      );
+    }
+
+    if (!anyTerminal) {
+      anyTerminal = projectTerminals[0];
+    }
+
+    if (anyTerminal) {
+      console.log('[DashboardPanel] Found existing terminal after timeout:', anyTerminal.clientId);
+      return { success: true, clientId: anyTerminal.clientId };
+    }
+
+    // Timeout - terminal wasn't created
+    console.log('[DashboardPanel] Timeout waiting for card terminal');
+    return { success: false, error: 'Timeout waiting for card terminal to be created. Make sure the project exists in the dashboard.' };
+  }
+
+  /**
+   * Get list of active card terminals (for MCP)
+   */
+  public getCardTerminals(): Array<{ clientId: string; sessionName: string; projectPath: string; terminalId: number }> {
+    return Array.from(this.cardClientSessions.entries()).map(([clientId, session]) => ({
       clientId,
       ...session,
     }));
   }
 
   /**
-   * Read output from a floating window terminal's tmux session (for MCP)
+   * Read output from a card terminal's tmux session (for MCP)
    */
-  public async readFloatingWindowOutput(clientId: string, lines: number = 100): Promise<string | null> {
-    const session = this.clientSessions.get(clientId);
+  public async readCardTerminalOutput(clientId: string, lines: number = 100): Promise<string | null> {
+    const session = this.cardClientSessions.get(clientId);
     if (!session) {
       return null;
     }
@@ -591,17 +1144,21 @@ export class DashboardPanel {
   }
 
   /**
-   * Send text to a floating window terminal (for MCP)
+   * Send text to a card terminal (for MCP)
    */
-  public async sendToFloatingWindow(clientId: string, text: string, addNewLine: boolean = true): Promise<boolean> {
-    const session = this.clientSessions.get(clientId);
+  public async sendToCardTerminalByClientId(clientId: string, text: string): Promise<boolean> {
+    const session = this.cardClientSessions.get(clientId);
     if (!session) {
       return false;
     }
     const tmux = TmuxManager.getInstance();
-    await tmux.sendKeys(session.sessionName, text, addNewLine);
+    await tmux.sendKeys(session.sessionName, text);
     return true;
   }
+
+  // ==========================================
+  // End of Card Embedded Terminal Backend Methods
+  // ==========================================
 
   /**
    * Refresh all data and send to webview (debounced to prevent rapid calls)
@@ -623,10 +1180,32 @@ export class DashboardPanel {
 
     this.isRefreshing = true;
     try {
-      const projects = await this.agentDiscovery.discoverProjects();
+      const mirrorMode = this.isMirrorMode();
+      let projects: ProjectInfo[];
+
+      if (mirrorMode) {
+        const mirrored = await this.fetchMirrorProjects();
+        projects = mirrored ?? [];
+
+        if (!mirrored) {
+          // Fallback to local discovery if host state couldn't be fetched.
+          projects = await this.agentDiscovery.discoverProjects();
+        }
+      } else {
+        projects = await this.agentDiscovery.discoverProjects();
+      }
+
+      this.panel.webview.postMessage({
+        type: 'dashboard:mode',
+        mirrorMode,
+        hostLabel: this.mirrorHostLabel,
+      });
+
       this.panel.webview.postMessage({
         type: 'projectsUpdate',
         projects,
+        mirrorMode,
+        hostLabel: this.mirrorHostLabel,
       });
     } finally {
       this.isRefreshing = false;
@@ -635,6 +1214,21 @@ export class DashboardPanel {
         this.refreshDebounceTimer = undefined;
       }, 200);
     }
+  }
+
+  private scheduleEventRefresh(delayMs: number = 250): void {
+    if (!this.panel.visible) {
+      return;
+    }
+
+    if (this.eventRefreshTimer) {
+      return;
+    }
+
+    this.eventRefreshTimer = setTimeout(() => {
+      this.eventRefreshTimer = undefined;
+      void this.refreshData();
+    }, delayMs);
   }
 
   /**
@@ -874,35 +1468,32 @@ export class DashboardPanel {
   }
 
   /**
-   * Remove a project from tracking
+   * Remove a project from tracking and kill all its tmux sessions
    */
   private async removeProject(projectPath: string): Promise<void> {
+    const tmux = TmuxManager.getInstance();
+
+    // Kill all floating window sessions for this project
+    for (const [clientId, session] of this.clientSessions) {
+      if (session.projectPath === projectPath) {
+        await this.tmuxBridge.stopStream(clientId);
+        await tmux.killSession(session.sessionName).catch(() => {});
+        this.clientSessions.delete(clientId);
+      }
+    }
+
+    // Kill all card embedded sessions for this project
+    for (const [clientId, session] of this.cardClientSessions) {
+      if (session.projectPath === projectPath) {
+        await this.tmuxBridge.stopStream(clientId);
+        await tmux.killSession(session.sessionName).catch(() => {});
+        this.cardClientSessions.delete(clientId);
+      }
+    }
+
     this.agentDiscovery.removeProject(projectPath);
     this.agentDiscovery.clearProjectActivity(projectPath);
     await this.refreshData();
-  }
-
-  /**
-   * Start auto-refresh interval
-   */
-  private startAutoRefresh(): void {
-    if (this.updateInterval) return;
-
-    // Increased from 2s to 10s to reduce performance overhead
-    // Individual projects update via watch events, this is just for sync
-    this.updateInterval = setInterval(() => {
-      this.refreshData();
-    }, 10000); // Refresh every 10 seconds instead of 2
-  }
-
-  /**
-   * Stop auto-refresh interval
-   */
-  private stopAutoRefresh(): void {
-    if (this.updateInterval) {
-      clearInterval(this.updateInterval);
-      this.updateInterval = undefined;
-    }
   }
 
   /**
@@ -991,6 +1582,29 @@ export class DashboardPanel {
       font-weight: 600;
     }
 
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mode-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 999px;
+      border: 1px solid #2e6f40;
+      background: rgba(34, 197, 94, 0.14);
+      color: #7fe7a2;
+      letter-spacing: 0.2px;
+    }
+
+    .mode-badge.mirror {
+      border-color: #9d7b22;
+      background: rgba(234, 179, 8, 0.12);
+      color: #f3d26b;
+    }
+
     .header-actions {
       display: flex;
       gap: 8px;
@@ -1012,6 +1626,11 @@ export class DashboardPanel {
 
     .btn:hover {
       background: var(--bg-secondary);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
     }
 
     .btn-primary {
@@ -1053,6 +1672,11 @@ export class DashboardPanel {
 
     .card.attention .card-attention {
       opacity: 1;
+    }
+
+    .card.highlight-card {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 10px var(--accent-blue);
     }
 
     .card:hover {
@@ -1211,6 +1835,11 @@ export class DashboardPanel {
       background: var(--bg-tertiary);
     }
 
+    .add-card.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     .add-card-icon {
       font-size: 28px;
       color: var(--text-muted);
@@ -1220,6 +1849,129 @@ export class DashboardPanel {
     .add-card-text {
       font-size: 13px;
       color: var(--text-secondary);
+    }
+
+    /* Embedded terminal mode for cards */
+    .card[data-terminal-mode="embedded"] {
+      min-height: 360px;
+      grid-row: span 2;
+    }
+
+    .card.mcp-focus[data-terminal-mode="embedded"] {
+      grid-column: 1 / -1;
+      min-height: clamp(440px, 72vh, 860px);
+      grid-row: span 3;
+    }
+
+    .card-terminal-container {
+      height: 260px;
+      display: none;
+      flex-direction: column;
+      background: var(--terminal-bg);
+      margin: 0 12px 12px;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .card[data-terminal-mode="embedded"] .card-terminal-container {
+      display: flex;
+    }
+
+    .card.mcp-focus[data-terminal-mode="embedded"] .card-terminal-container {
+      height: min(64vh, 720px);
+    }
+
+    .card[data-terminal-mode="embedded"] .terminal-preview {
+      display: none;
+    }
+
+    .card-terminal-tabs {
+      display: flex;
+      background: #1a1a1a;
+      border-bottom: 1px solid #333;
+      min-height: 28px;
+      overflow-x: auto;
+    }
+
+    .card-terminal-tab {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      font-size: 10px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-right: 1px solid #333;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+
+    .card-terminal-tab:hover {
+      background: #252525;
+      color: var(--text-primary);
+    }
+
+    .card-terminal-tab.active {
+      background: var(--terminal-bg);
+      color: var(--text-primary);
+    }
+
+    .card-terminal-tab .close-tab {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      opacity: 0;
+      transition: all 0.15s;
+    }
+
+    .card-terminal-tab:hover .close-tab,
+    .card-terminal-tab.active .close-tab {
+      opacity: 1;
+    }
+
+    .card-terminal-tab .close-tab:hover {
+      background: var(--accent-red);
+      color: white;
+    }
+
+    .card-terminal-tab.new-tab {
+      color: var(--text-muted);
+      padding: 4px 8px;
+    }
+
+    .card-terminal-tab.new-tab:hover {
+      color: var(--accent-green);
+    }
+
+    .card-xterm-wrapper {
+      flex: 1;
+      padding: 4px;
+      overflow: hidden;
+    }
+
+    .card-xterm-wrapper .xterm {
+      height: 100%;
+    }
+
+    .card-btn.expand {
+      font-size: 14px;
+    }
+
+    .card-btn.expand:hover {
+      background: var(--accent-blue);
+      color: white;
+    }
+
+    .card[data-terminal-mode="embedded"] .card-btn.expand {
+      transform: rotate(180deg);
     }
 
     /* Floating workspace */
@@ -1510,6 +2262,11 @@ export class DashboardPanel {
       background: var(--accent-yellow);
     }
 
+    .status-dot-small.waiting_input {
+      background: var(--accent-yellow);
+      animation: pulse 1s infinite;
+    }
+
     .status-dot-small.idle {
       background: var(--text-muted);
     }
@@ -1518,8 +2275,75 @@ export class DashboardPanel {
       background: var(--accent-green);
     }
 
+    .status-dot-small.processing {
+      background: var(--accent-blue);
+      animation: pulse 1.5s infinite;
+    }
+
+    .status-dot-small.completed {
+      background: var(--accent-green);
+    }
+
+    .status-dot-small.error {
+      background: var(--accent-red);
+    }
+
+    .status-dot-small.context_warning {
+      background: #ffaa00;
+      animation: pulse 2s infinite;
+    }
+
     .status-dot-small.disconnected {
-      background: var(--text-muted);
+      background: var(--accent-red);
+    }
+
+    .webview-notifications {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 45;
+      pointer-events: none;
+      max-width: 320px;
+    }
+
+    .webview-toast {
+      background: rgba(22, 27, 34, 0.96);
+      border: 1px solid var(--border-color);
+      border-left: 4px solid var(--accent-blue);
+      border-radius: 6px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+      color: var(--text-primary);
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.3;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.16s ease, transform 0.16s ease;
+      pointer-events: auto;
+    }
+
+    .webview-toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .webview-toast.waiting_input {
+      border-left-color: var(--accent-yellow);
+    }
+
+    .webview-toast.completed {
+      border-left-color: var(--accent-green);
+    }
+
+    .webview-toast.error {
+      border-left-color: var(--accent-red);
+    }
+
+    .webview-toast.context_warning {
+      border-left-color: #ffaa00;
     }
 
     /* Scrollbar */
@@ -1544,7 +2368,10 @@ export class DashboardPanel {
 </head>
 <body>
   <div class="header">
-    <h1>Xerebro</h1>
+    <div class="header-title">
+      <h1>Xerebro</h1>
+      <span class="mode-badge" id="modeBadge">Primary</span>
+    </div>
     <div class="header-actions">
       <button class="btn btn-primary" id="addProjectBtn">+ Add Project</button>
       <button class="btn" id="refreshBtn">Refresh</button>
@@ -1562,6 +2389,7 @@ export class DashboardPanel {
   </div>
 
   <div class="window-dock" id="windowDock"></div>
+  <div class="webview-notifications" id="webviewNotifications"></div>
 
   <script src="${terminalJsUri}" nonce="${nonce}"></script>
   <script nonce="${nonce}">
@@ -1574,6 +2402,10 @@ export class DashboardPanel {
     const addCard = document.getElementById('addCard');
     const windowLayer = document.getElementById('windowLayer');
     const windowDock = document.getElementById('windowDock');
+    const webviewNotifications = document.getElementById('webviewNotifications');
+    const addProjectBtn = document.getElementById('addProjectBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const modeBadge = document.getElementById('modeBadge');
 
     const windows = new Map();
     const projectWindows = new Map();
@@ -1581,6 +2413,12 @@ export class DashboardPanel {
     const pendingPty = new Map();
     const pendingPtyData = new Map();
     const projectCardByPath = new Map();
+
+    // Embedded card terminal state tracking
+    const cardTerminals = new Map(); // projectPath -> CardTerminalState
+    const cardPendingPty = new Map(); // clientId -> { projectPath }
+    const ptyToCard = new Map(); // ptyId -> projectPath
+    const pendingMcpCardOpens = new Map(); // projectPath -> MCP open options
 
     // Drag and drop state for project cards
     let draggedProjectPath = null;
@@ -1591,6 +2429,7 @@ export class DashboardPanel {
     const projectLivePreviewAt = new Map();
     const projectLivePreviewText = new Map();
     const projectPreviewLines = new Map();
+    const projectNotificationAt = new Map();
 
     const attentionIdleMs = 1200;
     const attentionCooldownMs = 2000;
@@ -1604,6 +2443,7 @@ export class DashboardPanel {
     const previewThrottleMs = 500; // Increased from 120ms to reduce flickering
     const previewUpdateDebounceMs = 800; // Wait for terminal to be idle before updating preview
     const activityRefreshMs = 10000;
+    const notificationThrottleMs = 3000;
     const previewFontSizing = {
       min: 5,
       max: 8,
@@ -1614,6 +2454,9 @@ export class DashboardPanel {
     };
 
     let audioContext = null;
+    let mirrorMode = false;
+    let mirrorHostLabel = '';
+    let lastMirrorNoticeAt = 0;
 
     let windowCounter = 0;
     let clientCounter = 0;
@@ -1629,18 +2472,83 @@ export class DashboardPanel {
       startTop: 0
     };
 
+    function applyDashboardMode() {
+      if (modeBadge) {
+        if (mirrorMode) {
+          modeBadge.classList.add('mirror');
+          modeBadge.textContent = mirrorHostLabel ? ('Mirror: ' + mirrorHostLabel) : 'Mirror';
+          modeBadge.title = mirrorHostLabel
+            ? ('Read-only mirror of host window (' + mirrorHostLabel + ')')
+            : 'Read-only mirror of host window';
+        } else {
+          modeBadge.classList.remove('mirror');
+          modeBadge.textContent = 'Primary';
+          modeBadge.title = 'Primary dashboard window';
+        }
+      }
+
+      if (addProjectBtn) {
+        addProjectBtn.disabled = mirrorMode;
+        addProjectBtn.title = mirrorMode
+          ? 'Read-only mirror mode. Add projects in the host dashboard window.'
+          : 'Add project';
+      }
+
+      if (addCard) {
+        addCard.classList.toggle('disabled', mirrorMode);
+        addCard.title = mirrorMode
+          ? 'Read-only mirror mode. Add projects in the host dashboard window.'
+          : 'Add Project';
+      }
+    }
+
+    function showMirrorModeNotice() {
+      if (!mirrorMode) return;
+      const now = Date.now();
+      if (now - lastMirrorNoticeAt < 2200) return;
+      lastMirrorNoticeAt = now;
+
+      if (!webviewNotifications) return;
+      const toast = document.createElement('div');
+      toast.className = 'webview-toast waiting_input';
+      const hostSuffix = mirrorHostLabel ? (' (' + mirrorHostLabel + ')') : '';
+      toast.textContent = 'Read-only mirror mode. Control from host dashboard' + hostSuffix;
+      webviewNotifications.appendChild(toast);
+      requestAnimationFrame(() => toast.classList.add('show'));
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 180);
+      }, 2600);
+    }
+
     // Event Listeners
-    document.getElementById('addProjectBtn').addEventListener('click', () => {
-      vscode.postMessage({ command: 'addProject' });
-    });
+    if (addProjectBtn) {
+      addProjectBtn.addEventListener('click', () => {
+        if (mirrorMode) {
+          showMirrorModeNotice();
+          return;
+        }
+        vscode.postMessage({ command: 'addProject' });
+      });
+    }
 
-    document.getElementById('addCard').addEventListener('click', () => {
-      vscode.postMessage({ command: 'addProject' });
-    });
+    if (addCard) {
+      addCard.addEventListener('click', () => {
+        if (mirrorMode) {
+          showMirrorModeNotice();
+          return;
+        }
+        vscode.postMessage({ command: 'addProject' });
+      });
+    }
 
-    document.getElementById('refreshBtn').addEventListener('click', () => {
-      vscode.postMessage({ command: 'refresh' });
-    });
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        vscode.postMessage({ command: 'refresh' });
+      });
+    }
+
+    applyDashboardMode();
 
     document.addEventListener('mousedown', (event) => {
       if (event.button !== 0) return;
@@ -1675,9 +2583,26 @@ export class DashboardPanel {
 
       switch (message.type) {
         case 'projectsUpdate':
+          if (typeof message.mirrorMode === 'boolean') {
+            mirrorMode = message.mirrorMode;
+          }
+          if (typeof message.hostLabel === 'string') {
+            mirrorHostLabel = message.hostLabel;
+          }
+          applyDashboardMode();
           projects = message.projects || [];
           renderProjects();
           reconcileWindows();
+          break;
+
+        case 'dashboard:mode':
+          if (typeof message.mirrorMode === 'boolean') {
+            mirrorMode = message.mirrorMode;
+          }
+          if (typeof message.hostLabel === 'string') {
+            mirrorHostLabel = message.hostLabel;
+          }
+          applyDashboardMode();
           break;
 
         case 'terminalOutput':
@@ -1702,12 +2627,42 @@ export class DashboardPanel {
           handlePtyError(message);
           break;
 
+        // Card embedded terminal messages
+        case 'card:pty:created':
+          handleCardPtyCreated(message);
+          break;
+
+        case 'card:pty:data':
+          handleCardPtyData(message);
+          break;
+
+        case 'card:pty:exit':
+          handleCardPtyExit(message);
+          break;
+
+        case 'card:pty:error':
+          handleCardPtyError(message);
+          break;
+
         case 'mcp:createEmbeddedTerminal':
-          // Open floating window (same as clicking the card)
-          const mcpProject = projects.find(p => p.path === message.projectPath);
-          if (mcpProject) {
-            openWindow(mcpProject);
-          }
+          console.log('[Dashboard] Received mcp:createEmbeddedTerminal message:', message);
+          // Report back to extension for debugging
+          vscode.postMessage({ command: 'debug:log', message: 'Webview received mcp:createEmbeddedTerminal for: ' + message.projectPath });
+          expandCardTerminalByMcp(message.projectPath, message.name);
+          break;
+
+        case 'mcp:openCardTerminal':
+          console.log('[Dashboard] Received mcp:openCardTerminal message:', message);
+          handleMcpOpenCardTerminal(message.projectPath, {
+            terminalName: message.terminalName,
+            terminalId: message.terminalId,
+            createNewTerminal: message.createNewTerminal,
+          });
+          break;
+
+        case 'mcp:scrollToCard':
+          console.log('[Dashboard] Received mcp:scrollToCard message:', message);
+          scrollToCard(message.projectPath);
           break;
 
         case 'projectsOrderUpdate':
@@ -1727,21 +2682,6 @@ export class DashboardPanel {
       });
       refreshPreviewFonts();
     });
-
-    // Increased from 4s to 8s to reduce performance overhead with multiple windows
-    setInterval(() => {
-      if (document.hidden) {
-        return;
-      }
-      windows.forEach((windowState) => {
-        if (!windowState || !windowState.isReady) {
-          return;
-        }
-        if (windowState.activity && windowState.activity !== 'idle') {
-          reportActivity(windowState, windowState.activity);
-        }
-      });
-    }, 8000);
 
     window.addEventListener('mousemove', (e) => {
       if (!dragState.windowId) return;
@@ -2155,19 +3095,145 @@ export class DashboardPanel {
       setLivePreview(windowState.project.path, previewText);
     }
 
-    function outputIndicatesWaiting(text) {
+    function outputIndicatesProcessing(text) {
       return [
+        /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/,
+        /Thinking\\.\\.\\./i,
+        /Processing\\.\\.\\./i,
+        /Working on/i,
+        /Reading\\s+\\S+/i,
+        /Writing\\s+\\S+/i,
+        /Searching\\s+\\S*/i,
+        /Analyzing/i,
+        /Compiling/i,
+        /Building/i,
+        /Calling\\s+\\w+/i,
+        /Using\\s+\\w+\\s+tool/i,
+        /Executing/i,
+        /━+.*\\d+%/,
+      ].some((pattern) => pattern.test(text));
+    }
+
+    function outputIndicatesSelectionPrompt(text) {
+      const lastFewLines = text.split('\\n').slice(-12).join('\\n');
+      return [
+        /Select.*:/i,
+        /Choose.*:/i,
+        /Pick.*:/i,
+        /Options:/i,
+        /\\[.*\\(Recommended\\)\\]/i,
+        /❯\\s*\\[/,
+        /^\\s*>\\s*\\[/m,
+      ].some((pattern) => pattern.test(lastFewLines));
+    }
+
+    function outputIndicatesWaitingInput(text) {
+      const lastFewLines = text.split('\\n').slice(-12).join('\\n');
+      return [
+        /\\?\\s*$/m,
+        /\\[Y\\/n\\]|\\[y\\/N\\]/i,
+        /\\(y\\/n\\)/i,
+        /Enter\\s+(?:your|a|the)\\s+\\w+:/i,
+        /Input\\s+\\w*:/i,
+        /What would you like/i,
+        /How should I/i,
+        /Should I\\s+\\w+\\?/i,
+        /Do you want\\s+/i,
+        /Would you like\\s+/i,
+        /Which\\s+\\w+\\s+(?:would|should|do)/i,
+        /Please\\s+(?:select|choose|pick|enter)/i,
+        /Press.*to continue/i,
+        /Confirm/i,
+        /Proceed\\?/i,
+        /Continue\\?/i,
+        /Approve.*\\?/i,
+        /Accept.*\\?/i,
         /waiting for (?:input|response)/i,
-        /press (?:enter|return|any key)/i,
-        /continue\\?\\s*(?:\\(?y\\/n\\)?|\\[y\\/n\\])?/i,
-        /\\by\\/n\\??\\b/i,
-        /type (?:a|your) (?:message|prompt|response)/i,
-        /enter (?:your )?(?:message|prompt|response)/i,
         /awaiting (?:input|response)/i,
         /ready for (?:input|your)/i,
-        /your move/i,
-        /type move/i
-      ].some((pattern) => pattern.test(text));
+      ].some((pattern) => pattern.test(lastFewLines));
+    }
+
+    function outputIndicatesCompleted(text) {
+      const lastFewLines = text.split('\\n').slice(-12).join('\\n');
+      return [
+        /✓\\s+(?:Task|Done|Complete|Finished)/i,
+        /✔/,
+        /Task\\s+completed/i,
+        /Successfully\\s+(?:created|updated|fixed|completed)/i,
+        /All\\s+\\d+\\s+\\w+\\s+(?:fixed|updated|created|completed)/i,
+        /Finished\\s+(?:processing|running|executing)/i,
+        /Done[.!]?$/im,
+        /Completed[.!]?$/im,
+      ].some((pattern) => pattern.test(lastFewLines));
+    }
+
+    function outputIndicatesError(text) {
+      const lastFewLines = text.split('\\n').slice(-15).join('\\n');
+      return [
+        /Error:\\s+\\S+/i,
+        /Failed\\s+to\\s+/i,
+        /✗\\s+/,
+        /❌/,
+        /FATAL/i,
+        /Exception:\\s+/i,
+        /Traceback/i,
+        /panic:/i,
+        /Command\\s+failed/i,
+      ].some((pattern) => pattern.test(lastFewLines));
+    }
+
+    function outputIndicatesContextWarning(text) {
+      const match = text.match(/(\\d+)%\\s*(?:context|used)|(\\d+)k\\/(\\d+)k\\s*tokens?\\s*\\((\\d+)%\\)/i);
+      if (!match) return false;
+      const percentage = parseInt(match[1] || match[4] || '0', 10);
+      return Number.isFinite(percentage) && percentage > 80;
+    }
+
+    function getLastNonEmptyLine(text) {
+      const lines = (text || '').replace(/\\r/g, '\\n').split('\\n');
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        const line = lines[i].trim();
+        if (line) {
+          return lines[i];
+        }
+      }
+      return '';
+    }
+
+    function classifyActivitySignal(text) {
+      const recent = (text || '').slice(-1800);
+      if (!recent.trim()) {
+        return { activity: 'idle', detail: null };
+      }
+
+      if (outputIndicatesContextWarning(recent)) {
+        return { activity: 'context_warning', detail: null };
+      }
+
+      if (outputIndicatesError(recent)) {
+        return { activity: 'error', detail: null };
+      }
+
+      if (outputIndicatesWaitingInput(recent)) {
+        const detail = outputIndicatesSelectionPrompt(recent) ? 'selection' : 'input';
+        return { activity: 'waiting_input', detail };
+      }
+
+      if (outputIndicatesCompleted(recent)) {
+        return { activity: 'completed', detail: null };
+      }
+
+      if (outputIndicatesProcessing(recent)) {
+        return { activity: 'processing', detail: null };
+      }
+
+      const lastLine = getLastNonEmptyLine(recent);
+      if (looksLikePrompt(lastLine)) {
+        return { activity: 'idle', detail: null };
+      }
+
+      return { activity: 'running', detail: null };
     }
 
     function looksLikePrompt(line) {
@@ -2179,31 +3245,110 @@ export class DashboardPanel {
 
     function setWindowStatus(windowState, state, label) {
       if (!windowState || !windowState.statusDot || !windowState.statusText) return;
-      windowState.statusDot.classList.remove('disconnected', 'running', 'waiting', 'idle');
+      windowState.statusDot.classList.remove(
+        'disconnected',
+        'running',
+        'waiting',
+        'idle',
+        'processing',
+        'waiting_input',
+        'completed',
+        'error',
+        'context_warning'
+      );
       windowState.statusDot.classList.add(state);
       windowState.statusText.textContent = label;
     }
 
-    function reportActivity(windowState, activity) {
-      if (!windowState || !windowState.project) return;
+    function getActivityLabel(activity, detail) {
+      if (activity === 'waiting_input') {
+        return detail === 'selection' ? 'Selection required' : 'Needs input';
+      }
+      if (activity === 'processing') return 'Processing...';
+      if (activity === 'completed') return 'Completed';
+      if (activity === 'error') return 'Error detected';
+      if (activity === 'context_warning') return 'Context warning';
+      if (activity === 'running') return 'Running';
+      if (activity === 'waiting') return 'Waiting for input';
+      return 'Idle';
+    }
+
+    function isAttentionActivity(activity) {
+      return activity === 'waiting_input' || activity === 'error' || activity === 'context_warning';
+    }
+
+    function isNotifiableActivity(activity) {
+      return isAttentionActivity(activity) || activity === 'completed';
+    }
+
+    function shouldThrottleProjectNotification(projectPath, activity) {
+      const key = projectPath + ':' + activity;
       const now = Date.now();
-      if (windowState.activity === activity && now - windowState.lastActivitySentAt < activityRefreshMs) {
+      const last = projectNotificationAt.get(key) || 0;
+      if (now - last < notificationThrottleMs) {
+        return true;
+      }
+      projectNotificationAt.set(key, now);
+      return false;
+    }
+
+    function showWebviewNotification(projectName, activity, detail) {
+      if (!webviewNotifications) {
         return;
       }
-      windowState.activity = activity;
-      windowState.lastActivitySentAt = now;
-      if (activity === 'waiting') {
-        setWindowStatus(windowState, 'waiting', 'Waiting for input');
-      } else if (activity === 'running') {
-        setWindowStatus(windowState, 'running', 'Running');
-      } else {
-        setWindowStatus(windowState, 'idle', 'Idle');
+
+      let message = 'Status updated';
+      if (activity === 'waiting_input') {
+        message = detail === 'selection' ? 'Selection required' : 'Needs your input';
+      } else if (activity === 'completed') {
+        message = 'Task completed';
+      } else if (activity === 'error') {
+        message = 'Error detected';
+      } else if (activity === 'context_warning') {
+        message = 'Context is getting full';
+      } else if (activity === 'processing') {
+        message = 'Processing...';
       }
+
+      const toast = document.createElement('div');
+      toast.className = 'webview-toast ' + activity;
+      toast.textContent = '[' + projectName + '] ' + message;
+      webviewNotifications.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.add('show');
+      });
+
+      setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+          toast.remove();
+        }, 180);
+      }, 3000);
+    }
+
+    function reportActivity(windowState, activity, detail) {
+      if (!windowState || !windowState.project) return;
+      const normalizedActivity = activity === 'waiting' ? 'waiting_input' : activity;
+      const now = Date.now();
+      if (windowState.activity === normalizedActivity && now - windowState.lastActivitySentAt < activityRefreshMs) {
+        return;
+      }
+
+      const previousActivity = windowState.activity;
+      windowState.activity = normalizedActivity;
+      windowState.lastActivitySentAt = now;
+      setWindowStatus(windowState, normalizedActivity, getActivityLabel(normalizedActivity, detail));
+
       vscode.postMessage({
         command: 'projectActivity',
         projectPath: windowState.project.path,
-        activity
+        activity: normalizedActivity
       });
+
+      if (isNotifiableActivity(normalizedActivity) && previousActivity !== normalizedActivity) {
+        maybeNotify(windowState, normalizedActivity, detail);
+      }
     }
 
     function setProjectAttention(projectPath, enabled) {
@@ -2216,6 +3361,54 @@ export class DashboardPanel {
       const card = projectCardByPath.get(projectPath);
       if (card) {
         card.classList.toggle('attention', enabled);
+      }
+    }
+
+    function getProjectNameByPath(projectPath) {
+      const project = projects.find((p) => p.path === projectPath);
+      if (project && project.name) {
+        return project.name;
+      }
+      if (!projectPath) {
+        return 'Project';
+      }
+      const segments = projectPath.split('/');
+      return segments[segments.length - 1] || projectPath;
+    }
+
+    function reportCardActivity(cardState, activity, detail) {
+      if (!cardState || !cardState.projectPath) {
+        return;
+      }
+
+      const normalizedActivity = activity === 'waiting' ? 'waiting_input' : activity;
+      const now = Date.now();
+      if (cardState.activity === normalizedActivity && now - cardState.lastActivitySentAt < activityRefreshMs) {
+        return;
+      }
+
+      const previousActivity = cardState.activity;
+      cardState.activity = normalizedActivity;
+      cardState.lastActivitySentAt = now;
+
+      if (normalizedActivity === 'running' || normalizedActivity === 'idle' || normalizedActivity === 'processing') {
+        setProjectAttention(cardState.projectPath, false);
+      } else if (isAttentionActivity(normalizedActivity)) {
+        setProjectAttention(cardState.projectPath, true);
+      }
+
+      vscode.postMessage({
+        command: 'projectActivity',
+        projectPath: cardState.projectPath,
+        activity: normalizedActivity
+      });
+
+      if (isNotifiableActivity(normalizedActivity) && previousActivity !== normalizedActivity) {
+        if (shouldThrottleProjectNotification(cardState.projectPath, normalizedActivity)) {
+          return;
+        }
+        showWebviewNotification(getProjectNameByPath(cardState.projectPath), normalizedActivity, detail);
+        playBeep();
       }
     }
 
@@ -2241,9 +3434,10 @@ export class DashboardPanel {
       setProjectAttention(windowState.project.path, false);
     }
 
-    function maybeNotify(windowState) {
-      if (!windowState || windowState.needsAttention) return;
+    function maybeNotify(windowState, activity, detail) {
+      if (!windowState || !windowState.project || !isNotifiableActivity(activity)) return;
 
+      const attentionNeeded = isAttentionActivity(activity);
       if (!windowState.minimized && windowState.id === activeWindowId) {
         return;
       }
@@ -2252,9 +3446,16 @@ export class DashboardPanel {
       if (now - windowState.lastAttentionAt < attentionCooldownMs) {
         return;
       }
+      if (shouldThrottleProjectNotification(windowState.project.path, activity)) {
+        return;
+      }
 
       windowState.lastAttentionAt = now;
-      setWindowAttention(windowState);
+      if (attentionNeeded) {
+        setWindowAttention(windowState);
+      }
+
+      showWebviewNotification(windowState.project.name, activity, detail);
       playBeep();
     }
 
@@ -2271,12 +3472,9 @@ export class DashboardPanel {
           return;
         }
 
-        const lines = windowState.outputTail.replace(/\\r/g, '\\n').split('\\n');
-        const lastLine = lines[lines.length - 1] || '';
-
-        if (looksLikePrompt(lastLine)) {
-          reportActivity(windowState, 'waiting');
-          maybeNotify(windowState);
+        const signal = classifyActivitySignal(windowState.outputTail);
+        if (signal.activity === 'idle') {
+          reportActivity(windowState, 'idle', signal.detail);
         }
       }, attentionIdleMs);
     }
@@ -2323,13 +3521,8 @@ export class DashboardPanel {
         // Use debounced preview update to reduce flickering
         schedulePreviewUpdate(windowState);
 
-        if (outputIndicatesWaiting(strippedText) || outputIndicatesWaiting(windowState.outputTail)) {
-          reportActivity(windowState, 'waiting');
-          maybeNotify(windowState);
-          return;
-        }
-
-        reportActivity(windowState, 'running');
+        const signal = classifyActivitySignal(windowState.outputTail);
+        reportActivity(windowState, signal.activity, signal.detail);
       }
 
       scheduleIdleAttention(windowState);
@@ -2530,7 +3723,8 @@ export class DashboardPanel {
         cols: windowState.term ? windowState.term.cols : 80,
         rows: windowState.term ? windowState.term.rows : 24,
         clientId: clientId,
-        terminalId: session.terminalId || null
+        terminalId: session.terminalId || null,
+        terminalName: session.name || null
       });
 
       startConnectTimer(windowState, cwd);
@@ -2562,6 +3756,20 @@ export class DashboardPanel {
           projectLivePreviewAt.delete(path);
         }
       });
+      Array.from(cardTerminals.keys()).forEach((path) => {
+        if (!activePaths.has(path)) {
+          const stale = cardTerminals.get(path);
+          if (stale) {
+            disposeCardTerminalRuntime(stale);
+          }
+          cardTerminals.delete(path);
+        }
+      });
+      Array.from(pendingMcpCardOpens.keys()).forEach((path) => {
+        if (!activePaths.has(path)) {
+          pendingMcpCardOpens.delete(path);
+        }
+      });
 
       projects.forEach(project => {
         const card = createProjectCard(project);
@@ -2582,6 +3790,9 @@ export class DashboardPanel {
           fitPreviewText(preview);
         }
       });
+
+      restoreExpandedCardTerminals();
+      processPendingMcpCardOpens();
     }
 
     function reconcileWindows() {
@@ -2602,6 +3813,11 @@ export class DashboardPanel {
 
     // Drag and drop handlers for project cards
     function handleDragStart(e, projectPath) {
+      if (mirrorMode) {
+        e.preventDefault();
+        showMirrorModeNotice();
+        return;
+      }
       draggedProjectPath = projectPath;
       draggedCard = e.currentTarget;
       e.currentTarget.classList.add('dragging');
@@ -2724,7 +3940,8 @@ export class DashboardPanel {
       const card = document.createElement('div');
       card.className = 'card';
       card.dataset.projectPath = project.path;
-      card.draggable = true;
+      card.draggable = !mirrorMode;
+      const cardState = cardTerminals.get(project.path);
 
       // Add drag event listeners
       card.addEventListener('dragstart', (e) => handleDragStart(e, project.path));
@@ -2735,8 +3952,30 @@ export class DashboardPanel {
 
       // Make entire card clickable to open window (except for interactive elements)
       card.addEventListener('click', (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
         // Don't open if clicking on buttons or during drag
-        if (e.target.tagName === 'BUTTON' || e.target.closest('button')) {
+        if (target.tagName === 'BUTTON' || target.closest('button')) {
+          return;
+        }
+        // Keep terminal interactions in-place. Clicking inside embedded/card terminals should
+        // never trigger "open window" because that steals focus from xterm input.
+        if (
+          target.closest('.card-terminal-container') ||
+          target.closest('.card-terminal-tabs') ||
+          target.closest('.card-xterm-wrapper') ||
+          target.closest('.xterm')
+        ) {
+          return;
+        }
+        // When a card is already expanded in embedded mode, don't auto-open floating windows.
+        if (card.dataset.terminalMode === 'embedded') {
+          return;
+        }
+        if (mirrorMode) {
+          showMirrorModeNotice();
           return;
         }
         openWindow(project);
@@ -2770,6 +4009,9 @@ export class DashboardPanel {
       const isActive = activity === 'running' || activity === 'processing';
       const needsAttention = activity === 'waiting_input' || activity === 'error' || activity === 'context_warning';
       let terminalCount = project.terminals ? project.terminals.length : 0;
+      if (cardState && Array.isArray(cardState.sessions) && cardState.sessions.length > terminalCount) {
+        terminalCount = cardState.sessions.length;
+      }
       const openWindowId = projectWindows.get(project.path);
       if (openWindowId && windows.has(openWindowId)) {
         const windowState = windows.get(openWindowId);
@@ -2795,6 +4037,7 @@ export class DashboardPanel {
       closeBtn.title = 'Remove project';
       closeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
+        collapseCardTerminal(project.path);
         closeWindowByProject(project.path);
         vscode.postMessage({ command: 'removeProject', projectPath: project.path });
       });
@@ -2831,8 +4074,11 @@ export class DashboardPanel {
       const preview = document.createElement('div');
       preview.className = 'terminal-preview';
       const firstTerminal = project.terminals && project.terminals[0];
+      const activeCardSession = cardState && Array.isArray(cardState.sessions) && cardState.sessions.length > 0
+        ? cardState.sessions[Math.min(cardState.activeSessionIndex || 0, cardState.sessions.length - 1)]
+        : null;
       const livePreview = projectLivePreviewText.get(project.path);
-      const previewText = livePreview || (firstTerminal && firstTerminal.lastOutput) || '$ _';
+      const previewText = livePreview || (activeCardSession && activeCardSession.outputTail) || (firstTerminal && firstTerminal.lastOutput) || '$ _';
       if (hasAnsiCodes(previewText)) {
         preview.innerHTML = ansiToHtml(previewText);
       } else {
@@ -2842,13 +4088,859 @@ export class DashboardPanel {
       updatePreviewLineCount(project.path, preview);
       cardBody.appendChild(preview);
 
+      // Embedded terminal container (hidden by default)
+      const terminalContainer = document.createElement('div');
+      terminalContainer.className = 'card-terminal-container';
+      terminalContainer.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        if (mirrorMode) {
+          showMirrorModeNotice();
+          return;
+        }
+        const active = cardTerminals.get(project.path);
+        if (active && active.term) {
+          active.term.focus();
+        }
+      });
+      terminalContainer.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (mirrorMode) {
+          showMirrorModeNotice();
+          return;
+        }
+        const active = cardTerminals.get(project.path);
+        if (active && active.term) {
+          active.term.focus();
+        }
+      });
+
+      const terminalTabs = document.createElement('div');
+      terminalTabs.className = 'card-terminal-tabs';
+
+      const xtermWrapper = document.createElement('div');
+      xtermWrapper.className = 'card-xterm-wrapper';
+
+      terminalContainer.appendChild(terminalTabs);
+      terminalContainer.appendChild(xtermWrapper);
+      cardBody.appendChild(terminalContainer);
+
       card.appendChild(cardBody);
 
       return card;
     }
 
     // ==========================================
-    // Floating Window Functions
+    // Embedded Card Terminal Functions
+    // ==========================================
+
+    function toggleCardTerminal(projectPath) {
+      const cardState = cardTerminals.get(projectPath);
+      if (cardState && cardState.isExpanded) {
+        collapseCardTerminal(projectPath);
+      } else {
+        expandCardTerminal(projectPath);
+      }
+    }
+
+    function disposeCardTerminalRuntime(cardState) {
+      if (!cardState) return;
+
+      // Detach PTY but keep tmux session alive for reconnection.
+      if (cardState.ptyId) {
+        vscode.postMessage({ command: 'card:pty:detach', id: cardState.ptyId, projectPath: cardState.projectPath });
+        ptyToCard.delete(cardState.ptyId);
+        cardState.ptyId = null;
+      }
+
+      if (cardState.clientId) {
+        cardPendingPty.delete(cardState.clientId);
+        cardState.clientId = null;
+      }
+
+      // Dispose xterm runtime and keep a preview snapshot.
+      if (cardState.term) {
+        const snapshot = getTerminalSnapshot(cardState.term, previewLineCount);
+        if (snapshot) {
+          setLivePreview(cardState.projectPath, snapshot);
+        }
+        cardState.term.dispose();
+        cardState.term = null;
+      }
+
+      if (cardState.resizeObserver) {
+        cardState.resizeObserver.disconnect();
+        cardState.resizeObserver = null;
+      }
+
+      cardState.fitAddon = null;
+      cardState.isReady = false;
+    }
+
+    function restoreExpandedCardTerminals() {
+      cardTerminals.forEach((cardState, projectPath) => {
+        if (!cardState || !cardState.isExpanded) {
+          return;
+        }
+
+        const card = projectCardByPath.get(projectPath);
+        if (!card) {
+          return;
+        }
+
+        const project = projects.find((p) => p.path === projectPath);
+        if (project) {
+          cardState.project = project;
+        }
+
+        card.dataset.terminalMode = 'embedded';
+        disposeCardTerminalRuntime(cardState);
+        renderCardTerminalTabs(cardState);
+        initializeCardTerminal(cardState);
+      });
+    }
+
+    function processPendingMcpCardOpens() {
+      if (pendingMcpCardOpens.size === 0) {
+        return;
+      }
+
+      pendingMcpCardOpens.forEach((options, projectPath) => {
+        if (!projectCardByPath.has(projectPath)) {
+          return;
+        }
+        pendingMcpCardOpens.delete(projectPath);
+        handleMcpOpenCardTerminal(projectPath, options || {});
+      });
+    }
+
+    function expandCardTerminal(projectPath) {
+      console.log('[Dashboard] expandCardTerminal called:', projectPath);
+      console.log('[Dashboard] projectCardByPath keys:', Array.from(projectCardByPath.keys()));
+      const card = projectCardByPath.get(projectPath);
+      if (!card) {
+        console.log('[Dashboard] Card not found for path:', projectPath);
+        return;
+      }
+      console.log('[Dashboard] Found card, expanding...');
+      console.log('[Dashboard] Card element:', card.tagName, card.className);
+
+      const project = projects.find(p => p.path === projectPath);
+      if (!project) {
+        console.log('[Dashboard] Project not found in projects array');
+        return;
+      }
+      console.log('[Dashboard] Project found:', project.name);
+
+      // Set card to embedded mode
+      card.dataset.terminalMode = 'embedded';
+      console.log('[Dashboard] Set terminalMode to embedded, current value:', card.dataset.terminalMode);
+
+      // Force style recalculation
+      const computedStyle = window.getComputedStyle(card);
+      console.log('[Dashboard] Card min-height after mode change:', computedStyle.minHeight);
+      console.log('[Dashboard] Card gridRow after mode change:', computedStyle.gridRow);
+
+      // Create or get card terminal state
+      let cardState = cardTerminals.get(projectPath);
+      const wasExpanded = !!cardState?.isExpanded;
+      if (!cardState) {
+        cardState = {
+          projectPath: projectPath,
+          project: project,
+          term: null,
+          fitAddon: null,
+          ptyId: null,
+          clientId: null,
+          isExpanded: false,
+          isReady: false,
+          sessions: [],
+          activeSessionIndex: 0,
+          outputTail: '',
+          lastOutputAt: 0,
+          activity: project.activity || 'idle',
+          lastActivitySentAt: 0
+        };
+        cardTerminals.set(projectPath, cardState);
+      }
+
+      cardState.isExpanded = true;
+      cardState.project = project;
+      if (!cardState.activity) {
+        cardState.activity = project.activity || 'idle';
+      }
+
+      // Only initialize from project data when we do not already have local card sessions.
+      // Re-initializing on every MCP open/switch drops terminal identity and breaks session reuse.
+      if (!Array.isArray(cardState.sessions) || cardState.sessions.length === 0) {
+        initializeCardSessions(cardState, project);
+      }
+      renderCardTerminalTabs(cardState);
+      if (!wasExpanded || !cardState.term) {
+        initializeCardTerminal(cardState);
+      }
+    }
+
+    function collapseCardTerminal(projectPath) {
+      const card = projectCardByPath.get(projectPath);
+      if (card) {
+        delete card.dataset.terminalMode;
+        card.classList.remove('mcp-focus');
+      }
+
+      const cardState = cardTerminals.get(projectPath);
+      if (!cardState) return;
+
+      cardState.isExpanded = false;
+      disposeCardTerminalRuntime(cardState);
+    }
+
+    function isGenericSessionName(name) {
+      const normalized = (name || '').trim().toLowerCase();
+      if (!normalized) return true;
+      return (
+        normalized === 'zsh' ||
+        normalized === 'bash' ||
+        normalized === 'sh' ||
+        normalized === 'fish' ||
+        normalized === 'pwsh' ||
+        normalized === 'powershell' ||
+        normalized === 'cmd' ||
+        normalized === 'tmux' ||
+        normalized === 'terminal'
+      );
+    }
+
+    function pickInitialProjectTerminals(projectTerminals, maxTabs = 4) {
+      if (!Array.isArray(projectTerminals) || projectTerminals.length === 0) {
+        return [];
+      }
+
+      const sorted = [...projectTerminals].sort((a, b) => {
+        const left = typeof a.processId === 'number' ? a.processId : 0;
+        const right = typeof b.processId === 'number' ? b.processId : 0;
+        return right - left;
+      });
+
+      const named = sorted.filter((terminal) => !isGenericSessionName(terminal.name));
+      const generic = sorted.filter((terminal) => isGenericSessionName(terminal.name));
+      const selected = [...named];
+
+      for (const terminal of generic) {
+        if (selected.length >= maxTabs) break;
+        selected.push(terminal);
+      }
+
+      if (selected.length === 0 && sorted.length > 0) {
+        selected.push(sorted[0]);
+      }
+
+      return selected.slice(0, maxTabs);
+    }
+
+    function initializeCardSessions(cardState, project) {
+      cardState.sessions = [];
+
+      if (project.terminals && project.terminals.length > 0) {
+        const initialTerminals = pickInitialProjectTerminals(project.terminals, 4);
+        initialTerminals.forEach((t, idx) => {
+          const rawPreview = t.lastOutput || '';
+          cardState.sessions.push({
+            id: t.processId || Date.now() + idx,
+            name: t.name,
+            ptyId: null,
+            agentType: t.agentType,
+            clientId: null,
+            terminalId: t.processId || null,
+            pendingInput: '',
+            outputTail: stripAnsi(rawPreview),
+            lastOutputAt: t.lastOutputAt || 0
+          });
+        });
+      }
+
+      if (cardState.sessions.length === 0) {
+        cardState.sessions.push({
+          id: Date.now(),
+          name: 'Terminal 1',
+          ptyId: null,
+          agentType: null,
+          clientId: null,
+          terminalId: null,
+          pendingInput: '',
+          outputTail: '',
+          lastOutputAt: 0
+        });
+      }
+
+      cardState.activeSessionIndex = 0;
+    }
+
+    function renderCardTerminalTabs(cardState) {
+      const card = projectCardByPath.get(cardState.projectPath);
+      if (!card) return;
+
+      const tabsContainer = card.querySelector('.card-terminal-tabs');
+      if (!tabsContainer) return;
+
+      tabsContainer.textContent = '';
+
+      const colors = {
+        claude: '#ff6b00',
+        zai: '#0ea5e9',
+        opencode: '#22c55e',
+        cline: '#a855f7',
+        aider: '#eab308'
+      };
+
+      cardState.sessions.forEach((session, idx) => {
+        const tab = document.createElement('div');
+        tab.className = 'card-terminal-tab' + (idx === cardState.activeSessionIndex ? ' active' : '');
+
+        if (session.agentType && session.agentType !== 'generic') {
+          const indicator = document.createElement('span');
+          indicator.className = 'agent-indicator';
+          indicator.style.background = colors[session.agentType] || '#969696';
+          indicator.style.width = '6px';
+          indicator.style.height = '6px';
+          indicator.style.borderRadius = '50%';
+          indicator.style.display = 'inline-block';
+          tab.appendChild(indicator);
+        }
+
+        const label = document.createElement('span');
+        label.textContent = session.name || 'Terminal ' + (idx + 1);
+        tab.appendChild(label);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'close-tab';
+        closeBtn.textContent = 'x';
+        closeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          closeCardTerminalSession(cardState, idx);
+        });
+        tab.appendChild(closeBtn);
+
+        tab.addEventListener('click', (e) => {
+          e.stopPropagation();
+          switchCardSession(cardState, idx);
+        });
+        tabsContainer.appendChild(tab);
+      });
+
+      const newTab = document.createElement('div');
+      newTab.className = 'card-terminal-tab new-tab';
+      newTab.textContent = '+';
+      newTab.title = 'New terminal';
+      newTab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        createNewCardSession(cardState);
+      });
+      tabsContainer.appendChild(newTab);
+    }
+
+    function initializeCardTerminal(cardState) {
+      console.log('[Dashboard] initializeCardTerminal called for:', cardState.projectPath);
+      const card = projectCardByPath.get(cardState.projectPath);
+      if (!card) {
+        console.log('[Dashboard] initializeCardTerminal: card not found');
+        return;
+      }
+
+      const xtermWrapper = card.querySelector('.card-xterm-wrapper');
+      if (!xtermWrapper) {
+        console.log('[Dashboard] initializeCardTerminal: xterm wrapper not found');
+        return;
+      }
+      console.log('[Dashboard] initializeCardTerminal: xterm wrapper found');
+
+      // Clear previous terminal
+      xtermWrapper.textContent = '';
+
+      const session = cardState.sessions[cardState.activeSessionIndex];
+      if (!session) {
+        console.log('[Dashboard] initializeCardTerminal: no active session');
+        return;
+      }
+      console.log('[Dashboard] initializeCardTerminal: using session:', session.name);
+
+      const term = new Terminal({
+        cursorBlink: true,
+        cursorStyle: 'block',
+        scrollback: 50000,
+        fontSize: 12,
+        fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
+        convertEol: true,
+        theme: {
+          background: '#0d1117',
+          foreground: '#e6edf3',
+          cursor: '#58a6ff',
+          cursorAccent: '#0d1117',
+          selectionBackground: '#3b5998',
+          black: '#484f58',
+          red: '#ff7b72',
+          green: '#3fb950',
+          yellow: '#d29922',
+          blue: '#58a6ff',
+          magenta: '#bc8cff',
+          cyan: '#39c5cf',
+          white: '#b1bac4',
+          brightBlack: '#6e7681',
+          brightRed: '#ffa198',
+          brightGreen: '#56d364',
+          brightYellow: '#e3b341',
+          brightBlue: '#79c0ff',
+          brightMagenta: '#d2a8ff',
+          brightCyan: '#56d4dd',
+          brightWhite: '#f0f6fc',
+        },
+        allowProposedApi: true,
+      });
+
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(xtermWrapper);
+      xtermWrapper.onmousedown = (event) => {
+        event.stopPropagation();
+        term.focus();
+      };
+      xtermWrapper.onclick = (event) => {
+        event.stopPropagation();
+        term.focus();
+      };
+      xtermWrapper.onwheel = (event) => {
+        event.stopPropagation();
+        const target = event.target;
+        const onViewport = target instanceof HTMLElement && !!target.closest('.xterm-viewport');
+        if (!onViewport && event.deltaY !== 0) {
+          const lineDelta = event.deltaMode === 1 ? event.deltaY : event.deltaY / 16;
+          const lines = Math.trunc(lineDelta);
+          if (lines !== 0) {
+            term.scrollLines(lines);
+            event.preventDefault();
+          }
+        }
+      };
+
+      // Delay fitting until DOM stabilized
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          fitAddon.fit();
+          term.focus();
+          requestCardPtyConnect(cardState);
+        });
+      });
+
+      term.onData(data => {
+        cardState.lastUserInputAt = Date.now();
+        setProjectAttention(cardState.projectPath, false);
+        reportCardActivity(cardState, 'running');
+        if (!cardState.ptyId || !cardState.isReady) {
+          // Buffer keystrokes while the tab/session is still attaching so rapid
+          // tab switches don't silently drop user input.
+          if (session) {
+            const nextInput = (session.pendingInput || '') + data;
+            session.pendingInput = nextInput.length > 8000 ? nextInput.slice(-8000) : nextInput;
+          }
+          return;
+        }
+        vscode.postMessage({
+          command: 'card:pty:write',
+          id: cardState.ptyId,
+          projectPath: cardState.projectPath,
+          data: data
+        });
+      });
+
+      term.onResize(size => {
+        if (cardState.ptyId && cardState.isReady) {
+          vscode.postMessage({
+            command: 'card:pty:resize',
+            id: cardState.ptyId,
+            projectPath: cardState.projectPath,
+            cols: size.cols,
+            rows: size.rows
+          });
+        }
+      });
+
+      cardState.term = term;
+      cardState.fitAddon = fitAddon;
+      cardState.isReady = false;
+
+      // Set up resize observer for the card terminal container
+      const resizeObserver = new ResizeObserver(() => {
+        if (cardState.isExpanded && cardState.fitAddon) {
+          cardState.fitAddon.fit();
+        }
+      });
+      resizeObserver.observe(xtermWrapper);
+      cardState.resizeObserver = resizeObserver;
+    }
+
+    function requestCardPtyConnect(cardState) {
+      const session = cardState.sessions[cardState.activeSessionIndex];
+      if (!session) return;
+
+      if (cardState.clientId) {
+        cardPendingPty.delete(cardState.clientId);
+        cardState.clientId = null;
+      }
+
+      const clientId = 'card-' + nextClientId();
+      cardState.clientId = clientId;
+      session.clientId = clientId;
+      cardPendingPty.set(clientId, { projectPath: cardState.projectPath, sessionId: session.id });
+
+      vscode.postMessage({
+        command: 'card:pty:create',
+        projectPath: cardState.projectPath,
+        cwd: cardState.projectPath,
+        cols: cardState.term ? cardState.term.cols : 80,
+        rows: cardState.term ? cardState.term.rows : 24,
+        clientId: clientId,
+        terminalId: session.terminalId || null,
+        terminalName: session.name || null
+      });
+    }
+
+    function handleCardPtyCreated(message) {
+      const pending = cardPendingPty.get(message.clientId);
+      if (!pending) {
+        if (message.id) {
+          vscode.postMessage({ command: 'card:pty:detach', id: message.id, projectPath: message.projectPath });
+        }
+        return;
+      }
+
+      const cardState = cardTerminals.get(pending.projectPath);
+      if (!cardState || !cardState.isExpanded) {
+        vscode.postMessage({ command: 'card:pty:detach', id: message.id, projectPath: pending.projectPath });
+        cardPendingPty.delete(message.clientId);
+        return;
+      }
+
+      const session = cardState.sessions.find(s => s.id === pending.sessionId);
+      if (!session) {
+        vscode.postMessage({ command: 'card:pty:detach', id: message.id, projectPath: pending.projectPath });
+        cardPendingPty.delete(message.clientId);
+        return;
+      }
+
+      session.ptyId = message.id;
+      session.clientId = null;
+      if (typeof message.pid === 'number') {
+        session.terminalId = message.pid;
+      }
+      if (typeof message.terminalName === 'string' && message.terminalName.trim()) {
+        session.name = message.terminalName.trim();
+      }
+
+      cardState.ptyId = message.id;
+      cardState.clientId = null;
+      cardState.isReady = true;
+      renderCardTerminalTabs(cardState);
+
+      ptyToCard.set(message.id, cardState.projectPath);
+      cardPendingPty.delete(message.clientId);
+
+      if (cardState.term) {
+        cardState.term.focus();
+      }
+
+      // Send pending resize
+      if (cardState.term) {
+        vscode.postMessage({
+          command: 'card:pty:resize',
+          id: cardState.ptyId,
+          projectPath: cardState.projectPath,
+          cols: cardState.term.cols,
+          rows: cardState.term.rows
+        });
+      }
+
+      const pendingInput = typeof session.pendingInput === 'string' ? session.pendingInput : '';
+      if (pendingInput.length > 0) {
+        session.pendingInput = '';
+        vscode.postMessage({
+          command: 'card:pty:write',
+          id: cardState.ptyId,
+          projectPath: cardState.projectPath,
+          data: pendingInput
+        });
+      }
+    }
+
+    function handleCardPtyData(message) {
+      const projectPath = ptyToCard.get(message.id);
+      if (!projectPath) return;
+
+      const cardState = cardTerminals.get(projectPath);
+      if (!cardState || !cardState.term || !cardState.isExpanded) return;
+
+      if (message.full) {
+        cardState.term.reset();
+        cardState.outputTail = '';
+      }
+
+      cardState.term.write(message.data);
+      cardState.lastOutputAt = Date.now();
+      cardState.outputTail = updateOutputTail(cardState.outputTail, stripAnsi(message.data));
+
+      const signal = classifyActivitySignal(cardState.outputTail);
+      reportCardActivity(cardState, signal.activity, signal.detail);
+    }
+
+    function handleCardPtyExit(message) {
+      const projectPath = ptyToCard.get(message.id);
+      if (!projectPath) return;
+
+      const cardState = cardTerminals.get(projectPath);
+      if (cardState) {
+        if (cardState.ptyId === message.id) {
+          cardState.ptyId = null;
+          cardState.isReady = false;
+        }
+        cardState.sessions.forEach((session) => {
+          if (session.ptyId === message.id) {
+            session.ptyId = null;
+          }
+        });
+        reportCardActivity(cardState, 'idle');
+      }
+      ptyToCard.delete(message.id);
+    }
+
+    function handleCardPtyError(message) {
+      const pending = cardPendingPty.get(message.clientId);
+      if (!pending) return;
+
+      const cardState = cardTerminals.get(pending.projectPath);
+      if (cardState) {
+        cardState.isReady = false;
+        cardState.clientId = null;
+        const session = cardState.sessions.find(s => s.clientId === message.clientId);
+        if (session) {
+          session.clientId = null;
+        }
+        reportCardActivity(cardState, 'error', 'connection');
+      }
+      cardPendingPty.delete(message.clientId);
+    }
+
+    function switchCardSession(cardState, idx) {
+      if (idx === cardState.activeSessionIndex) return;
+
+      // Detach current session
+      if (cardState.ptyId) {
+        vscode.postMessage({ command: 'card:pty:detach', id: cardState.ptyId, projectPath: cardState.projectPath });
+        ptyToCard.delete(cardState.ptyId);
+        cardState.ptyId = null;
+      }
+
+      cardState.activeSessionIndex = idx;
+      renderCardTerminalTabs(cardState);
+      initializeCardTerminal(cardState);
+    }
+
+    function createNewCardSession(cardState) {
+      // Detach current session before switching to a new one
+      if (cardState.ptyId) {
+        vscode.postMessage({ command: 'card:pty:detach', id: cardState.ptyId, projectPath: cardState.projectPath });
+        ptyToCard.delete(cardState.ptyId);
+        cardState.ptyId = null;
+      }
+
+      if (cardState.clientId) {
+        cardPendingPty.delete(cardState.clientId);
+        cardState.clientId = null;
+      }
+
+      const session = {
+        id: Date.now(),
+        name: 'Terminal ' + (cardState.sessions.length + 1),
+        ptyId: null,
+        agentType: null,
+        clientId: null,
+        terminalId: null,
+        pendingInput: '',
+        outputTail: '',
+        lastOutputAt: 0
+      };
+      cardState.sessions.push(session);
+      cardState.activeSessionIndex = cardState.sessions.length - 1;
+      renderCardTerminalTabs(cardState);
+      initializeCardTerminal(cardState);
+    }
+
+    function closeCardTerminalSession(cardState, idx) {
+      const session = cardState.sessions[idx];
+      const wasActiveSession = (idx === cardState.activeSessionIndex);
+
+      if (session.ptyId) {
+        // Kill the tmux session completely when user explicitly closes
+        vscode.postMessage({ command: 'card:pty:kill', id: session.ptyId, projectPath: cardState.projectPath });
+        ptyToCard.delete(session.ptyId);
+      }
+
+      if (session.clientId) {
+        cardPendingPty.delete(session.clientId);
+        session.clientId = null;
+      }
+
+      if (cardState.ptyId === session.ptyId) {
+        cardState.ptyId = null;
+      }
+
+      cardState.sessions.splice(idx, 1);
+
+      if (cardState.sessions.length === 0) {
+        createNewCardSession(cardState);
+        return;
+      }
+
+      if (idx < cardState.activeSessionIndex) {
+        cardState.activeSessionIndex--;
+        renderCardTerminalTabs(cardState);
+      } else if (wasActiveSession) {
+        if (cardState.activeSessionIndex >= cardState.sessions.length) {
+          cardState.activeSessionIndex = cardState.sessions.length - 1;
+        }
+        renderCardTerminalTabs(cardState);
+        initializeCardTerminal(cardState);
+      } else {
+        renderCardTerminalTabs(cardState);
+      }
+    }
+
+    // Expand card terminal via MCP command
+    function expandCardTerminalByMcp(projectPath, terminalName) {
+      console.log('[Dashboard] expandCardTerminalByMcp called:', projectPath, terminalName);
+      vscode.postMessage({ command: 'debug:log', message: 'expandCardTerminalByMcp called for: ' + projectPath });
+
+      // Check if card exists
+      const cardExists = projectCardByPath.has(projectPath);
+      vscode.postMessage({ command: 'debug:log', message: 'Card exists: ' + cardExists + ', keys: ' + Array.from(projectCardByPath.keys()).join(', ') });
+
+      expandCardTerminal(projectPath);
+
+      const cardState = cardTerminals.get(projectPath);
+      vscode.postMessage({ command: 'debug:log', message: 'Card state after expand: ' + (cardState ? 'exists, expanded=' + cardState.isExpanded : 'null') });
+
+      if (cardState && terminalName) {
+        // Rename the first session if a name was provided
+        if (cardState.sessions.length > 0) {
+          cardState.sessions[0].name = terminalName;
+          renderCardTerminalTabs(cardState);
+        }
+      }
+    }
+
+    function createWindowSessionForMcp(windowState, terminalName, terminalId) {
+      const session = {
+        id: Date.now(),
+        name: terminalName || ('Terminal ' + (windowState.sessions.length + 1)),
+        ptyId: null,
+        agentType: null,
+        clientId: null,
+        terminalId: terminalId !== null ? terminalId : null,
+        pendingInput: '',
+        outputTail: '',
+        outputTailRaw: '',
+        lastOutputAt: 0
+      };
+      windowState.sessions.push(session);
+      windowState.activeSessionIndex = windowState.sessions.length - 1;
+      renderTerminalTabs(windowState);
+      initializeTerminal(windowState, windowState.project.path);
+    }
+
+    // Handle MCP request to open a collaborative terminal in the same floating window UI
+    // as manual card clicks (instead of the compact in-card expansion mode).
+    function handleMcpOpenCardTerminal(projectPath, options) {
+      console.log('[Dashboard] handleMcpOpenCardTerminal called:', projectPath, options);
+      vscode.postMessage({ command: 'debug:log', message: '[MCP] handleMcpOpenCardTerminal: ' + projectPath });
+
+      const project = projects.find((candidate) => candidate.path === projectPath);
+      if (!project) {
+        console.log('[Dashboard] Project not found for path:', projectPath);
+        vscode.postMessage({ command: 'debug:log', message: '[MCP] ERROR: Project not found for: ' + projectPath });
+        const alreadyPending = pendingMcpCardOpens.has(projectPath);
+        pendingMcpCardOpens.set(projectPath, {
+          terminalName: options && typeof options.terminalName === 'string' ? options.terminalName : undefined,
+          terminalId: options && typeof options.terminalId === 'number' ? options.terminalId : undefined,
+          createNewTerminal: !!(options && options.createNewTerminal),
+        });
+        if (!alreadyPending) {
+          vscode.postMessage({ command: 'refresh' });
+        }
+        return;
+      }
+      pendingMcpCardOpens.delete(projectPath);
+
+      // Keep a single visual mode: close any expanded card-embedded terminal first.
+      collapseCardTerminal(projectPath);
+      projectCardByPath.forEach((candidate) => candidate.classList.remove('mcp-focus'));
+
+      const windowState = openWindow(project);
+      if (!windowState) {
+        return;
+      }
+
+      restoreWindow(windowState.id);
+      bringToFront(windowState.id);
+
+      const createNewTerminal = !!(options && options.createNewTerminal);
+      const terminalId = options && typeof options.terminalId === 'number' ? options.terminalId : null;
+      const terminalName = options && typeof options.terminalName === 'string' ? options.terminalName.trim() : '';
+
+      if (createNewTerminal) {
+        createNewSession(windowState);
+        if (terminalName) {
+          const activeSession = getActiveSession(windowState);
+          if (activeSession) {
+            activeSession.name = terminalName;
+            renderTerminalTabs(windowState);
+          }
+        }
+        return;
+      }
+
+      if (terminalId !== null) {
+        const targetIndex = windowState.sessions.findIndex((session) => session.terminalId === terminalId);
+        if (targetIndex >= 0) {
+          switchToSession(windowState, targetIndex);
+        } else {
+          createWindowSessionForMcp(windowState, terminalName, terminalId);
+        }
+        return;
+      }
+
+      if (terminalName) {
+        const normalized = terminalName.toLowerCase();
+        const targetIndex = windowState.sessions.findIndex(
+          (session) => (session.name || '').toLowerCase() === normalized
+        );
+        if (targetIndex >= 0) {
+          switchToSession(windowState, targetIndex);
+        } else {
+          createWindowSessionForMcp(windowState, terminalName, null);
+        }
+      }
+    }
+
+    // Scroll to a project card
+    function scrollToCard(projectPath, block = 'center') {
+      const card = projectCardByPath.get(projectPath);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: block });
+        // Add a brief highlight effect
+        card.classList.add('highlight-card');
+        setTimeout(() => card.classList.remove('highlight-card'), 1000);
+      }
+    }
+
+    // ==========================================
+    // End of Embedded Card Terminal Functions
     // ==========================================
 
     function openWindow(project) {
@@ -2857,6 +4949,9 @@ export class DashboardPanel {
         const existingWindow = windows.get(existingId);
         restoreWindow(existingId);
         bringToFront(existingId);
+        if (existingWindow && existingWindow.term) {
+          existingWindow.term.focus();
+        }
         return existingWindow || null;
       }
 
@@ -3090,7 +5185,12 @@ export class DashboardPanel {
       }
 
       bringToFront(windowId);
-      requestAnimationFrame(() => fitWindowTerminal(windowState));
+      requestAnimationFrame(() => {
+        fitWindowTerminal(windowState);
+        if (windowState.term) {
+          windowState.term.focus();
+        }
+      });
     }
 
     function toggleMaximizeWindow(windowId) {
@@ -3182,7 +5282,8 @@ export class DashboardPanel {
       windowState.sessions = [];
 
       if (project.terminals && project.terminals.length > 0) {
-        project.terminals.forEach((t, idx) => {
+        const initialTerminals = pickInitialProjectTerminals(project.terminals, 4);
+        initialTerminals.forEach((t, idx) => {
           const rawPreview = t.lastOutput || '';
           windowState.sessions.push({
             id: t.processId || Date.now() + idx,
@@ -3191,6 +5292,7 @@ export class DashboardPanel {
             agentType: t.agentType,
             clientId: null,
             terminalId: t.processId || null,
+            pendingInput: '',
             outputTail: stripAnsi(rawPreview),
             outputTailRaw: rawPreview,
             lastOutputAt: t.lastOutputAt || 0
@@ -3206,6 +5308,7 @@ export class DashboardPanel {
           agentType: null,
           clientId: null,
           terminalId: null,
+          pendingInput: '',
           outputTail: '',
           outputTailRaw: '',
           lastOutputAt: 0
@@ -3291,6 +5394,7 @@ export class DashboardPanel {
         agentType: null,
         clientId: null,
         terminalId: null,
+        pendingInput: '',
         outputTail: '',
         outputTailRaw: '',
         lastOutputAt: 0
@@ -3420,6 +5524,7 @@ export class DashboardPanel {
       const term = new Terminal({
         cursorBlink: true,
         cursorStyle: 'block',
+        scrollback: 50000,
         fontSize: 13,
         fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
         convertEol: true,
@@ -3454,6 +5559,19 @@ export class DashboardPanel {
 
       windowState.terminalContainer.textContent = '';
       term.open(windowState.terminalContainer);
+      windowState.terminalContainer.onwheel = (event) => {
+        event.stopPropagation();
+        const target = event.target;
+        const onViewport = target instanceof HTMLElement && !!target.closest('.xterm-viewport');
+        if (!onViewport && event.deltaY !== 0) {
+          const lineDelta = event.deltaMode === 1 ? event.deltaY : event.deltaY / 16;
+          const lines = Math.trunc(lineDelta);
+          if (lines !== 0) {
+            term.scrollLines(lines);
+            event.preventDefault();
+          }
+        }
+      };
 
       // Delay fitting until after the DOM has fully stabilized
       // Double RAF ensures the browser has completed layout and paint
@@ -3462,17 +5580,10 @@ export class DashboardPanel {
           fitAddon.fit();
           term.focus();
           sendResize(windowState, term.cols, term.rows);
+          requestPtyConnect(windowState, cwd);
 
           // Re-enable fit operations after initial fit is complete
           windowState.suppressFit = false;
-
-          // Force a refresh after fit to redraw any content that arrived
-          // before the terminal was properly sized (fixes invisible prompt issue)
-          setTimeout(() => {
-            if (windowState.term) {
-              windowState.term.refresh(0, windowState.term.rows - 1);
-            }
-          }, 50);
         });
       });
 
@@ -3480,13 +5591,16 @@ export class DashboardPanel {
         noteInput(windowState, data);
         windowState.lastUserInputAt = Date.now();
         clearWindowAttention(windowState);
-        if (windowState.currentPtyId && windowState.isReady) {
-          vscode.postMessage({
-            command: 'pty:write',
-            id: windowState.currentPtyId,
-            data: data
-          });
+        if (!windowState.currentPtyId || !windowState.isReady) {
+          const nextInput = (session.pendingInput || '') + data;
+          session.pendingInput = nextInput.length > 8000 ? nextInput.slice(-8000) : nextInput;
+          return;
         }
+        vscode.postMessage({
+          command: 'pty:write',
+          id: windowState.currentPtyId,
+          data: data
+        });
       });
 
       term.onResize(size => {
@@ -3502,8 +5616,6 @@ export class DashboardPanel {
 
       setWindowStatus(windowState, 'disconnected', 'Connecting...');
       windowState.isReady = false;
-
-      requestPtyConnect(windowState, cwd);
     }
 
     function sendResize(windowState, cols, rows) {
@@ -3588,6 +5700,10 @@ export class DashboardPanel {
       if (typeof message.pid === 'number') {
         session.terminalId = message.pid;
       }
+      if (typeof message.terminalName === 'string' && message.terminalName.trim()) {
+        session.name = message.terminalName.trim();
+      }
+      renderTerminalTabs(windowState);
       windowState.currentPtyId = message.id;
       windowState.isReady = true;
       windowState.connectAttempts = 0;
@@ -3613,6 +5729,17 @@ export class DashboardPanel {
       } else {
         fitWindowTerminal(windowState);
       }
+
+      const pendingInput = typeof session.pendingInput === 'string' ? session.pendingInput : '';
+      if (pendingInput.length > 0) {
+        session.pendingInput = '';
+        vscode.postMessage({
+          command: 'pty:write',
+          id: windowState.currentPtyId,
+          data: pendingInput
+        });
+      }
+
       flushPendingDrops(windowState);
     }
 
@@ -3628,18 +5755,11 @@ export class DashboardPanel {
         return;
       }
 
-      // Only reset terminal for full snapshots on NEW sessions, not reconnections
-      // When reconnecting, the terminal content should be preserved from the previous view
-      // and the pipe-pane will stream only new output
-      if (message.full && !message.reconnect && !windowState.isReconnect) {
-        console.log('[Webview] New session (clearing output state, terminal already empty)');
+      if (message.full) {
+        console.log('[Webview] Received full snapshot, resetting terminal state');
+        windowState.term.reset();
         windowState.outputTail = '';
         windowState.outputTailRaw = '';
-        // Don't call reset() - the terminal was just created and is already empty
-        // reset() can cause scroll position issues
-      } else if (message.full) {
-        console.log('[Webview] Skipping reset - this is a reconnection');
-        // Clear the reconnect flag after first data, subsequent full snapshots (e.g., resize) should reset
         windowState.isReconnect = false;
       }
 
@@ -3668,7 +5788,6 @@ export class DashboardPanel {
           }
         });
         reportActivity(windowState, 'idle');
-        maybeNotify(windowState);
       }
       ptyToWindow.delete(message.id);
     }
@@ -3696,7 +5815,7 @@ export class DashboardPanel {
 
       windowState.isReady = false;
       setWindowStatus(windowState, 'disconnected', 'Disconnected');
-      reportActivity(windowState, 'idle');
+      reportActivity(windowState, 'error', 'connection');
       pendingPty.delete(message.clientId);
       attemptReconnect(windowState, 'Error: ' + message.error);
     }
@@ -3733,17 +5852,128 @@ export class DashboardPanel {
     return text;
   }
 
+  // ==========================================
+  // Public MCP API Methods for Terminal Control
+  // ==========================================
+
+  /**
+   * Get all active floating window and card embedded terminals
+   * Used by vscode_card_terminals_list MCP tool
+   */
+  public getFloatingWindowTerminals(): Array<{
+    clientId: string;
+    sessionName: string;
+    projectPath: string;
+    terminalId: number;
+  }> {
+    const terminals: Array<{
+      clientId: string;
+      sessionName: string;
+      projectPath: string;
+      terminalId: number;
+    }> = [];
+
+    // Get floating window terminals
+    for (const [clientId, session] of this.clientSessions) {
+      terminals.push({
+        clientId,
+        sessionName: session.sessionName,
+        projectPath: session.projectPath,
+        terminalId: session.terminalId,
+      });
+    }
+
+    // Get card embedded terminals
+    for (const [clientId, session] of this.cardClientSessions) {
+      terminals.push({
+        clientId,
+        sessionName: session.sessionName,
+        projectPath: session.projectPath,
+        terminalId: session.terminalId,
+      });
+    }
+
+    return terminals;
+  }
+
+  /**
+   * Read output from a floating window or card terminal
+   * Used by vscode_card_terminal_read MCP tool
+   */
+  public async readFloatingWindowOutput(clientId: string, lines: number = 100): Promise<string | null> {
+    // Check floating windows first
+    let session = this.clientSessions.get(clientId);
+
+    // Then check card terminals
+    if (!session) {
+      session = this.cardClientSessions.get(clientId);
+    }
+
+    if (!session) {
+      return null;
+    }
+
+    const tmux = TmuxManager.getInstance();
+    return await tmux.readBuffer(session.sessionName, lines);
+  }
+
+  /**
+   * Send text to a floating window or card terminal
+   * Used by vscode_card_terminal_send MCP tool
+   */
+  public async sendToFloatingWindow(clientId: string, text: string, addNewLine: boolean = true): Promise<boolean> {
+    // Check floating windows first
+    let session = this.clientSessions.get(clientId);
+
+    // Then check card terminals
+    if (!session) {
+      session = this.cardClientSessions.get(clientId);
+    }
+
+    if (!session) {
+      return false;
+    }
+
+    const tmux = TmuxManager.getInstance();
+
+    // Two-step approach for reliable submission:
+    // 1. Send text without Enter (so it types the text)
+    // 2. Send Enter separately (so it submits)
+    // This works reliably for both regular shells and Claude Code terminals
+    if (addNewLine && text.length > 0) {
+      // Step 1: Send text without newline
+      const textSent = await tmux.sendKeys(session.sessionName, text, false);
+      if (!textSent) {
+        return false;
+      }
+      // Small delay to ensure text is received before Enter
+      await new Promise(resolve => setTimeout(resolve, 50));
+      // Step 2: Send Enter to submit
+      return await tmux.sendKeys(session.sessionName, '', true);
+    } else if (addNewLine) {
+      // Just send Enter (empty text with newline)
+      return await tmux.sendKeys(session.sessionName, '', true);
+    } else {
+      // Just send text without Enter
+      return await tmux.sendKeys(session.sessionName, text, false);
+    }
+  }
+
   /**
    * Dispose the panel
    */
   public dispose(): void {
     DashboardPanel.currentPanel = undefined;
-    this.stopAutoRefresh();
 
     // Clear any pending refresh debounce timer
     if (this.refreshDebounceTimer) {
       clearTimeout(this.refreshDebounceTimer);
       this.refreshDebounceTimer = undefined;
+    }
+
+    if (this.eventRefreshTimer) {
+      clearTimeout(this.eventRefreshTimer);
+      this.eventRefreshTimer = undefined;
     }
 
     // Stop all tmux streams and clean up embedded terminal sessions
@@ -3753,14 +5983,25 @@ export class DashboardPanel {
       console.error('[DashboardPanel] Error disposing tmux bridge:', err);
     });
 
-    // Clean up embedded terminal tmux sessions
+    // Clean up all embedded terminal tmux sessions (floating windows + card terminals)
     const tmux = TmuxManager.getInstance();
+
+    // Clean up floating window sessions
     for (const [clientId, session] of this.clientSessions) {
       tmux.killSession(session.sessionName).catch(() => {
         // Ignore errors during cleanup
       });
     }
     this.clientSessions.clear();
+
+    // Clean up card embedded terminal sessions
+    for (const [clientId, session] of this.cardClientSessions) {
+      tmux.killSession(session.sessionName).catch(() => {
+        // Ignore errors during cleanup
+      });
+    }
+    this.cardClientSessions.clear();
+    this.cardTerminalNameIndex.clear();
 
     // Clean up tracked terminal associations
     // Note: We don't dispose the terminals themselves as they may still be useful

@@ -38,6 +38,9 @@ interface StreamInfo {
  * instead of polling capture-pane snapshots.
  */
 export class TmuxStreamBridge {
+  private static readonly SNAPSHOT_SCROLLBACK_LINES = 20000;
+  private static readonly MAX_CAPTURE_LINES = 50000;
+  private static readonly CAPTURE_MAX_BUFFER = 32 * 1024 * 1024;
   private streams: Map<string, StreamInfo> = new Map(); // clientId -> StreamInfo
   private tmux: TmuxManager;
 
@@ -157,7 +160,7 @@ export class TmuxStreamBridge {
   }
 
   /**
-   * Update size for a stream and refresh with a full snapshot
+   * Update size for a stream.
    */
   public updateSize(clientId: string, cols?: number, rows?: number): void {
     const streamInfo = this.streams.get(clientId);
@@ -171,10 +174,6 @@ export class TmuxStreamBridge {
     if (typeof rows === 'number' && Number.isFinite(rows) && rows > 0) {
       streamInfo.rows = Math.floor(rows);
     }
-
-    this.sendSnapshot(streamInfo).catch(() => {
-      // Ignore snapshot errors on resize
-    });
   }
 
   /**
@@ -243,10 +242,49 @@ export class TmuxStreamBridge {
   private async sendSnapshot(streamInfo: StreamInfo): Promise<void> {
     if (!streamInfo.isActive) return;
 
-    const lines = streamInfo.rows && streamInfo.rows > 0 ? streamInfo.rows : 200;
-    const snapshot = await this.tmux.readBuffer(streamInfo.sessionName, lines);
+    const snapshot = await this.capturePaneWithHistory(
+      streamInfo.sessionName,
+      TmuxStreamBridge.SNAPSHOT_SCROLLBACK_LINES
+    );
     if (snapshot) {
-      streamInfo.callbacks.onData({ text: snapshot, full: true });
+      // capture-pane snapshots typically end with a trailing newline.
+      // If replayed verbatim into xterm, this can push the first visible prompt
+      // line into scrollback by one row. Trim only one final newline.
+      let normalized = snapshot;
+      if (normalized.endsWith('\n')) {
+        normalized = normalized.slice(0, -1);
+      }
+
+      // For reconnect/open flows we want scrollback restoration. Sending pane history
+      // directly gives xterm real scroll depth per terminal tab.
+      streamInfo.callbacks.onData({ text: normalized, full: true });
+    }
+  }
+
+  /**
+   * Capture pane content with history so xterm can restore per-terminal scrollback
+   * when a card/window is opened or reattached.
+   */
+  private async capturePaneWithHistory(sessionName: string, lines: number): Promise<string> {
+    const target = this.shellEscape(sessionName);
+    const safeLines = Math.max(200, Math.min(Math.floor(lines), TmuxStreamBridge.MAX_CAPTURE_LINES));
+
+    try {
+      const { stdout } = await execAsync(
+        `tmux capture-pane -t ${target} -p -e -N -S -${safeLines}`,
+        { maxBuffer: TmuxStreamBridge.CAPTURE_MAX_BUFFER }
+      );
+      return stdout;
+    } catch {
+      try {
+        const { stdout } = await execAsync(
+          `tmux capture-pane -t ${target} -p -e -S -${safeLines}`,
+          { maxBuffer: TmuxStreamBridge.CAPTURE_MAX_BUFFER }
+        );
+        return stdout;
+      } catch {
+        return '';
+      }
     }
   }
 

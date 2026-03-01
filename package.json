@@ -1,9 +1,9 @@
 {
-  "name": "xerebro",
+  "name": "xerebro-vscode",
   "displayName": "Operator",
   "description": "MCP server that enables AI assistants to control VS Code",
-  "version": "0.1.6",
-  "publisher": "iprado",
+  "version": "0.1.9",
+  "publisher": "xerebro",
   "repository": {
     "type": "git",
     "url": "https://github.com/iprado/cerebroapp-monorepo"
@@ -15,31 +15,10 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onView:aiAgentDashboard"
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "ai-agent-manager",
-          "title": "Operator",
-          "icon": "resources/ai-agent-icon.svg"
-        }
-      ]
-    },
-    "views": {
-      "ai-agent-manager": [
-        {
-          "type": "webview",
-          "id": "aiAgentDashboard",
-          "name": "Operator",
-          "icon": "$(layout)",
-          "contextualTitle": "Operator"
-        }
-      ]
-    },
     "commands": [
       {
         "command": "vscode-mcp-server.start",

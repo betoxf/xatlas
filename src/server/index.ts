@@ -1,4 +1,5 @@
 import * as http from 'http';
+import * as net from 'net';
 import * as vscode from 'vscode';
 import { MCPRequest, MCPResponse, MCPError, MCPErrorCodes, ServerConfig } from '../types';
 import { handleMCPRequest } from './mcpHandler';
@@ -7,29 +8,32 @@ import { actionLog } from '../services/actionLog';
 
 let server: http.Server | null = null;
 let statusBarItem: vscode.StatusBarItem | null = null;
-let connectedToExisting = false;
+let activePort: number | null = null;
 
-// Check if an MCP server is already running on the port
-async function checkExistingServer(host: string, port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const req = http.request(
-      { host, port, path: '/health', method: 'GET', timeout: 1000 },
-      (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            resolve(json.server === 'vscode-mcp-server');
-          } catch {
-            resolve(false);
-          }
-        });
+// Find the first available port in [startPort, maxPort] by attempting a real TCP bind.
+function findAvailablePort(host: string, startPort: number, maxPort: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let port = startPort;
+    function tryPort() {
+      if (port > maxPort) {
+        reject(new Error(`No available port found between ${startPort} and ${maxPort}`));
+        return;
       }
-    );
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => { req.destroy(); resolve(false); });
-    req.end();
+      const tester = net.createServer();
+      tester.once('error', (err: NodeJS.ErrnoException) => {
+        if (err.code === 'EADDRINUSE') {
+          port++;
+          tryPort();
+        } else {
+          reject(err);
+        }
+      });
+      tester.once('listening', () => {
+        tester.close(() => resolve(port));
+      });
+      tester.listen(port, host);
+    }
+    tryPort();
   });
 }
 
@@ -41,18 +45,12 @@ export function createStatusBarItem(): vscode.StatusBarItem {
   return statusBarItem;
 }
 
-function updateStatusBar(running: boolean, port?: number, isSecondary?: boolean) {
+function updateStatusBar(running: boolean, port?: number) {
   if (statusBarItem) {
-    if (running) {
-      if (isSecondary) {
-        statusBarItem.text = `$(plug) MCP :${port}`;
-        statusBarItem.tooltip = `Connected to MCP Server on port ${port} (started by another window)`;
-        statusBarItem.backgroundColor = undefined;
-      } else {
-        statusBarItem.text = `$(radio-tower) MCP :${port}`;
-        statusBarItem.tooltip = `MCP Server running on port ${port}. Click to stop.`;
-        statusBarItem.backgroundColor = undefined;
-      }
+    if (running && port) {
+      statusBarItem.text = `$(radio-tower) MCP :${port}`;
+      statusBarItem.tooltip = `MCP Server running on port ${port}. Click to stop.`;
+      statusBarItem.backgroundColor = undefined;
     } else {
       statusBarItem.text = `$(circle-slash) MCP Off`;
       statusBarItem.tooltip = 'MCP Server stopped. Click to start.';
@@ -68,12 +66,13 @@ export async function startServer(config: ServerConfig): Promise<void> {
     return;
   }
 
-  // Check if another VS Code window already started the server
-  const existingServer = await checkExistingServer(config.host, config.port);
-  if (existingServer) {
-    console.log(`MCP Server already running on port ${config.port} from another window`);
-    connectedToExisting = true;
-    updateStatusBar(true, config.port, true);
+  // Find the first free port starting from config.port (each VS Code window gets its own port)
+  let port: number;
+  try {
+    port = await findAvailablePort(config.host, config.port, config.port + 13); // 9002–9015
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    vscode.window.showErrorMessage(`MCP Server: ${msg}`);
     return;
   }
 
@@ -257,15 +256,39 @@ export async function startServer(config: ServerConfig): Promise<void> {
 
         req.on('end', async () => {
           try {
-            const request: MCPRequest = JSON.parse(body);
+            const parsed = JSON.parse(body);
+
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+              const errorResponse: MCPResponse = {
+                jsonrpc: '2.0',
+                id: null,
+                error: {
+                  code: MCPErrorCodes.INVALID_REQUEST,
+                  message: 'Invalid JSON-RPC request payload',
+                },
+              };
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(errorResponse));
+              return;
+            }
+
+            const request = parsed as MCPRequest;
+            const isNotification = request.id === undefined || request.id === null;
             const response = await handleMCPRequest(request);
+
+            if (isNotification) {
+              // JSON-RPC notifications must not receive a response body.
+              res.writeHead(202);
+              res.end();
+              return;
+            }
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(response));
           } catch (error) {
             const errorResponse: MCPResponse = {
               jsonrpc: '2.0',
-              id: 0,
+              id: null,
               error: {
                 code: MCPErrorCodes.PARSE_ERROR,
                 message: error instanceof Error ? error.message : 'Parse error',
@@ -284,43 +307,41 @@ export async function startServer(config: ServerConfig): Promise<void> {
     });
 
     server.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE') {
-        vscode.window.showErrorMessage(`MCP Server: Port ${config.port} is already in use`);
-      } else {
-        vscode.window.showErrorMessage(`MCP Server error: ${error.message}`);
-      }
+      vscode.window.showErrorMessage(`MCP Server error: ${error.message}`);
       server = null;
+      activePort = null;
       updateStatusBar(false);
       reject(error);
     });
 
-    server.listen(config.port, config.host, () => {
-      console.log(`MCP Server listening on http://${config.host}:${config.port}`);
-      vscode.window.showInformationMessage(`MCP Server started on port ${config.port}`);
-      updateStatusBar(true, config.port);
+    server.listen(port, config.host, () => {
+      activePort = port;
+      console.log(`MCP Server listening on http://${config.host}:${port}`);
+      vscode.window.showInformationMessage(`MCP Server started on port ${port}`);
+      updateStatusBar(true, port);
       resolve();
     });
   });
 }
 
 export function stopServer(): void {
-  if (connectedToExisting) {
-    // Can't stop a server we didn't start
-    vscode.window.showInformationMessage('MCP Server is running in another VS Code window');
-    return;
-  }
   if (server) {
     server.close(() => {
       console.log('MCP Server stopped');
       vscode.window.showInformationMessage('MCP Server stopped');
     });
     server = null;
+    activePort = null;
     updateStatusBar(false);
   }
 }
 
 export function isServerRunning(): boolean {
-  return server !== null || connectedToExisting;
+  return server !== null;
+}
+
+export function getActivePort(): number | null {
+  return activePort;
 }
 
 export function disposeStatusBar(): void {

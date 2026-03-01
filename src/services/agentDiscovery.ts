@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as http from 'http';
 import { TerminalWatcher, TerminalInfo, AgentType, AGENT_PATTERNS } from './terminalWatcher';
+import { TmuxManager } from './tmuxManager';
 import { CONFIG_NAMESPACE } from './extensionInfo';
 
 /**
@@ -52,6 +53,13 @@ export interface ProjectInfo {
   accentColor?: string;
 }
 
+export interface ProjectActivityChange {
+  projectPath: string;
+  previousActivity?: ProjectActivity;
+  activity: ProjectActivity;
+  timestamp: number;
+}
+
 /**
  * Response from a remote dashboard API
  */
@@ -77,15 +85,22 @@ export class AgentDiscovery {
   private remoteWindows: Map<number, ProjectInfo> = new Map();
   private scanPorts = { start: 9002, end: 9015 };
   private projectActivity: Map<string, { activity: ProjectActivity; updatedAt: number }> = new Map();
+  private activityCallbacks: Array<(change: ProjectActivityChange) => void> = [];
   private storage?: vscode.Memento;
   private projectOrder: string[] = [];
   private projectColors: Map<string, string> = new Map();
+  private discoveryCache: { projects: ProjectInfo[]; timestamp: number } | null = null;
+  private discoveryInFlight: Promise<ProjectInfo[]> | null = null;
+  private remoteProjectsCache: { projects: ProjectInfo[]; timestamp: number } | null = null;
+  private remoteDiscoveryInFlight: Promise<ProjectInfo[]> | null = null;
 
   private static readonly ACTIVITY_TTL_MS = 15000;
   private static readonly OUTPUT_ACTIVITY_TTL_MS = 12000;
   private static readonly STORAGE_KEY = 'operador.trackedProjects';
   private static readonly ORDER_KEY = 'operador.projectOrder';
   private static readonly COLOR_KEY = 'operador.projectColors';
+  private static readonly DISCOVERY_CACHE_TTL_MS = 2500;
+  private static readonly REMOTE_DISCOVERY_TTL_MS = 15000;
 
   // Track added projects (path -> project info)
   private addedProjects: Map<string, { name: string; path: string }> = new Map();
@@ -109,6 +124,7 @@ export class AgentDiscovery {
    */
   public addProject(path: string, name: string): void {
     this.addedProjects.set(path, { name, path });
+    this.invalidateDiscoveryCache();
     this.persistProjects();
   }
 
@@ -117,6 +133,7 @@ export class AgentDiscovery {
    */
   public removeProject(path: string): void {
     this.addedProjects.delete(path);
+    this.invalidateDiscoveryCache();
     if (this.projectOrder.length > 0) {
       this.projectOrder = this.projectOrder.filter((entry) => entry !== path);
       this.persistProjectOrder();
@@ -147,6 +164,7 @@ export class AgentDiscovery {
       seen.add(path);
       return true;
     });
+    this.invalidateDiscoveryCache();
     this.persistProjectOrder();
   }
 
@@ -159,6 +177,7 @@ export class AgentDiscovery {
     } else {
       this.projectColors.set(path, color);
     }
+    this.invalidateDiscoveryCache();
     this.persistProjectColors();
   }
 
@@ -193,14 +212,54 @@ export class AgentDiscovery {
         }
       });
     }
+
+    this.invalidateDiscoveryCache(true);
   }
 
   public setProjectActivity(path: string, activity: ProjectActivity): void {
-    this.projectActivity.set(path, { activity, updatedAt: Date.now() });
+    const previous = this.projectActivity.get(path)?.activity;
+    const timestamp = Date.now();
+    this.projectActivity.set(path, { activity, updatedAt: timestamp });
+
+    if (previous !== activity) {
+      const change: ProjectActivityChange = {
+        projectPath: path,
+        previousActivity: previous,
+        activity,
+        timestamp,
+      };
+      for (const callback of this.activityCallbacks) {
+        try {
+          callback(change);
+        } catch {
+          // Keep callbacks isolated.
+        }
+      }
+    }
+    this.discoveryCache = null;
   }
 
   public clearProjectActivity(path: string): void {
     this.projectActivity.delete(path);
+    this.discoveryCache = null;
+  }
+
+  public onProjectActivityChange(callback: (change: ProjectActivityChange) => void): void {
+    this.activityCallbacks.push(callback);
+  }
+
+  public offProjectActivityChange(callback: (change: ProjectActivityChange) => void): void {
+    const idx = this.activityCallbacks.indexOf(callback);
+    if (idx >= 0) {
+      this.activityCallbacks.splice(idx, 1);
+    }
+  }
+
+  private invalidateDiscoveryCache(includeRemote: boolean = false): void {
+    this.discoveryCache = null;
+    if (includeRemote) {
+      this.remoteProjectsCache = null;
+    }
   }
 
   private persistProjects(): void {
@@ -256,9 +315,42 @@ export class AgentDiscovery {
   /**
    * Discover all projects with their agents
    */
-  public async discoverProjects(): Promise<ProjectInfo[]> {
+  public async discoverProjects(options?: { force?: boolean }): Promise<ProjectInfo[]> {
+    const force = options?.force === true;
+    const now = Date.now();
+
+    if (!force && this.discoveryCache) {
+      if (now - this.discoveryCache.timestamp < AgentDiscovery.DISCOVERY_CACHE_TTL_MS) {
+        return this.discoveryCache.projects;
+      }
+    }
+
+    if (!force && this.discoveryInFlight) {
+      return this.discoveryInFlight;
+    }
+
+    const pending = this.discoverProjectsInternal(force);
+    this.discoveryInFlight = pending;
+    try {
+      const projects = await pending;
+      this.discoveryCache = { projects, timestamp: Date.now() };
+      return projects;
+    } finally {
+      if (this.discoveryInFlight === pending) {
+        this.discoveryInFlight = null;
+      }
+    }
+  }
+
+  private async discoverProjectsInternal(force: boolean): Promise<ProjectInfo[]> {
     const projects: ProjectInfo[] = [];
     const allTerminals = this.terminalWatcher.getTerminals();
+    const tmux = TmuxManager.getInstance();
+    try {
+      await tmux.refreshTrackedSessions();
+    } catch {
+      // Best-effort refresh only.
+    }
 
     // Get current workspace path
     const currentWorkspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
@@ -291,6 +383,20 @@ export class AgentDiscovery {
       });
 
       const terminalInstances = projectTerminals.map((t) => this.mapTerminalInfo(t));
+      const knownTerminalIds = new Set(terminalInstances.map((terminal) => terminal.processId));
+      const tmuxTerminals = tmux
+        .getAllSessions()
+        .filter((session) => {
+          if (!session.cwd) {
+            return false;
+          }
+          if (knownTerminalIds.has(session.terminalId)) {
+            return false;
+          }
+          return this.isPathWithin(session.cwd, projectPath);
+        })
+        .map((session) => this.mapTmuxSession(session));
+      terminalInstances.push(...tmuxTerminals);
       const agents = projectTerminals
         .filter((t) => t.agentType !== 'generic')
         .map((t) => this.mapAgentFromTerminal(t));
@@ -307,7 +413,7 @@ export class AgentDiscovery {
     }
 
     // Get remote projects (from other VS Code windows)
-    const remoteProjects = await this.discoverRemoteProjects();
+    const remoteProjects = await this.discoverRemoteProjects(force);
 
     // Filter out remotes that are already in added projects
     for (const remote of remoteProjects) {
@@ -340,6 +446,7 @@ export class AgentDiscovery {
     const workspacePaths = workspaceFolders.map((folder) => folder.uri.fsPath);
     const workspaceNames = workspaceFolders.map((folder) => folder.name.toLowerCase());
     const allTerminals = this.terminalWatcher.getTerminals();
+    const tmux = TmuxManager.getInstance();
     const localTerminals = allTerminals.filter((t) => {
       if (t.cwd) {
         return workspacePaths.some((workspacePath) => this.isPathWithin(t.cwd as string, workspacePath));
@@ -347,6 +454,20 @@ export class AgentDiscovery {
       return workspaceNames.some((name) => t.name.toLowerCase().includes(name));
     });
       const terminalInstances = localTerminals.map((t) => this.mapTerminalInfo(t));
+      const knownTerminalIds = new Set(terminalInstances.map((terminal) => terminal.processId));
+      const tmuxTerminals = tmux
+        .getAllSessions()
+        .filter((session) => {
+          if (!session.cwd) {
+            return false;
+          }
+          if (knownTerminalIds.has(session.terminalId)) {
+            return false;
+          }
+          return workspacePaths.some((workspacePath) => this.isPathWithin(session.cwd as string, workspacePath));
+        })
+        .map((session) => this.mapTmuxSession(session));
+      terminalInstances.push(...tmuxTerminals);
       const agents = localTerminals
         .filter((t) => t.agentType !== 'generic')
         .map((t) => this.mapAgentFromTerminal(t));
@@ -375,7 +496,33 @@ export class AgentDiscovery {
   /**
    * Discover projects from other VS Code windows via HTTP
    */
-  private async discoverRemoteProjects(): Promise<ProjectInfo[]> {
+  private async discoverRemoteProjects(force: boolean = false): Promise<ProjectInfo[]> {
+    const now = Date.now();
+
+    if (!force && this.remoteProjectsCache) {
+      if (now - this.remoteProjectsCache.timestamp < AgentDiscovery.REMOTE_DISCOVERY_TTL_MS) {
+        return this.remoteProjectsCache.projects;
+      }
+    }
+
+    if (!force && this.remoteDiscoveryInFlight) {
+      return this.remoteDiscoveryInFlight;
+    }
+
+    const pending = this.discoverRemoteProjectsInternal();
+    this.remoteDiscoveryInFlight = pending;
+    try {
+      const projects = await pending;
+      this.remoteProjectsCache = { projects, timestamp: Date.now() };
+      return projects;
+    } finally {
+      if (this.remoteDiscoveryInFlight === pending) {
+        this.remoteDiscoveryInFlight = null;
+      }
+    }
+  }
+
+  private async discoverRemoteProjectsInternal(): Promise<ProjectInfo[]> {
     const projects: ProjectInfo[] = [];
     const currentPort = vscode.workspace
       .getConfiguration(CONFIG_NAMESPACE)
@@ -503,6 +650,17 @@ export class AgentDiscovery {
       isActive: info.isActive,
       lastOutput: info.lastOutput,
       lastOutputAt: info.lastOutputAt,
+    };
+  }
+
+  private mapTmuxSession(session: { terminalId: number; terminalName: string; cwd?: string }): TerminalInstance {
+    return {
+      processId: session.terminalId,
+      name: session.terminalName || 'Terminal',
+      agentType: 'generic',
+      isActive: true,
+      lastOutput: '',
+      lastOutputAt: 0,
     };
   }
 

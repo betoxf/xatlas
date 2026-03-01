@@ -39,6 +39,10 @@ export class TmuxManager {
   private workspaceHash: string;
   private tmuxAvailable: boolean | null = null;
   private userShell: string = 'bash'; // Default to bash
+  private terminalIdCounter = 0;
+  private refreshTrackedSessionsPromise: Promise<void> | null = null;
+  private lastTrackedRefreshAt = 0;
+  private trackedRefreshIntervalMs = 15000;
 
   private static readonly SESSION_PREFIX = 'xvsc';
   private static readonly HISTORY_LIMIT = 50000;
@@ -246,26 +250,51 @@ export class TmuxManager {
     // -d: detached, -s: session name, -c: working directory
     await execAsync(`tmux new-session -d -s ${sessionName} -c "${workDir}"`);
 
-    // Configure session for long-running commands and stability
-    const options = [
-      `history-limit ${TmuxManager.HISTORY_LIMIT}`,          // Large scrollback buffer
-      `remain-on-exit on`,                                     // Keep pane alive after process exits
+    // Configure session + window options for long-running commands and stability.
+    // Important: history-limit/remain-on-exit/rename options are WINDOW options in tmux,
+    // so they must be set with set-window-option to actually apply.
+    const sessionOptions = [
       `status off`,                                            // Disable status bar (cleaner for embedded)
-      `automatic-rename off`,                                  // Don't auto-rename windows
-      `allow-rename off`,                                      // Prevent external rename
       `set-clipboard off`,                                     // Disable clipboard (faster, less issues)
       `default-terminal "screen-256color"`,                    // Proper terminal type
       `assume-paste-time 1`,                                   // Reduce paste delays
       `destroy-unattached off`,                                // Don't kill when detached
+      `mouse off`,                                             // Keep native xterm scrollback behavior
+    ];
+    const windowOptions = [
+      `history-limit ${TmuxManager.HISTORY_LIMIT}`,            // Large scrollback buffer
+      `remain-on-exit on`,                                     // Keep pane alive after process exits
+      `automatic-rename off`,                                  // Don't auto-rename windows
+      `allow-rename off`,                                      // Prevent external rename
     ];
 
-    for (const option of options) {
+    for (const option of sessionOptions) {
       try {
         await execAsync(`tmux set-option -t ${sessionName} ${option}`);
       } catch (err) {
-        // Some options might fail in different tmux versions - log but continue
-        console.warn(`[TmuxManager] Failed to set option "${option}":`, err);
+        console.warn(`[TmuxManager] Failed to set session option "${option}":`, err);
       }
+    }
+
+    for (const option of windowOptions) {
+      try {
+        await execAsync(`tmux set-window-option -t ${sessionName} ${option}`);
+      } catch (err) {
+        console.warn(`[TmuxManager] Failed to set window option "${option}":`, err);
+      }
+    }
+
+    // Persist the logical terminal name in session metadata so we can recover
+    // it across extension reloads instead of falling back to pane command names.
+    const escapedTerminalName = terminalName
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\$/g, '\\$')
+      .replace(/`/g, '\\`');
+    try {
+      await execAsync(`tmux set-option -t ${sessionName} @xvsc_terminal_name "${escapedTerminalName}"`);
+    } catch {
+      // Custom options may be unavailable in older tmux builds; continue with defaults.
     }
 
     // Track the session
@@ -289,7 +318,10 @@ export class TmuxManager {
     cwd?: string,
     env?: Record<string, string>
   ): Promise<{ terminal: vscode.Terminal; sessionName: string }> {
-    const terminalId = Date.now();
+    // Use millisecond timestamp + rolling suffix to avoid session name collisions
+    // when multiple terminals are created in the same millisecond.
+    this.terminalIdCounter = (this.terminalIdCounter + 1) % 1000;
+    const terminalId = Date.now() * 1000 + this.terminalIdCounter;
     const sessionName = await this.createSession(terminalId, name, cwd);
 
     // Create VS Code terminal that attaches to the tmux session
@@ -497,6 +529,18 @@ export class TmuxManager {
   }
 
   /**
+   * Get session info by tmux session name (e.g., xvsc_abc123_12345)
+   */
+  public getInfoBySessionName(sessionName: string): TmuxSessionInfo | undefined {
+    for (const info of this.sessions.values()) {
+      if (info.sessionName === sessionName) {
+        return info;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Register an existing terminal with tmux
    * Creates a tmux session and tracks it, but doesn't modify the terminal
    * (used for terminals created outside our control)
@@ -542,6 +586,125 @@ export class TmuxManager {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Rebuild in-memory session tracking from live tmux sessions.
+   * This is needed after extension reloads so collaborative sessions remain discoverable.
+   */
+  public async refreshTrackedSessions(force: boolean = false): Promise<void> {
+    if (!force) {
+      if (this.refreshTrackedSessionsPromise) {
+        return this.refreshTrackedSessionsPromise;
+      }
+      if (
+        this.lastTrackedRefreshAt > 0 &&
+        Date.now() - this.lastTrackedRefreshAt < this.trackedRefreshIntervalMs
+      ) {
+        return;
+      }
+    }
+
+    const refreshPromise = this.refreshTrackedSessionsInternal();
+    this.refreshTrackedSessionsPromise = refreshPromise;
+    try {
+      await refreshPromise;
+      this.lastTrackedRefreshAt = Date.now();
+    } finally {
+      if (this.refreshTrackedSessionsPromise === refreshPromise) {
+        this.refreshTrackedSessionsPromise = null;
+      }
+    }
+  }
+
+  private async refreshTrackedSessionsInternal(): Promise<void> {
+    if (!(await this.isAvailable())) {
+      return;
+    }
+
+    const sessions = await this.listSessions();
+    const nextById = new Map<number, TmuxSessionInfo>();
+    const nextByName = new Map<string, TmuxSessionInfo>();
+    const sessionMeta = await this.getSessionMetadataFromPanes();
+
+    for (const sessionName of sessions) {
+      const suffix = sessionName.split('_').pop() || '';
+      const parsedId = Number(suffix);
+      if (!Number.isFinite(parsedId)) {
+        continue;
+      }
+
+      const existing = this.sessions.get(parsedId);
+      const meta = sessionMeta.get(sessionName);
+      let cwd = meta?.cwd || existing?.cwd || '';
+      let terminalName = existing?.terminalName || meta?.terminalName || sessionName;
+
+      // Read persisted terminal name only for sessions we don't already know well.
+      const shouldLookupPersistedName =
+        !existing ||
+        !existing.terminalName ||
+        existing.terminalName === sessionName ||
+        existing.terminalName === (meta?.terminalName || '');
+
+      if (shouldLookupPersistedName) {
+        try {
+          const { stdout } = await execAsync(
+            `tmux show-options -v -t ${sessionName} @xvsc_terminal_name`
+          );
+          const persisted = stdout.trim();
+          if (persisted) {
+            terminalName = persisted;
+          }
+        } catch {
+          // No persisted terminal name for this session.
+        }
+      }
+
+      const info: TmuxSessionInfo = {
+        sessionName,
+        terminalName: terminalName || existing?.terminalName || sessionName,
+        terminalId: parsedId,
+        cwd: cwd || existing?.cwd,
+      };
+
+      nextById.set(parsedId, info);
+      nextByName.set(info.terminalName, info);
+    }
+
+    this.sessions = nextById;
+    this.sessionByName = nextByName;
+  }
+
+  private async getSessionMetadataFromPanes(): Promise<
+    Map<string, { cwd: string; terminalName: string }>
+  > {
+    const result = new Map<string, { cwd: string; terminalName: string }>();
+    const prefix = `${TmuxManager.SESSION_PREFIX}_${this.workspaceHash}_`;
+
+    try {
+      const { stdout } = await execAsync(
+        'tmux list-panes -a -F "#{session_name}|#{pane_current_path}|#{window_name}"'
+      );
+      const lines = stdout.split('\n').filter(Boolean);
+
+      for (const line of lines) {
+        const [sessionName, cwd, terminalName] = line.split('|');
+        if (!sessionName || !sessionName.startsWith(prefix)) {
+          continue;
+        }
+        if (result.has(sessionName)) {
+          continue;
+        }
+        result.set(sessionName, {
+          cwd: cwd || '',
+          terminalName: terminalName || sessionName,
+        });
+      }
+    } catch {
+      // Keep best-effort defaults when metadata lookup fails.
+    }
+
+    return result;
   }
 
   /**

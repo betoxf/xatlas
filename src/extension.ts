@@ -8,7 +8,6 @@ import {
 } from './server';
 import { registerAllTools } from './tools';
 import { DashboardPanel } from './dashboard/DashboardPanel';
-import { DashboardViewProvider } from './dashboard/DashboardViewProvider';
 import { AgentDiscovery } from './services/agentDiscovery';
 import { TmuxManager } from './services/tmuxManager';
 import { NotificationService } from './services/notificationService';
@@ -32,15 +31,6 @@ export function activate(context: vscode.ExtensionContext) {
   dashboardStatusBar.command = 'vscode-mcp-server.openDashboard';
   dashboardStatusBar.show();
   context.subscriptions.push(dashboardStatusBar);
-
-  // Register sidebar webview provider
-  const dashboardViewProvider = new DashboardViewProvider(context.extensionUri);
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      DashboardViewProvider.viewType,
-      dashboardViewProvider
-    )
-  );
 
   // Register tools
   registerAllTools();

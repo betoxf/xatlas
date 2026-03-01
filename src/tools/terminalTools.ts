@@ -361,7 +361,17 @@ function registerTerminalSend(): void {
 
       // Fall back to VS Code's sendText if tmux failed or not available
       if (!sentViaTmux) {
-        terminal.sendText(text, addNewLine);
+        if (addNewLine && text.length > 0) {
+          // Two-step approach: send text first, then Enter separately.
+          // VS Code's sendText with addNewLine=true can trigger bracket-paste mode
+          // in zsh, which requires a second Enter to execute. Splitting the send
+          // into text + delayed Enter ensures reliable execution.
+          terminal.sendText(text, false);
+          await new Promise(resolve => setTimeout(resolve, 50));
+          terminal.sendText('\r', false);
+        } else {
+          terminal.sendText(text, addNewLine);
+        }
       }
 
       // Record command in terminal history (MCP-sourced)

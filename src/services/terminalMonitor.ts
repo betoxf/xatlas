@@ -109,23 +109,20 @@ export class TerminalMonitor {
    */
   public async getStatus(): Promise<TerminalStatus[]> {
     const sessions = await this.listTmuxSessions();
-    const statuses: TerminalStatus[] = [];
+    const targets = sessions.filter((session) => session.startsWith('xvsc_')); // Only monitor dashboard terminals
+    const statuses = await Promise.all(
+      targets.map(async (session) => {
+        try {
+          const content = await this.capturePane(session, 30);
+          return this.analyzeTerminal(session, content);
+        } catch {
+          // Session might have been killed
+          return null;
+        }
+      })
+    );
 
-    for (const session of sessions) {
-      if (!session.startsWith('xvsc_')) {
-        continue; // Only monitor dashboard terminals
-      }
-
-      try {
-        const content = await this.capturePane(session, 50);
-        const status = this.analyzeTerminal(session, content);
-        statuses.push(status);
-      } catch (err) {
-        // Session might have been killed
-      }
-    }
-
-    return statuses;
+    return statuses.filter((status): status is TerminalStatus => status !== null);
   }
 
   /**
@@ -176,10 +173,14 @@ export class TerminalMonitor {
 
     // Detect agent type
     let agentType: TerminalStatus['agentType'] = 'unknown';
-    if (content.includes('Claude Code') || content.includes('▐▛███▜▌')) {
+    if (content.includes('Claude Code') || content.includes('▐▛███▜▌') || content.includes('claude-code') || content.includes('Anthropic')) {
       agentType = 'claude';
+    } else if (content.includes('codex') || content.includes('Codex')) {
+      agentType = 'opencode'; // Reuse opencode for codex detection
     } else if (content.includes('GPT-') || content.includes('opencode') || content.includes('Auto (Off)')) {
       agentType = 'opencode';
+    } else if (content.includes('aider') || content.includes('Aider')) {
+      agentType = 'shell'; // Aider
     } else if (content.match(/\$\s*❯?\s*$/) && !content.includes('Claude')) {
       agentType = 'shell';
     }
@@ -209,13 +210,25 @@ export class TerminalMonitor {
       }
     }
 
-    // Check for processing indicators
+    // Check for processing indicators (specific to AI agents)
     const processingIndicators = [
-      /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/, // Spinner
-      /\.\.\.$/, // Trailing dots
-      /Thinking|Processing|Working|Reading|Writing|Searching/i,
+      /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/, // Spinner characters
+      /Thinking\.\.\./i,
+      /Processing\.\.\./i,
+      /Working on/i,
+      /Reading\s+\S+/i,   // Reading file/etc
+      /Writing\s+\S+/i,   // Writing file/etc
+      /Searching\s+\S+/i, // Searching for/etc
       /⏳/,
-      /━+.*%/, // Progress bar
+      /━+.*\d+%/,         // Progress bar with percentage
+      /Running\s+\S+/i,   // Running command
+      /Analyzing/i,
+      /Compiling/i,
+      // Claude Code specific
+      /●.*Read|●.*Write|●.*Edit|●.*Bash|●.*Glob|●.*Grep/i, // Tool call markers
+      /Calling\s+\w+/i,   // Calling tool
+      /Using\s+\w+\s+tool/i,
+      /Executing/i,
     ];
 
     for (const indicator of processingIndicators) {
@@ -225,14 +238,32 @@ export class TerminalMonitor {
       }
     }
 
-    // Check for waiting for input (question/options)
+    // Check for waiting for input (question/options) - more specific patterns
     const questionIndicators = [
-      /\?\s*$/m, // Ends with ?
-      /Select|Choose|Pick|Which|Options:/i,
-      /\[Y\/n\]|\[y\/N\]/i,
-      /Enter.*:|Input.*:/i,
-      /❯\s*\[.*\]/,  // Selection brackets
-      /^\s*>\s*\[/m, // Selection list
+      /\[Y\/n\]|\[y\/N\]/i,           // Yes/No prompts
+      /\(y\/n\)/i,                     // Yes/No in parens
+      /Select.*:/i,                    // Selection prompts
+      /Choose.*:/i,
+      /Pick.*:/i,
+      /Options:/i,
+      /❯\s*\[.*\]/,                   // Selection brackets
+      /^\s*>\s*\[/m,                  // Selection list
+      /What would you like/i,          // Claude's question patterns
+      /How should I/i,
+      /Should I\s+\w+\?/i,            // Should I continue?
+      /Do you want\s+/i,
+      /Would you like\s+/i,
+      /Which\s+\w+\s+(?:would|should|do)/i, // Which option would you prefer?
+      /Enter\s+(?:your|a|the)\s+\w+:/i,     // Enter your name:
+      /Please\s+(?:select|choose|pick|enter)/i,
+      // Claude Code specific question patterns
+      /\[.*\(Recommended\)\]/i,       // Options with recommended choice
+      /Press.*to continue/i,          // Press enter to continue
+      /Confirm/i,                      // Confirmation prompts
+      /Proceed\?/i,                    // Proceed?
+      /Continue\?/i,                   // Continue?
+      /Approve.*\?/i,                  // Approve?
+      /Accept.*\?/i,                   // Accept?
     ];
 
     for (const indicator of questionIndicators) {
@@ -245,24 +276,56 @@ export class TerminalMonitor {
       }
     }
 
-    // Check for completed state (just finished something)
-    if (lastLines.includes('✓') || lastLines.includes('Done') || lastLines.includes('Completed') || lastLines.includes('Success')) {
-      if (state === 'unknown') {
-        state = 'completed';
+    // Check for completed state - more specific patterns
+    const completedPatterns = [
+      /✓\s+(?:Task|Done|Complete|Finished)/i,
+      /✔/,
+      /Task\s+completed/i,
+      /Successfully\s+(?:created|updated|fixed|completed)/i,
+      /All\s+\d+\s+\w+\s+(?:fixed|updated|created|completed)/i,
+      /Finished\s+(?:processing|running|executing)/i,
+    ];
+
+    if (state === 'unknown') {
+      for (const pattern of completedPatterns) {
+        if (pattern.test(lastLines)) {
+          state = 'completed';
+          break;
+        }
       }
     }
 
-    // Check for error state
-    if (lastLines.includes('Error:') || lastLines.includes('Failed') || lastLines.includes('✗')) {
-      state = 'error';
+    // Check for error state - more specific patterns
+    const errorPatterns = [
+      /Error:\s+\S+/i,      // Error: something
+      /Failed\s+to\s+/i,    // Failed to do something
+      /✗\s+/,               // X mark followed by text
+      /❌/,
+      /FATAL/i,
+      /Exception:\s+/i,
+      /Traceback/i,
+      /panic:/i,
+      /Command\s+failed/i,
+    ];
+
+    for (const pattern of errorPatterns) {
+      if (pattern.test(lastLines)) {
+        state = 'error';
+        break;
+      }
     }
 
-    // Check for idle/ready state
+    // Check for idle/ready state (agent waiting for next task)
     const idlePatterns = [
-      /❯\s*$/m, // Empty prompt
-      /❯\s*Try\s*"/m, // Suggestion prompt
-      />\s*Try\s*"/m, // OpenCode suggestion
-      /\$\s*$/m, // Shell prompt
+      /❯\s*$/m,                       // Empty prompt (Claude Code)
+      /❯\s*Try\s*"/m,                 // Suggestion prompt (Claude Code)
+      />\s*Try\s*"/m,                 // OpenCode suggestion
+      /\$\s*$/m,                      // Shell prompt
+      /claude>\s*$/m,                 // Claude Code prompt
+      /You:\s*$/m,                    // Chat-style prompt
+      />>>\s*$/m,                     // Python-style prompt
+      /aider>\s*$/m,                  // Aider prompt
+      /codex>\s*$/m,                  // Codex prompt
     ];
 
     if (state === 'unknown') {

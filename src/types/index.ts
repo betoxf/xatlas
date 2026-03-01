@@ -2,14 +2,14 @@
 
 export interface MCPRequest {
   jsonrpc: '2.0';
-  id: string | number;
+  id?: string | number | null;
   method: string;
   params?: Record<string, unknown>;
 }
 
 export interface MCPResponse {
   jsonrpc: '2.0';
-  id: string | number;
+  id: string | number | null;
   result?: unknown;
   error?: MCPError;
 }
