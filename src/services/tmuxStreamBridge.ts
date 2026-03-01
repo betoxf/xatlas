@@ -327,14 +327,17 @@ export class TmuxStreamBridge {
 
     try {
       const { stdout } = await execAsync(
-        `tmux capture-pane -t ${target} -p -e -J -S -${safeLines}`,
+        // Do not use -e here: escape/control sequences in snapshots can move the
+        // cursor to a different row than the visible prompt, which makes typing
+        // appear detached from the cwd/prompt line after restore.
+        `tmux capture-pane -t ${target} -p -J -S -${safeLines}`,
         { maxBuffer: TmuxStreamBridge.CAPTURE_MAX_BUFFER }
       );
       return stdout;
     } catch {
       try {
         const { stdout } = await execAsync(
-          `tmux capture-pane -t ${target} -p -e -S -${safeLines}`,
+          `tmux capture-pane -t ${target} -p -S -${safeLines}`,
           { maxBuffer: TmuxStreamBridge.CAPTURE_MAX_BUFFER }
         );
         return stdout;
