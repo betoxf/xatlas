@@ -38,7 +38,9 @@ interface StreamInfo {
  * instead of polling capture-pane snapshots.
  */
 export class TmuxStreamBridge {
-  private static readonly SNAPSHOT_SCROLLBACK_LINES = 20000;
+  private static readonly SNAPSHOT_SCROLLBACK_LINES = 6000;
+  private static readonly SNAPSHOT_MAX_RENDER_LINES = 1800;
+  private static readonly SNAPSHOT_MAX_CONSECUTIVE_BLANKS = 2;
   private static readonly MAX_CAPTURE_LINES = 50000;
   private static readonly CAPTURE_MAX_BUFFER = 32 * 1024 * 1024;
   private streams: Map<string, StreamInfo> = new Map(); // clientId -> StreamInfo
@@ -247,18 +249,72 @@ export class TmuxStreamBridge {
       TmuxStreamBridge.SNAPSHOT_SCROLLBACK_LINES
     );
     if (snapshot) {
-      // capture-pane snapshots typically end with a trailing newline.
-      // If replayed verbatim into xterm, this can push the first visible prompt
-      // line into scrollback by one row. Trim only one final newline.
-      let normalized = snapshot;
-      if (normalized.endsWith('\n')) {
-        normalized = normalized.slice(0, -1);
-      }
+      const normalized = this.normalizeSnapshot(snapshot);
 
       // For reconnect/open flows we want scrollback restoration. Sending pane history
       // directly gives xterm real scroll depth per terminal tab.
       streamInfo.callbacks.onData({ text: normalized, full: true });
     }
+  }
+
+  private normalizeSnapshot(snapshot: string): string {
+    let normalized = snapshot.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // Trim one trailing newline emitted by capture-pane.
+    if (normalized.endsWith('\n')) {
+      normalized = normalized.slice(0, -1);
+    }
+
+    // Remove trailing blank rows so prompt and cursor don't appear separated
+    // when restoring into xterm.
+    const lines = normalized.split('\n');
+    while (lines.length > 0 && this.isEffectivelyBlankLine(lines[lines.length - 1])) {
+      lines.pop();
+    }
+
+    const collapsed = this.collapseBlankRuns(
+      lines,
+      TmuxStreamBridge.SNAPSHOT_MAX_CONSECUTIVE_BLANKS
+    );
+
+    if (collapsed.length > TmuxStreamBridge.SNAPSHOT_MAX_RENDER_LINES) {
+      return collapsed
+        .slice(collapsed.length - TmuxStreamBridge.SNAPSHOT_MAX_RENDER_LINES)
+        .join('\n');
+    }
+
+    return collapsed.join('\n');
+  }
+
+  private isEffectivelyBlankLine(line: string): boolean {
+    if (!line) {
+      return true;
+    }
+    const withoutAnsi = this.stripAnsi(line);
+    return withoutAnsi.trim().length === 0;
+  }
+
+  private stripAnsi(text: string): string {
+    return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g, '');
+  }
+
+  private collapseBlankRuns(lines: string[], maxConsecutiveBlanks: number): string[] {
+    const output: string[] = [];
+    let blankRun = 0;
+
+    for (const line of lines) {
+      if (this.isEffectivelyBlankLine(line)) {
+        blankRun += 1;
+        if (blankRun <= maxConsecutiveBlanks) {
+          output.push('');
+        }
+      } else {
+        blankRun = 0;
+        output.push(line);
+      }
+    }
+
+    return output;
   }
 
   /**
@@ -271,7 +327,7 @@ export class TmuxStreamBridge {
 
     try {
       const { stdout } = await execAsync(
-        `tmux capture-pane -t ${target} -p -e -N -S -${safeLines}`,
+        `tmux capture-pane -t ${target} -p -e -J -S -${safeLines}`,
         { maxBuffer: TmuxStreamBridge.CAPTURE_MAX_BUFFER }
       );
       return stdout;

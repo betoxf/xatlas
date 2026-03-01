@@ -798,10 +798,20 @@ export class AgentDiscovery {
   }
 
   private outputIndicatesError(text: string): boolean {
-    const lastFewLines = text.split('\n').slice(-15).join('\n');
+    const lines = text
+      .split('\n')
+      .slice(-20)
+      .map((line) => line.replace(/\r/g, '').trimEnd())
+      .filter((line) => line.trim().length > 0);
+
+    if (lines.length === 0) {
+      return false;
+    }
+
     const patterns = [
       /Error:/i,
       /Failed:/i,
+      /Failed to /i,
       /✗/,
       /❌/,
       /FATAL/i,
@@ -809,7 +819,50 @@ export class AgentDiscovery {
       /Traceback/i,
       /panic:/i,
     ];
-    return patterns.some((p) => p.test(lastFewLines));
+
+    const tailBlock = lines.slice(-6).join('\n');
+    if (this.outputIndicatesBenignStartupWarning(tailBlock)) {
+      return false;
+    }
+
+    const last = lines[lines.length - 1];
+    const previous = lines[lines.length - 2] ?? '';
+
+    if (patterns.some((p) => p.test(last))) {
+      return !this.outputIndicatesBenignStartupWarning(last);
+    }
+
+    if (this.looksLikePrompt(last) && patterns.some((p) => p.test(previous))) {
+      return !this.outputIndicatesBenignStartupWarning(previous);
+    }
+
+    return false;
+  }
+
+  private outputIndicatesBenignStartupWarning(text: string): boolean {
+    if (!text) {
+      return false;
+    }
+
+    const patterns = [
+      /MCP\s+client\s+for\s+['"]?\w+['"]?\s+failed\s+to\s+start/i,
+      /failed\s+to\s+start\s+MCP\s+client/i,
+      /MCP\s+server\s+.*\s+is\s+not\s+configured/i,
+    ];
+    return patterns.some((pattern) => pattern.test(text));
+  }
+
+  private looksLikePrompt(line: string): boolean {
+    if (!line) {
+      return false;
+    }
+
+    const trimmed = line.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '').trimEnd();
+    if (!trimmed || trimmed.length > 120) {
+      return false;
+    }
+
+    return /[$#%>❯]\s*$/.test(trimmed);
   }
 
   private outputIndicatesContextWarning(text: string): boolean {

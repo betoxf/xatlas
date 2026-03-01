@@ -38,7 +38,6 @@ export class DashboardPanel {
   private terminalClientIds = new Map<string, vscode.Terminal>(); // clientId -> terminal
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
-    console.log('[DashboardPanel] Constructor called');
     this.panel = panel;
     this.extensionUri = extensionUri;
 
@@ -46,11 +45,9 @@ export class DashboardPanel {
     this.terminalWatcher = TerminalWatcher.getInstance();
     this.agentDiscovery = AgentDiscovery.getInstance(this.terminalWatcher);
     this.tmuxBridge = new TmuxStreamBridge();
-    console.log('[DashboardPanel] Services initialized');
 
     // Set the webview's initial html content
     this.update();
-    console.log('[DashboardPanel] HTML content set');
 
     // Listen for when the panel is disposed
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -58,13 +55,11 @@ export class DashboardPanel {
     // Handle messages from the webview
     this.panel.webview.onDidReceiveMessage(
       message => {
-        console.log('[DashboardPanel] onDidReceiveMessage callback triggered');
         this.handleWebviewMessage(message);
       },
       null,
       this.disposables
     );
-    console.log('[DashboardPanel] Message handler registered');
 
     // Update when panel becomes visible
     this.panel.onDidChangeViewState(
@@ -90,19 +85,16 @@ export class DashboardPanel {
    * Create or show the dashboard panel
    */
   public static createOrShow(extensionUri: vscode.Uri): DashboardPanel {
-    console.log('[DashboardPanel] createOrShow called');
     const column = vscode.window.activeTextEditor
       ? vscode.window.activeTextEditor.viewColumn
       : undefined;
 
     // If we already have a panel, show it
     if (DashboardPanel.currentPanel) {
-      console.log('[DashboardPanel] Revealing existing panel');
       DashboardPanel.currentPanel.panel.reveal(column);
       return DashboardPanel.currentPanel;
     }
 
-    console.log('[DashboardPanel] Creating new panel');
     // Otherwise, create a new panel
     const panel = vscode.window.createWebviewPanel(
       DashboardPanel.viewType,
@@ -120,7 +112,6 @@ export class DashboardPanel {
     );
 
     DashboardPanel.currentPanel = new DashboardPanel(panel, extensionUri);
-    console.log('[DashboardPanel] Panel created and assigned to currentPanel');
     return DashboardPanel.currentPanel;
   }
 
@@ -268,8 +259,6 @@ export class DashboardPanel {
    * Handle messages from the webview
    */
   private async handleWebviewMessage(message: any): Promise<void> {
-    console.log(`[DashboardPanel] handleWebviewMessage received:`, message.command || message.type, message);
-
     if (
       this.isMirrorMode() &&
       message.command &&
@@ -2442,7 +2431,6 @@ export class DashboardPanel {
     const livePreviewHoldMs = 1500;
     const previewThrottleMs = 500; // Increased from 120ms to reduce flickering
     const previewUpdateDebounceMs = 800; // Wait for terminal to be idle before updating preview
-    const activityRefreshMs = 10000;
     const notificationThrottleMs = 3000;
     const previewFontSizing = {
       min: 5,
@@ -2610,12 +2598,10 @@ export class DashboardPanel {
           break;
 
         case 'pty:created':
-          console.log('[Webview] Received pty:created message:', message);
           handlePtyCreated(message);
           break;
 
         case 'pty:data':
-          console.log('[Webview] Received pty:data message, id:', message.id, 'data length:', message.data ? message.data.length : 0);
           handlePtyData(message);
           break;
 
@@ -2645,14 +2631,10 @@ export class DashboardPanel {
           break;
 
         case 'mcp:createEmbeddedTerminal':
-          console.log('[Dashboard] Received mcp:createEmbeddedTerminal message:', message);
-          // Report back to extension for debugging
-          vscode.postMessage({ command: 'debug:log', message: 'Webview received mcp:createEmbeddedTerminal for: ' + message.projectPath });
           expandCardTerminalByMcp(message.projectPath, message.name);
           break;
 
         case 'mcp:openCardTerminal':
-          console.log('[Dashboard] Received mcp:openCardTerminal message:', message);
           handleMcpOpenCardTerminal(message.projectPath, {
             terminalName: message.terminalName,
             terminalId: message.terminalId,
@@ -2661,7 +2643,6 @@ export class DashboardPanel {
           break;
 
         case 'mcp:scrollToCard':
-          console.log('[Dashboard] Received mcp:scrollToCard message:', message);
           scrollToCard(message.projectPath);
           break;
 
@@ -2742,14 +2723,11 @@ export class DashboardPanel {
       event.stopPropagation();
 
       const dataTransfer = event.dataTransfer;
-      if (!dataTransfer || !dataTransfer.files || dataTransfer.files.length === 0) {
+      if (!dataTransfer) {
         return;
       }
 
-      const filePaths = Array.from(dataTransfer.files)
-        .map((file) => file.path || file.name || '')
-        .filter((value) => value);
-
+      const filePaths = extractDroppedFilePaths(dataTransfer);
       if (filePaths.length === 0) {
         return;
       }
@@ -2760,6 +2738,95 @@ export class DashboardPanel {
       }
 
       sendDropToWindow(targetWindow, filePaths);
+    }
+
+    function extractDroppedFilePaths(dataTransfer) {
+      const uniquePaths = new Set();
+
+      if (dataTransfer.files && dataTransfer.files.length > 0) {
+        for (const file of Array.from(dataTransfer.files)) {
+          const candidate = normalizeDroppedPath(file.path || '');
+          if (candidate) {
+            uniquePaths.add(candidate);
+            continue;
+          }
+
+          if (file.name) {
+            uniquePaths.add(file.name);
+          }
+        }
+      }
+
+      const uriList = dataTransfer.getData('text/uri-list');
+      if (uriList) {
+        for (const rawLine of uriList.split('\n')) {
+          const line = rawLine.trim();
+          if (!line || line.startsWith('#')) {
+            continue;
+          }
+
+          const candidate = normalizeDroppedPath(uriToFilePath(line) || line);
+          if (candidate) {
+            uniquePaths.add(candidate);
+          }
+        }
+      }
+
+      const plainText = dataTransfer.getData('text/plain');
+      if (plainText) {
+        for (const piece of plainText.split(/\s+/)) {
+          const candidate = normalizeDroppedPath(uriToFilePath(piece) || piece);
+          if (candidate) {
+            uniquePaths.add(candidate);
+          }
+        }
+      }
+
+      return Array.from(uniquePaths);
+    }
+
+    function uriToFilePath(uriText) {
+      if (!uriText || !/^file:/i.test(uriText)) {
+        return '';
+      }
+
+      try {
+        const parsed = new URL(uriText);
+        if (parsed.protocol !== 'file:') {
+          return '';
+        }
+
+        let pathname = decodeURIComponent(parsed.pathname || '');
+        if (/^\\/[A-Za-z]:\\//.test(pathname)) {
+          pathname = pathname.slice(1);
+        }
+
+        if (parsed.host) {
+          return normalizeDroppedPath('//'+ parsed.host + pathname);
+        }
+
+        return normalizeDroppedPath(pathname);
+      } catch {
+        return '';
+      }
+    }
+
+    function normalizeDroppedPath(value) {
+      if (!value) {
+        return '';
+      }
+
+      let normalized = String(value).trim();
+      if (!normalized) {
+        return '';
+      }
+
+      if ((normalized.startsWith('"') && normalized.endsWith('"')) || (normalized.startsWith("'") && normalized.endsWith("'"))) {
+        normalized = normalized.slice(1, -1).trim();
+      }
+
+      normalized = normalized.replace(/^file:\\/\\//i, '');
+      return normalized;
     }
 
     function resolveDropTarget(event) {
@@ -3169,10 +3236,18 @@ export class DashboardPanel {
     }
 
     function outputIndicatesError(text) {
-      const lastFewLines = text.split('\\n').slice(-15).join('\\n');
-      return [
+      const lastLines = text.split('\\n').slice(-20);
+      const nonEmpty = lastLines
+        .map((line) => line.replace(/\\r/g, '').trimEnd())
+        .filter((line) => line.trim().length > 0);
+      if (nonEmpty.length === 0) {
+        return false;
+      }
+
+      const errorPatterns = [
         /Error:\\s+\\S+/i,
         /Failed\\s+to\\s+/i,
+        /Failed:/i,
         /✗\\s+/,
         /❌/,
         /FATAL/i,
@@ -3180,7 +3255,37 @@ export class DashboardPanel {
         /Traceback/i,
         /panic:/i,
         /Command\\s+failed/i,
-      ].some((pattern) => pattern.test(lastFewLines));
+      ];
+
+      const tailBlock = nonEmpty.slice(-6).join('\\n');
+      if (outputIndicatesBenignStartupWarning(tailBlock)) {
+        return false;
+      }
+
+      const last = nonEmpty[nonEmpty.length - 1];
+      const previous = nonEmpty[nonEmpty.length - 2] || '';
+
+      if (errorPatterns.some((pattern) => pattern.test(last))) {
+        return !outputIndicatesBenignStartupWarning(last);
+      }
+
+      if (looksLikePrompt(last) && errorPatterns.some((pattern) => pattern.test(previous))) {
+        return !outputIndicatesBenignStartupWarning(previous);
+      }
+
+      return false;
+    }
+
+    function outputIndicatesBenignStartupWarning(text) {
+      if (!text) {
+        return false;
+      }
+
+      return [
+        /MCP\\s+client\\s+for\\s+['"]?\\w+['"]?\\s+failed\\s+to\\s+start/i,
+        /failed\\s+to\\s+start\\s+MCP\\s+client/i,
+        /MCP\\s+server\\s+.*\\s+is\\s+not\\s+configured/i,
+      ].some((pattern) => pattern.test(text));
     }
 
     function outputIndicatesContextWarning(text) {
@@ -3331,7 +3436,7 @@ export class DashboardPanel {
       if (!windowState || !windowState.project) return;
       const normalizedActivity = activity === 'waiting' ? 'waiting_input' : activity;
       const now = Date.now();
-      if (windowState.activity === normalizedActivity && now - windowState.lastActivitySentAt < activityRefreshMs) {
+      if (windowState.activity === normalizedActivity) {
         return;
       }
 
@@ -3383,7 +3488,7 @@ export class DashboardPanel {
 
       const normalizedActivity = activity === 'waiting' ? 'waiting_input' : activity;
       const now = Date.now();
-      if (cardState.activity === normalizedActivity && now - cardState.lastActivitySentAt < activityRefreshMs) {
+      if (cardState.activity === normalizedActivity) {
         return;
       }
 
@@ -5744,19 +5849,14 @@ export class DashboardPanel {
     }
 
     function handlePtyData(message) {
-      console.log('[Webview] handlePtyData called, id:', message.id, 'data length:', message.data ? message.data.length : 0, 'full:', message.full, 'reconnect:', message.reconnect);
       const windowId = ptyToWindow.get(message.id);
-      console.log('[Webview] windowId from ptyToWindow:', windowId);
       const windowState = windows.get(windowId);
-      console.log('[Webview] windowState found:', !!windowState, 'has term:', !!(windowState && windowState.term));
       if (!windowState || !windowState.term) {
         pendingPtyData.set(message.id, message);
-        console.log('[Webview] No windowState or term, buffering data');
         return;
       }
 
       if (message.full) {
-        console.log('[Webview] Received full snapshot, resetting terminal state');
         windowState.term.reset();
         windowState.outputTail = '';
         windowState.outputTailRaw = '';
@@ -5764,11 +5864,8 @@ export class DashboardPanel {
       }
 
       if (windowState && windowState.term) {
-        console.log('[Webview] Writing to terminal:', message.data.substring(0, 50) + '...');
         windowState.term.write(message.data);
         noteOutput(windowState, message.data);
-      } else {
-        console.log('[Webview] No windowState or term, cannot write');
       }
     }
 
