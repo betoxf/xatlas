@@ -30,6 +30,7 @@ export class DashboardPanel {
   private isRefreshing: boolean = false;
   private mirrorNoticeAt: number = 0;
   private mirrorHostLabel: string = 'primary';
+  private seededWorkspaceProject = false;
 
   // Tmux streaming bridge for embedded terminals
   private tmuxBridge: TmuxStreamBridge;
@@ -1277,6 +1278,19 @@ export class DashboardPanel {
         }
       } else {
         projects = await this.agentDiscovery.discoverProjects();
+
+        if (!this.seededWorkspaceProject && projects.length === 0) {
+          const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+          if (workspaceFolder?.uri?.fsPath) {
+            const workspacePath = workspaceFolder.uri.fsPath;
+            const tracked = this.agentDiscovery.getTrackedProjects();
+            if (!tracked.some(project => project.path === workspacePath)) {
+              this.agentDiscovery.addProject(workspacePath, path.basename(workspacePath));
+              projects = await this.agentDiscovery.discoverProjects();
+            }
+          }
+          this.seededWorkspaceProject = true;
+        }
       }
 
       this.panel.webview.postMessage({

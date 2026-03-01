@@ -15,7 +15,10 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:vscode-mcp-server.openDashboard",
+    "onCommand:vscode-mcp-server.addProject",
+    "onView:xerebroLauncherView"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -56,7 +59,8 @@
       "xerebroOperator": [
         {
           "id": "xerebroLauncherView",
-          "name": "Open Dashboard"
+          "name": "Open Dashboard",
+          "type": "webview"
         }
       ]
     },
