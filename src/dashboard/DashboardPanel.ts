@@ -2512,8 +2512,8 @@ export class DashboardPanel {
     const attentionIdleMs = 1200;
     const attentionCooldownMs = 2000;
     const outputTailLimit = 500;
-    const connectTimeoutMs = 6000;
-    const maxConnectAttempts = 2;
+    const connectTimeoutMs = 12000;
+    const maxConnectAttempts = 3;
     const previewLineCount = 20;
     const previewCaptureMultiplier = 3;
     const previewCaptureMax = 200;
@@ -2521,6 +2521,9 @@ export class DashboardPanel {
     const previewThrottleMs = 500; // Increased from 120ms to reduce flickering
     const previewUpdateDebounceMs = 800; // Wait for terminal to be idle before updating preview
     const activitySignalThrottleMs = 220;
+    const cardActivitySignalThrottleMs = 280;
+    const terminalWriteChunkSize = 8192;
+    const terminalWriteYieldMs = 0;
     const notificationThrottleMs = 3000;
     const previewFontSizing = {
       min: 5,
@@ -4884,14 +4887,32 @@ export class DashboardPanel {
       if (message.full) {
         cardState.term.reset();
         cardState.outputTail = '';
+        cardState.lastOutputAt = Date.now();
+        cardState.outputTail = updateOutputTail(cardState.outputTail, stripAnsi(message.data));
+        writeTerminalChunked(cardState.term, message.data, () => {
+          if (cardState.term) {
+            cardState.term.scrollToBottom();
+            if (cardState.isExpanded) {
+              cardState.term.focus();
+            }
+          }
+        });
+      } else {
+        cardState.term.write(message.data);
+        cardState.lastOutputAt = Date.now();
+        cardState.outputTail = updateOutputTail(cardState.outputTail, stripAnsi(message.data));
       }
 
-      cardState.term.write(message.data);
-      cardState.lastOutputAt = Date.now();
-      cardState.outputTail = updateOutputTail(cardState.outputTail, stripAnsi(message.data));
-
-      const signal = classifyActivitySignal(cardState.outputTail);
-      reportCardActivity(cardState, signal.activity, signal.detail);
+      const now = Date.now();
+      const shouldAnalyze =
+        !cardState.lastActivityCheckAt ||
+        now - cardState.lastActivityCheckAt >= cardActivitySignalThrottleMs ||
+        /[\r\n]/.test(message.data || '');
+      if (shouldAnalyze) {
+        cardState.lastActivityCheckAt = now;
+        const signal = classifyActivitySignal(cardState.outputTail);
+        reportCardActivity(cardState, signal.activity, signal.detail);
+      }
     }
 
     function handleCardPtyExit(message) {
@@ -5856,6 +5877,40 @@ export class DashboardPanel {
       sendResize(windowState, windowState.term.cols, windowState.term.rows);
     }
 
+    function writeTerminalChunked(term, text, onDone) {
+      if (!term || !text) {
+        if (typeof onDone === 'function') onDone();
+        return;
+      }
+
+      if (text.length <= terminalWriteChunkSize) {
+        term.write(text, () => {
+          if (typeof onDone === 'function') onDone();
+        });
+        return;
+      }
+
+      let offset = 0;
+      const writeNext = () => {
+        if (!term) {
+          if (typeof onDone === 'function') onDone();
+          return;
+        }
+
+        const chunk = text.slice(offset, offset + terminalWriteChunkSize);
+        offset += chunk.length;
+        term.write(chunk, () => {
+          if (offset >= text.length) {
+            if (typeof onDone === 'function') onDone();
+            return;
+          }
+          setTimeout(writeNext, terminalWriteYieldMs);
+        });
+      };
+
+      writeNext();
+    }
+
     function handlePtyCreated(message) {
       if (!message.clientId) {
         return;
@@ -5960,6 +6015,16 @@ export class DashboardPanel {
         windowState.outputTail = '';
         windowState.outputTailRaw = '';
         windowState.isReconnect = false;
+        noteOutput(windowState, message.data);
+        writeTerminalChunked(windowState.term, message.data, () => {
+          if (windowState.term) {
+            windowState.term.scrollToBottom();
+            if (windowState.id === activeWindowId) {
+              windowState.term.focus();
+            }
+          }
+        });
+        return;
       }
 
       if (windowState && windowState.term) {

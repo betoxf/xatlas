@@ -38,11 +38,12 @@ interface StreamInfo {
  * instead of polling capture-pane snapshots.
  */
 export class TmuxStreamBridge {
-  private static readonly SNAPSHOT_SCROLLBACK_LINES = 6000;
-  private static readonly SNAPSHOT_MAX_RENDER_LINES = 900;
+  private static readonly SNAPSHOT_SCROLLBACK_LINES = 1400;
+  private static readonly SNAPSHOT_MAX_RENDER_LINES = 420;
   private static readonly SNAPSHOT_MAX_CONSECUTIVE_BLANKS = 2;
   private static readonly MAX_CAPTURE_LINES = 50000;
   private static readonly CAPTURE_MAX_BUFFER = 32 * 1024 * 1024;
+  private static readonly STREAM_PENDING_MAX_CHARS = 128 * 1024;
   private streams: Map<string, StreamInfo> = new Map(); // clientId -> StreamInfo
   private tmux: TmuxManager;
 
@@ -199,8 +200,8 @@ export class TmuxStreamBridge {
     const reader = fs.createReadStream(streamInfo.pipePath, { encoding: 'utf8' });
     streamInfo.reader = reader;
 
-    // Debounce data sending - batch chunks together and send every 50ms max
-    const FLUSH_INTERVAL_MS = 50;
+    // Debounce data sending - batch chunks together to reduce UI thrash.
+    const FLUSH_INTERVAL_MS = 80;
 
     reader.on('data', (chunk: string | Buffer) => {
       if (!streamInfo.isActive || !chunk) {
@@ -212,6 +213,11 @@ export class TmuxStreamBridge {
 
       // Accumulate data
       streamInfo.pendingData += text;
+      if (streamInfo.pendingData.length > TmuxStreamBridge.STREAM_PENDING_MAX_CHARS) {
+        // Keep tail to preserve latest prompt/cursor updates when output floods.
+        streamInfo.pendingData =
+          streamInfo.pendingData.slice(-TmuxStreamBridge.STREAM_PENDING_MAX_CHARS);
+      }
 
       // Schedule flush if not already scheduled
       if (!streamInfo.flushTimer) {
