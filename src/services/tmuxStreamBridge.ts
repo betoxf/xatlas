@@ -307,15 +307,19 @@ export class TmuxStreamBridge {
     const target = this.shellEscape(sessionName);
     try {
       const { stdout } = await execAsync(
-        `tmux list-panes -t ${target} -F '#{cursor_x},#{cursor_y},#{pane_width},#{pane_height}'`,
+        `tmux list-panes -t ${target} -F '#{pane_active},#{cursor_x},#{cursor_y},#{pane_width},#{pane_height}'`,
         { maxBuffer: 16 * 1024 }
       );
-      const first = (stdout || '').split('\n').find(Boolean);
-      if (!first) {
+      const candidates = (stdout || '')
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+      if (candidates.length === 0) {
         return null;
       }
 
-      const [xRaw, yRaw, wRaw, hRaw] = first.split(',');
+      const activeLine = candidates.find(line => line.startsWith('1,')) || candidates[0];
+      const [, xRaw, yRaw, wRaw, hRaw] = activeLine.split(',');
       const x = Number.parseInt(xRaw || '', 10);
       const y = Number.parseInt(yRaw || '', 10);
       const width = Number.parseInt(wRaw || '', 10);
