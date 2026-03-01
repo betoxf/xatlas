@@ -16,9 +16,7 @@
   ],
   "activationEvents": [
     "onStartupFinished",
-    "onCommand:vscode-mcp-server.openDashboard",
-    "onCommand:vscode-mcp-server.addProject",
-    "onView:xerebroLauncherView"
+    "onView:aiAgentDashboard"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -39,28 +37,25 @@
         "command": "vscode-mcp-server.openDashboard",
         "title": "Open Operator",
         "icon": "$(layout)"
-      },
-      {
-        "command": "vscode-mcp-server.addProject",
-        "title": "Xerebro: Add Project",
-        "icon": "$(new-folder)"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "xerebroOperator",
-          "title": "Xerebro",
+          "id": "ai-agent-manager",
+          "title": "Operator",
           "icon": "resources/ai-agent-icon.svg"
         }
       ]
     },
     "views": {
-      "xerebroOperator": [
+      "ai-agent-manager": [
         {
-          "id": "xerebroLauncherView",
-          "name": "Open Dashboard",
-          "type": "webview"
+          "type": "webview",
+          "id": "aiAgentDashboard",
+          "name": "Operator",
+          "icon": "$(layout)",
+          "contextualTitle": "Operator"
         }
       ]
     },

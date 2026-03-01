@@ -8,7 +8,7 @@ import {
 } from './server';
 import { registerAllTools } from './tools';
 import { DashboardPanel } from './dashboard/DashboardPanel';
-import { DashboardLauncherViewProvider } from './dashboard/DashboardLauncherViewProvider';
+import { DashboardViewProvider } from './dashboard/DashboardViewProvider';
 import { AgentDiscovery } from './services/agentDiscovery';
 import { TmuxManager } from './services/tmuxManager';
 import { NotificationService } from './services/notificationService';
@@ -32,6 +32,15 @@ export function activate(context: vscode.ExtensionContext) {
   dashboardStatusBar.command = 'vscode-mcp-server.openDashboard';
   dashboardStatusBar.show();
   context.subscriptions.push(dashboardStatusBar);
+
+  // Register sidebar webview provider
+  const dashboardViewProvider = new DashboardViewProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      DashboardViewProvider.viewType,
+      dashboardViewProvider
+    )
+  );
 
   // Register tools
   registerAllTools();
@@ -90,28 +99,11 @@ export function activate(context: vscode.ExtensionContext) {
     }
   );
 
-  const addProjectCommand = vscode.commands.registerCommand(
-    'vscode-mcp-server.addProject',
-    async () => {
-      const panel = DashboardPanel.createOrShow(context.extensionUri);
-      await panel.promptAddProject();
-    }
-  );
-
-  // Lightweight sidebar launcher (Activity Bar icon -> open full dashboard)
-  const dashboardLauncherProvider = new DashboardLauncherViewProvider();
-  const dashboardLauncherRegistration = vscode.window.registerWebviewViewProvider(
-    DashboardLauncherViewProvider.viewType,
-    dashboardLauncherProvider
-  );
-
   context.subscriptions.push(
     startCommand,
     stopCommand,
     toggleCommand,
-    dashboardCommand,
-    addProjectCommand,
-    dashboardLauncherRegistration
+    dashboardCommand
   );
 
   // Listen for configuration changes
