@@ -34,8 +34,15 @@ export class DashboardPanel {
   private tmuxBridge: TmuxStreamBridge;
   // Track embedded terminal sessions: clientId -> { sessionName, projectPath, terminalId }
   private clientSessions: Map<string, { sessionName: string; projectPath: string; terminalId: number }> = new Map();
+  // Buffered input queues to avoid one tmux process spawn per keystroke.
+  private queuedInput: Map<
+    string,
+    { sessionName: string; buffer: string; flushing: boolean; timer?: NodeJS.Timeout }
+  > = new Map();
   // Track VS Code terminal associations for legacy PTY compatibility
   private terminalClientIds = new Map<string, vscode.Terminal>(); // clientId -> terminal
+  private static readonly INPUT_FLUSH_DELAY_MS = 8;
+  private static readonly INPUT_MAX_BUFFER_SIZE = 64000;
 
   private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
     this.panel = panel;
@@ -554,6 +561,7 @@ export class DashboardPanel {
               id: clientId,
               code: 0,
             });
+            this.clearQueuedInput(`pty:${clientId}`);
             this.clientSessions.delete(clientId);
           },
           onError: (error) => {
@@ -605,6 +613,83 @@ export class DashboardPanel {
     }
   }
 
+  private queueTmuxInput(queueKey: string, sessionName: string, data: string): void {
+    if (!data) {
+      return;
+    }
+
+    let entry = this.queuedInput.get(queueKey);
+    if (!entry || entry.sessionName !== sessionName) {
+      if (entry?.timer) {
+        clearTimeout(entry.timer);
+      }
+      entry = {
+        sessionName,
+        buffer: '',
+        flushing: false,
+      };
+      this.queuedInput.set(queueKey, entry);
+    }
+
+    entry.buffer += data;
+    if (entry.buffer.length > DashboardPanel.INPUT_MAX_BUFFER_SIZE) {
+      entry.buffer = entry.buffer.slice(-DashboardPanel.INPUT_MAX_BUFFER_SIZE);
+    }
+
+    this.scheduleQueuedInputFlush(queueKey);
+  }
+
+  private scheduleQueuedInputFlush(queueKey: string): void {
+    const entry = this.queuedInput.get(queueKey);
+    if (!entry || entry.flushing || entry.timer) {
+      return;
+    }
+
+    entry.timer = setTimeout(() => {
+      const current = this.queuedInput.get(queueKey);
+      if (!current) {
+        return;
+      }
+      current.timer = undefined;
+      void this.flushQueuedInput(queueKey);
+    }, DashboardPanel.INPUT_FLUSH_DELAY_MS);
+  }
+
+  private async flushQueuedInput(queueKey: string): Promise<void> {
+    const entry = this.queuedInput.get(queueKey);
+    if (!entry || entry.flushing || entry.buffer.length === 0) {
+      return;
+    }
+
+    const payload = entry.buffer;
+    entry.buffer = '';
+    entry.flushing = true;
+
+    try {
+      const tmux = TmuxManager.getInstance();
+      await tmux.sendKeys(entry.sessionName, payload, false);
+    } catch (error) {
+      console.error(`[DashboardPanel] Failed to flush input queue for ${queueKey}:`, error);
+    } finally {
+      const current = this.queuedInput.get(queueKey);
+      if (!current) {
+        return;
+      }
+      current.flushing = false;
+      if (current.buffer.length > 0) {
+        this.scheduleQueuedInputFlush(queueKey);
+      }
+    }
+  }
+
+  private clearQueuedInput(queueKey: string): void {
+    const entry = this.queuedInput.get(queueKey);
+    if (entry?.timer) {
+      clearTimeout(entry.timer);
+    }
+    this.queuedInput.delete(queueKey);
+  }
+
   /**
    * Send data to a terminal by client ID
    * Looks up the tmux session from clientSessions and sends keys directly
@@ -613,9 +698,7 @@ export class DashboardPanel {
     // First check embedded terminal sessions (tmux)
     const session = this.clientSessions.get(clientId);
     if (session) {
-      const tmux = TmuxManager.getInstance();
-      // Don't add newline - let the caller control that
-      await tmux.sendKeys(session.sessionName, data, false);
+      this.queueTmuxInput(`pty:${clientId}`, session.sessionName, data);
       return;
     }
 
@@ -683,6 +766,7 @@ export class DashboardPanel {
       await tmux.killSession(session.sessionName);
 
       // Clean up tracking
+      this.clearQueuedInput(`pty:${clientId}`);
       this.clientSessions.delete(clientId);
 
       // Notify webview
@@ -729,6 +813,7 @@ export class DashboardPanel {
     }
 
     await this.tmuxBridge.stopStream(clientId);
+    this.clearQueuedInput(`pty:${clientId}`);
     this.clientSessions.delete(clientId);
   }
 
@@ -933,6 +1018,7 @@ export class DashboardPanel {
             code: 0,
             projectPath,
           });
+          this.clearQueuedInput(`card:${clientId}`);
           this.cardClientSessions.delete(clientId);
         },
         onError: (error) => {
@@ -961,8 +1047,7 @@ export class DashboardPanel {
       return;
     }
 
-    const tmux = TmuxManager.getInstance();
-    await tmux.sendKeys(session.sessionName, data, false);
+    this.queueTmuxInput(`card:${clientId}`, session.sessionName, data);
   }
 
   /**
@@ -999,6 +1084,7 @@ export class DashboardPanel {
     }
 
     await this.tmuxBridge.stopStream(clientId);
+    this.clearQueuedInput(`card:${clientId}`);
     this.cardClientSessions.delete(clientId);
     // Note: We don't kill the tmux session - it stays alive for reconnection
   }
@@ -1015,6 +1101,7 @@ export class DashboardPanel {
     const tmux = TmuxManager.getInstance();
     await this.tmuxBridge.stopStream(clientId);
     await tmux.killSession(session.sessionName).catch(() => {});
+    this.clearQueuedInput(`card:${clientId}`);
     this.cardClientSessions.delete(clientId);
     console.log(`[DashboardPanel] Killed card terminal session: ${session.sessionName}`);
   }
@@ -1467,6 +1554,7 @@ export class DashboardPanel {
       if (session.projectPath === projectPath) {
         await this.tmuxBridge.stopStream(clientId);
         await tmux.killSession(session.sessionName).catch(() => {});
+        this.clearQueuedInput(`pty:${clientId}`);
         this.clientSessions.delete(clientId);
       }
     }
@@ -1476,6 +1564,7 @@ export class DashboardPanel {
       if (session.projectPath === projectPath) {
         await this.tmuxBridge.stopStream(clientId);
         await tmux.killSession(session.sessionName).catch(() => {});
+        this.clearQueuedInput(`card:${clientId}`);
         this.cardClientSessions.delete(clientId);
       }
     }
@@ -6098,6 +6187,7 @@ export class DashboardPanel {
       tmux.killSession(session.sessionName).catch(() => {
         // Ignore errors during cleanup
       });
+      this.clearQueuedInput(`pty:${clientId}`);
     }
     this.clientSessions.clear();
 
@@ -6106,6 +6196,7 @@ export class DashboardPanel {
       tmux.killSession(session.sessionName).catch(() => {
         // Ignore errors during cleanup
       });
+      this.clearQueuedInput(`card:${clientId}`);
     }
     this.cardClientSessions.clear();
     this.cardTerminalNameIndex.clear();
