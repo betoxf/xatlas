@@ -6,18 +6,348 @@ final class TerminalService {
 
     var sessions: [TerminalSession] = []
 
-    func createSession(title: String = "Terminal", projectID: UUID? = nil, workingDirectory: String? = nil) -> TerminalSession {
-        let session = TerminalSession(title: title, projectID: projectID)
+    private let tmux = TmuxService.shared
+
+    func createSession(title: String? = nil, projectID: UUID? = nil, workingDirectory: String? = nil) -> TerminalSession {
+        let sessionID = UUID().uuidString
+        let tmuxSessionName = "xatlas_\(sessionID.prefix(8).lowercased())"
+        let defaultTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? Self.defaultTitle(for: workingDirectory)
+
+        var session = TerminalSession(
+            id: sessionID,
+            tmuxSessionName: tmuxSessionName,
+            title: defaultTitle,
+            pinnedTitle: nil,
+            projectID: projectID,
+            workingDirectory: workingDirectory,
+            currentDirectory: workingDirectory,
+            isActive: true,
+            activityState: .idle,
+            lastCommand: nil,
+            semanticTaskKey: nil
+        )
+
+        if tmux.isAvailable(), tmux.ensureSession(name: tmuxSessionName, cwd: workingDirectory, title: defaultTitle) {
+            session.activityState = .idle
+        } else {
+            session.activityState = .error
+        }
+
         sessions.append(session)
+        notifyChange(for: session)
         return session
     }
 
-    func removeSession(_ id: String) {
+    func removeSession(_ id: String, killTmux: Bool = false) {
+        guard let session = session(id: id) else { return }
+        if killTmux {
+            _ = tmux.killSession(name: session.tmuxSessionName)
+        }
         sessions.removeAll { $0.id == id }
+        notifyChange(for: session)
+    }
+
+    func session(id: String) -> TerminalSession? {
+        sessions.first { $0.id == id }
     }
 
     func sessionsForProject(_ projectID: UUID?) -> [TerminalSession] {
-        guard let projectID else { return sessions }
+        guard let projectID else {
+            return sessions
+        }
         return sessions.filter { $0.projectID == projectID }
+    }
+
+    func displayTitle(for sessionID: String) -> String {
+        session(id: sessionID)?.displayTitle ?? "Terminal"
+    }
+
+    func snapshot(for sessionID: String, lines: Int = 200) -> String? {
+        guard let session = session(id: sessionID) else { return nil }
+        return tmux.capturePane(session: session.tmuxSessionName, lines: lines)
+    }
+
+    func rehydrateSessions(projects: [Project]) {
+        guard tmux.isAvailable() else { return }
+
+        let liveSessions = tmux.listManagedSessions()
+        let liveNames = Set(liveSessions.map(\.name))
+
+        for descriptor in liveSessions {
+            if let existingID = sessions.first(where: { $0.tmuxSessionName == descriptor.name })?.id {
+                updateSession(existingID) { session in
+                    if let title = descriptor.title?.nonEmpty, session.pinnedTitle == nil {
+                        session.title = title
+                    }
+                    if let cwd = descriptor.currentDirectory?.nonEmpty {
+                        session.currentDirectory = cwd
+                        session.workingDirectory = session.workingDirectory ?? cwd
+                    }
+                    session.projectID = Self.matchingProjectID(
+                        for: descriptor.currentDirectory,
+                        in: projects
+                    )
+                    session.activityState = .detached
+                    session.updatedAt = .now
+                }
+                continue
+            }
+
+            let currentDirectory = descriptor.currentDirectory?.nonEmpty
+            let restored = TerminalSession(
+                id: descriptor.name,
+                tmuxSessionName: descriptor.name,
+                title: descriptor.title?.nonEmpty ?? Self.defaultTitle(for: currentDirectory),
+                pinnedTitle: nil,
+                projectID: Self.matchingProjectID(for: currentDirectory, in: projects),
+                workingDirectory: currentDirectory,
+                currentDirectory: currentDirectory,
+                isActive: true,
+                activityState: .detached,
+                lastCommand: nil,
+                semanticTaskKey: nil,
+                createdAt: .now,
+                updatedAt: .now
+            )
+            sessions.append(restored)
+            notifyChange(for: restored)
+        }
+
+        for index in sessions.indices {
+            if !liveNames.contains(sessions[index].tmuxSessionName) {
+                sessions[index].activityState = .exited
+            }
+            sessions[index].projectID = Self.matchingProjectID(
+                for: sessions[index].currentDirectory ?? sessions[index].workingDirectory,
+                in: projects
+            )
+        }
+    }
+
+    @discardableResult
+    func ensureBackingSession(for sessionID: String) -> Bool {
+        guard let session = session(id: sessionID) else { return false }
+        let success = tmux.ensureSession(
+            name: session.tmuxSessionName,
+            cwd: session.currentDirectory ?? session.workingDirectory,
+            title: session.displayTitle
+        )
+        if success {
+            updateActivityState(.idle, for: sessionID)
+        } else {
+            updateActivityState(.error, for: sessionID)
+        }
+        return success
+    }
+
+    @discardableResult
+    func sendCommand(_ command: String, to sessionID: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let session = session(id: sessionID) else { return false }
+        guard ensureBackingSession(for: sessionID) else { return false }
+
+        let success = tmux.sendKeys(session: session.tmuxSessionName, keys: trimmed, pressEnter: true)
+        if success {
+            recordCommand(trimmed, for: sessionID)
+            updateActivityState(.running, for: sessionID)
+        } else {
+            updateActivityState(.error, for: sessionID)
+        }
+        return success
+    }
+
+    func recordCommand(_ command: String, for sessionID: String) {
+        let cleaned = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+
+        var updatedSessionName: String?
+        var updatedTitle: String?
+
+        updateSession(sessionID) { session in
+            session.lastCommand = cleaned
+            session.updatedAt = .now
+            session.activityState = .running
+
+            guard session.pinnedTitle == nil else { return }
+            guard let semantic = TerminalTitleHeuristics.semanticKey(for: cleaned) else { return }
+            let oldKey = session.semanticTaskKey
+            if oldKey == semantic { return }
+
+            session.semanticTaskKey = semantic
+            let nextTitle = TerminalTitleHeuristics.displayTitle(
+                for: cleaned,
+                semanticKey: semantic,
+                cwd: session.currentDirectory ?? session.workingDirectory
+            )
+            session.title = nextTitle
+            updatedSessionName = session.tmuxSessionName
+            updatedTitle = nextTitle
+        }
+
+        if let updatedSessionName, let updatedTitle {
+            _ = tmux.setSessionTitle(name: updatedSessionName, title: updatedTitle)
+        }
+    }
+
+    func updateCurrentDirectory(_ directory: String?, for sessionID: String) {
+        guard let directory, !directory.isEmpty else { return }
+        updateSession(sessionID) { session in
+            session.currentDirectory = directory
+            session.updatedAt = .now
+        }
+    }
+
+    func syncFromTmux(for sessionID: String) {
+        guard let session = session(id: sessionID) else { return }
+        let directory = tmux.currentDirectory(for: session.tmuxSessionName)
+        let title = tmux.sessionTitle(for: session.tmuxSessionName)
+
+        updateSession(sessionID) { session in
+            if let directory, !directory.isEmpty {
+                session.currentDirectory = directory
+            }
+            if session.pinnedTitle == nil, let title, !title.isEmpty {
+                session.title = title
+            }
+            session.updatedAt = .now
+        }
+    }
+
+    func handleAttached(sessionID: String) {
+        updateActivityState(.idle, for: sessionID)
+        syncFromTmux(for: sessionID)
+    }
+
+    func handleProcessTerminated(sessionID: String) {
+        guard let session = session(id: sessionID) else { return }
+        let stillAlive = tmux.sessionExists(session.tmuxSessionName)
+        updateActivityState(stillAlive ? .detached : .exited, for: sessionID)
+        if stillAlive {
+            syncFromTmux(for: sessionID)
+        }
+    }
+
+    func updateActivityState(_ state: TerminalActivityState, for sessionID: String) {
+        updateSession(sessionID) { session in
+            session.activityState = state
+            session.updatedAt = .now
+        }
+    }
+
+    private func updateSession(_ sessionID: String, mutate: (inout TerminalSession) -> Void) {
+        guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+        let previous = sessions[index]
+        mutate(&sessions[index])
+        guard sessions[index] != previous else { return }
+        notifyChange(for: sessions[index])
+    }
+
+    private func notifyChange(for session: TerminalSession) {
+        NotificationCenter.default.post(
+            name: .xatlasTerminalSessionDidChange,
+            object: self,
+            userInfo: ["session": session]
+        )
+    }
+
+    private static func defaultTitle(for workingDirectory: String?) -> String {
+        guard let workingDirectory, !workingDirectory.isEmpty else {
+            return "Terminal"
+        }
+        return URL(fileURLWithPath: workingDirectory).lastPathComponent.nonEmpty ?? "Terminal"
+    }
+
+    private static func matchingProjectID(for directory: String?, in projects: [Project]) -> UUID? {
+        guard let directory = directory?.nonEmpty else { return nil }
+        return projects.first(where: { project in
+            directory == project.path || directory.hasPrefix(project.path + "/")
+        })?.id
+    }
+}
+
+private enum TerminalTitleHeuristics {
+    private static let lowSignalCommands: Set<String> = [
+        "ls", "ll", "la", "pwd", "clear", "history", "cd", "z", "exit"
+    ]
+
+    static func semanticKey(for command: String) -> String? {
+        let tokens = tokenize(command)
+        guard let executable = primaryExecutable(in: tokens) else { return nil }
+        if lowSignalCommands.contains(executable) { return nil }
+
+        switch executable {
+        case "git":
+            return "git"
+        case "npm", "pnpm", "yarn", "bun":
+            let action = preferredToken(tokens.dropFirst()) ?? "task"
+            return "js:\(action)"
+        case "cargo", "go", "swift", "xcodebuild", "make", "cmake", "python", "python3", "node", "deno":
+            let action = preferredToken(tokens.dropFirst()) ?? executable
+            return "\(executable):\(action)"
+        case "claude", "codex", "opencode":
+            return "agent:\(executable)"
+        default:
+            let action = preferredToken(tokens.dropFirst())
+            return action.map { "\(executable):\($0)" } ?? executable
+        }
+    }
+
+    static func displayTitle(for command: String, semanticKey: String, cwd: String?) -> String {
+        let tokens = tokenize(command)
+        let executable = primaryExecutable(in: tokens) ?? "task"
+        let folder = cwd.flatMap { URL(fileURLWithPath: $0).lastPathComponent.nonEmpty }
+
+        switch executable {
+        case "git":
+            return folder.map { "\($0) git" } ?? "git workflow"
+        case "npm", "pnpm", "yarn", "bun":
+            let action = preferredToken(tokens.dropFirst()) ?? "task"
+            return folder.map { "\($0) \(action)" } ?? "\(executable) \(action)"
+        case "cargo", "go", "swift", "xcodebuild", "make", "cmake":
+            let action = preferredToken(tokens.dropFirst()) ?? executable
+            return folder.map { "\($0) \(action)" } ?? "\(executable) \(action)"
+        case "claude", "codex", "opencode":
+            return folder.map { "\(executable) \($0)" } ?? executable
+        default:
+            let target = preferredToken(tokens.dropFirst())
+            if let folder, let target, target != folder {
+                return "\(folder) \(target)"
+            }
+            return folder ?? executable
+        }
+    }
+
+    private static func tokenize(_ command: String) -> [String] {
+        command
+            .split(whereSeparator: { $0.isWhitespace || $0 == "|" || $0 == "&" || $0 == ";" })
+            .map(String.init)
+            .filter { !$0.isEmpty && !$0.hasPrefix("-") }
+    }
+
+    private static func primaryExecutable(in tokens: [String]) -> String? {
+        for token in tokens {
+            if token.contains("=") && !token.hasPrefix("./") && !token.hasPrefix("/") {
+                continue
+            }
+            return URL(fileURLWithPath: token).lastPathComponent.lowercased()
+        }
+        return nil
+    }
+
+    private static func preferredToken<S: Sequence>(_ tokens: S) -> String? where S.Element == String {
+        for token in tokens {
+            let lowered = token.lowercased()
+            if lowered.hasPrefix("-") { continue }
+            if lowered == "run" || lowered == "exec" || lowered == "--" { continue }
+            return URL(fileURLWithPath: lowered).lastPathComponent
+        }
+        return nil
+    }
+}
+
+private extension String {
+    var nonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

@@ -1,31 +1,51 @@
 import Foundation
 import Network
 
-/// Minimal HTTP server on localhost:9002 for MCP tool access.
+/// Minimal HTTP server on localhost for MCP tool access.
 /// Uses NWListener for a lightweight, dependency-free approach.
 final class MCPServer: @unchecked Sendable {
     nonisolated(unsafe) static let shared = MCPServer()
     private var listener: NWListener?
     private let handler = MCPHandler()
-    private let port: UInt16 = 9002
+    private let preferredPort: UInt16
+    private(set) var boundPort: UInt16?
+
+    private init() {
+        if let envPort = ProcessInfo.processInfo.environment["XATLAS_MCP_PORT"],
+           let parsed = UInt16(envPort) {
+            preferredPort = parsed
+        } else {
+            preferredPort = 9012
+        }
+    }
 
     func start() {
-        do {
-            let params = NWParameters.tcp
-            listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
-            listener?.newConnectionHandler = { [weak self] conn in
-                self?.handleConnection(conn)
+        let candidatePorts = Array(preferredPort...(preferredPort + 5))
+
+        for candidate in candidatePorts {
+            do {
+                let params = NWParameters.tcp
+                listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: candidate)!)
+                listener?.newConnectionHandler = { [weak self] conn in
+                    self?.handleConnection(conn)
+                }
+                listener?.start(queue: .global(qos: .userInitiated))
+                boundPort = candidate
+                print("[MCP] Server listening on localhost:\(candidate)")
+                return
+            } catch {
+                listener?.cancel()
+                listener = nil
             }
-            listener?.start(queue: .global(qos: .userInitiated))
-            print("[MCP] Server listening on localhost:\(port)")
-        } catch {
-            print("[MCP] Failed to start: \(error)")
         }
+
+        print("[MCP] Failed to start on ports \(candidatePorts.map(String.init).joined(separator: ", "))")
     }
 
     func stop() {
         listener?.cancel()
         listener = nil
+        boundPort = nil
     }
 
     private func handleConnection(_ connection: NWConnection) {
@@ -66,7 +86,8 @@ final class MCPServer: @unchecked Sendable {
         let path = String(parts[1])
 
         if path == "/health" {
-            sendResponse(connection: connection, status: 200, body: "{\"status\":\"ok\",\"app\":\"xatlas\"}")
+            let port = boundPort ?? preferredPort
+            sendResponse(connection: connection, status: 200, body: "{\"status\":\"ok\",\"app\":\"xatlas\",\"port\":\(port)}")
             return
         }
 

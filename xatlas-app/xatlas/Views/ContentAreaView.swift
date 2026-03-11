@@ -46,9 +46,7 @@ struct ContentAreaView: View {
         switch tab.kind {
         case .terminal(let sessionID):
             StyledTerminalView(
-                sessionID: sessionID,
-                workingDirectory: state.selectedProject?.path,
-                appState: state
+                sessionID: sessionID,                appState: state
             )
         case .editor(let filePath):
             EditorView(filePath: filePath)

@@ -66,6 +66,8 @@ struct AnyCodable: Codable, @unchecked Sendable {
         case let i as Int: try container.encode(i)
         case let d as Double: try container.encode(d)
         case let s as String: try container.encode(s)
+        case let a as [AnyCodable]: try container.encode(a)
+        case let o as [String: AnyCodable]: try container.encode(o)
         case let a as [Any]: try container.encode(a.map { AnyCodable($0) })
         case let o as [String: Any]: try container.encode(o.mapValues { AnyCodable($0) })
         default: try container.encodeNil()

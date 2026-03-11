@@ -3,12 +3,10 @@ import SwiftUI
 struct MainView: View {
     @State private var state = AppState.shared
 
-    // Slightly tinted background so white cards pop
     private let windowBg = Color(nsColor: NSColor(white: 0.93, alpha: 1.0))
 
     var body: some View {
         HStack(spacing: 10) {
-            // Sidebar — floating white card
             SidebarView(state: state)
                 .frame(width: 220)
                 .background(
@@ -21,9 +19,8 @@ struct MainView: View {
                 .padding(.leading, 10)
                 .padding(.vertical, 10)
 
-            // Main content
             VStack(spacing: 0) {
-                Spacer().frame(height: 38) // match traffic light height
+                Spacer().frame(height: 38)
                 ToolbarView(state: state)
                 ContentAreaView(state: state)
             }
@@ -35,15 +32,22 @@ struct MainView: View {
             if let project = state.selectedProject {
                 state.switchToProject(project)
             } else if state.tabs.isEmpty {
-                let session = TerminalService.shared.createSession()
-                let tab = TabItem(id: session.id, title: "Terminal", kind: .terminal(sessionID: session.id))
-                state.openTab(tab)
+                if let recovered = TerminalService.shared.sessions.first {
+                    let tab = TabItem(
+                        id: recovered.id,
+                        title: recovered.displayTitle,
+                        kind: .terminal(sessionID: recovered.id)
+                    )
+                    state.openTab(tab)
+                } else {
+                    let session = TerminalService.shared.createSession(workingDirectory: NSHomeDirectory())
+                    let tab = TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
+                    state.openTab(tab)
+                }
             }
         }
     }
 }
-
-// MARK: - Toolbar with circular glass buttons
 
 struct ToolbarView: View {
     @Bindable var state: AppState

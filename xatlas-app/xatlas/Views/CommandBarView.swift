@@ -15,6 +15,8 @@ struct CommandBarView: View {
                 .textFieldStyle(.plain)
                 .font(XatlasFont.mono)
                 .focused($isFocused)
+                .accessibilityLabel("Command Bar")
+                .accessibilityIdentifier("xatlas.commandBar")
                 .onSubmit { handleSubmit() }
         }
         .padding(.horizontal, 14)
@@ -40,8 +42,26 @@ struct CommandBarView: View {
         if command.hasPrefix(":") {
             handleAppCommand(String(command.dropFirst()))
         } else {
-            // Send to active terminal
-            state.pendingTerminalCommand = command
+            sendToActiveTerminal(command)
+        }
+    }
+
+    private func sendToActiveTerminal(_ command: String) {
+        if case .terminal(let sessionID) = state.selectedTab?.kind {
+            DispatchQueue.main.async {
+                _ = TerminalService.shared.sendCommand(command, to: sessionID)
+            }
+            return
+        }
+
+        let session = TerminalService.shared.createSession(
+            projectID: state.selectedProject?.id,
+            workingDirectory: state.selectedProject?.path
+        )
+        let tab = TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
+        state.openTab(tab)
+        DispatchQueue.main.async {
+            _ = TerminalService.shared.sendCommand(command, to: session.id)
         }
     }
 
@@ -52,9 +72,10 @@ struct CommandBarView: View {
         switch action {
         case "new":
             let session = TerminalService.shared.createSession(
-                projectID: state.selectedProject?.id
+                projectID: state.selectedProject?.id,
+                workingDirectory: state.selectedProject?.path
             )
-            state.openTab(TabItem(id: session.id, title: session.title, kind: .terminal(sessionID: session.id)))
+            state.openTab(TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id)))
         case "open":
             if let path = parts.dropFirst().first {
                 let p = String(path)

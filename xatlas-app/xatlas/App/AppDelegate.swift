@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.title = "xatlas"
         window.isMovableByWindowBackground = true
         window.backgroundColor = .clear
         window.isOpaque = false
