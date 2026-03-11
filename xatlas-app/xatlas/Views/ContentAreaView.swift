@@ -6,8 +6,7 @@ struct ContentAreaView: View {
     var body: some View {
         VStack(spacing: 0) {
             if state.selectedSection == .projects {
-                // Minimal tab strip — only if multiple tabs
-                if state.tabs.count > 1 {
+                if !state.tabs.isEmpty {
                     tabBar
                 }
 
@@ -32,16 +31,37 @@ struct ContentAreaView: View {
                 ForEach(state.tabs) { tab in
                     TabButton(
                         tab: tab,
+                        requiresAttention: requiresAttention(for: tab),
                         isSelected: state.selectedTab?.id == tab.id,
                         onSelect: { state.selectedTab = tab },
                         onClose: { state.closeTab(tab) }
                     )
                 }
+
+                Button {
+                    _ = state.createTerminalForSelectedProject()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.primary.opacity(0.65))
+                        .frame(width: 22, height: 22)
+                        .background(
+                            Circle().fill(.white.opacity(0.38))
+                        )
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 4)
             }
             .padding(.horizontal, 8)
         }
         .frame(height: 30)
         .background(.ultraThinMaterial)
+    }
+
+    private func requiresAttention(for tab: TabItem) -> Bool {
+        guard case .terminal(let sessionID) = tab.kind else { return false }
+        _ = state.terminalEventVersion
+        return state.terminalRequiresAttention(sessionID)
     }
 
     @ViewBuilder
@@ -90,6 +110,7 @@ struct ContentAreaView: View {
 
 private struct TabButton: View {
     let tab: TabItem
+    let requiresAttention: Bool
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
@@ -102,6 +123,15 @@ private struct TabButton: View {
             Text(tab.title)
                 .font(XatlasFont.monoSmall)
                 .lineLimit(1)
+
+            if requiresAttention {
+                Text("1")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(.red.opacity(0.78)))
+            }
 
             Button(action: onClose) {
                 Image(systemName: "xmark")

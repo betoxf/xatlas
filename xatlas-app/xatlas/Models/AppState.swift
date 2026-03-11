@@ -29,6 +29,7 @@ final class AppState {
     var tabs: [TabItem] = []
     var isCommandBarFocused = false
     var sidebarWidth: CGFloat = 220
+    var terminalEventVersion: Int = 0
 
     private var terminalSessionObserver: NSObjectProtocol?
 
@@ -230,6 +231,14 @@ final class AppState {
         return true
     }
 
+    func terminalRequiresAttention(_ sessionID: String) -> Bool {
+        TerminalService.shared.session(id: sessionID)?.requiresAttention ?? false
+    }
+
+    func projectAttentionCount(_ projectID: UUID?) -> Int {
+        TerminalService.shared.sessionsForProject(projectID).filter(\.requiresAttention).count
+    }
+
     private func observeTerminalSessions() {
         terminalSessionObserver = NotificationCenter.default.addObserver(
             forName: .xatlasTerminalSessionDidChange,
@@ -238,6 +247,7 @@ final class AppState {
         ) { [weak self] note in
             guard let self,
                   let session = note.userInfo?["session"] as? TerminalSession else { return }
+            self.terminalEventVersion &+= 1
             self.syncTitles(for: session)
         }
     }

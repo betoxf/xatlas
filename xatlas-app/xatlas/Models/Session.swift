@@ -28,6 +28,7 @@ struct TerminalSession: Identifiable, Codable, Equatable {
     var currentDirectory: String?
     var isActive: Bool = true
     var activityState: TerminalActivityState = .idle
+    var requiresAttention: Bool = false
     var lastCommand: String?
     var semanticTaskKey: String?
     var createdAt: Date = .now

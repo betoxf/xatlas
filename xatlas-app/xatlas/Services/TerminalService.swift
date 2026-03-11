@@ -7,6 +7,7 @@ final class TerminalService {
     var sessions: [TerminalSession] = []
 
     private let tmux = TmuxService.shared
+    private var completionMonitorTokens: [String: Int] = [:]
 
     func createSession(title: String? = nil, projectID: UUID? = nil, workingDirectory: String? = nil) -> TerminalSession {
         let sessionID = UUID().uuidString
@@ -23,6 +24,7 @@ final class TerminalService {
             currentDirectory: workingDirectory,
             isActive: true,
             activityState: .idle,
+            requiresAttention: false,
             lastCommand: nil,
             semanticTaskKey: nil
         )
@@ -40,6 +42,7 @@ final class TerminalService {
 
     func removeSession(_ id: String, killTmux: Bool = false) {
         guard let session = session(id: id) else { return }
+        completionMonitorTokens.removeValue(forKey: id)
         if killTmux {
             _ = tmux.killSession(name: session.tmuxSessionName)
         }
@@ -104,6 +107,7 @@ final class TerminalService {
                 currentDirectory: currentDirectory,
                 isActive: true,
                 activityState: .detached,
+                requiresAttention: false,
                 lastCommand: nil,
                 semanticTaskKey: nil,
                 createdAt: .now,
@@ -167,6 +171,7 @@ final class TerminalService {
             session.lastCommand = cleaned
             session.updatedAt = .now
             session.activityState = .running
+            session.requiresAttention = false
 
             guard session.pinnedTitle == nil else { return }
             guard let semantic = TerminalTitleHeuristics.semanticKey(for: cleaned) else { return }
@@ -187,6 +192,8 @@ final class TerminalService {
         if let updatedSessionName, let updatedTitle {
             _ = tmux.setSessionTitle(name: updatedSessionName, title: updatedTitle)
         }
+
+        startCompletionMonitor(for: sessionID, command: cleaned)
     }
 
     func updateCurrentDirectory(_ directory: String?, for sessionID: String) {
@@ -234,6 +241,13 @@ final class TerminalService {
         }
     }
 
+    func clearAttention(for sessionID: String) {
+        updateSession(sessionID) { session in
+            session.requiresAttention = false
+            session.updatedAt = .now
+        }
+    }
+
     private func updateSession(_ sessionID: String, mutate: (inout TerminalSession) -> Void) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
         let previous = sessions[index]
@@ -248,6 +262,97 @@ final class TerminalService {
             object: self,
             userInfo: ["session": session]
         )
+    }
+
+    private func startCompletionMonitor(for sessionID: String, command: String) {
+        let token = (completionMonitorTokens[sessionID] ?? 0) + 1
+        completionMonitorTokens[sessionID] = token
+        pollCompletion(sessionID: sessionID, token: token, remainingChecks: 150, lastTail: "", readyHits: 0)
+    }
+
+    private func markCommandFinished(for sessionID: String, observedTail: String) {
+        completionMonitorTokens.removeValue(forKey: sessionID)
+
+        updateSession(sessionID) { session in
+            guard session.activityState == .running else { return }
+            session.activityState = .idle
+            session.requiresAttention = true
+            session.updatedAt = .now
+        }
+    }
+
+    private static func relevantTail(from snapshot: String) -> String {
+        snapshot
+            .components(separatedBy: .newlines)
+            .suffix(8)
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func snapshotShowsReadyState(_ snapshot: String) -> Bool {
+        guard let line = snapshot
+            .components(separatedBy: .newlines)
+            .reversed()
+            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?
+            .trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return false
+        }
+
+        if line.contains("❯") || line.hasSuffix("$") || line.hasSuffix("%") || line.hasSuffix("#") {
+            return true
+        }
+
+        if line.hasPrefix("› ") || line == ">" || line.hasPrefix("> ") {
+            return true
+        }
+
+        return false
+    }
+
+    private func pollCompletion(
+        sessionID: String,
+        token: Int,
+        remainingChecks: Int,
+        lastTail: String,
+        readyHits: Int
+    ) {
+        guard remainingChecks > 0 else {
+            completionMonitorTokens.removeValue(forKey: sessionID)
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [sessionID, token, remainingChecks, lastTail, readyHits] in
+            guard TerminalService.shared.completionMonitorTokens[sessionID] == token else { return }
+            guard let snapshot = TerminalService.shared.snapshot(for: sessionID, lines: 60) else {
+                TerminalService.shared.completionMonitorTokens.removeValue(forKey: sessionID)
+                return
+            }
+
+            let tail = Self.relevantTail(from: snapshot)
+            if Self.snapshotShowsReadyState(tail) {
+                let nextHits = (tail == lastTail) ? (readyHits + 1) : 1
+                if nextHits >= 2 {
+                    TerminalService.shared.markCommandFinished(for: sessionID, observedTail: tail)
+                    return
+                }
+                TerminalService.shared.pollCompletion(
+                    sessionID: sessionID,
+                    token: token,
+                    remainingChecks: remainingChecks - 1,
+                    lastTail: tail,
+                    readyHits: nextHits
+                )
+                return
+            }
+
+            TerminalService.shared.pollCompletion(
+                sessionID: sessionID,
+                token: token,
+                remainingChecks: remainingChecks - 1,
+                lastTail: tail,
+                readyHits: 0
+            )
+        }
     }
 
     private static func defaultTitle(for workingDirectory: String?) -> String {

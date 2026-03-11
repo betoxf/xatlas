@@ -7,11 +7,15 @@ struct TerminalTools: MCPToolSet {
             selectTerminal,
             closeTerminal,
             listTerminals,
+            listTabs,
+            selectTab,
+            closeTab,
             sendToTerminal,
             snapshotTerminal,
             listProjects,
             addProject,
             selectProject,
+            removeProject,
             workspaceState,
         ]
     }
@@ -150,6 +154,86 @@ struct TerminalTools: MCPToolSet {
         )
     }
 
+    private var listTabs: MCPTool {
+        MCPTool(
+            name: "xatlas_tab_list",
+            definition: MCPToolDefinition(
+                name: "xatlas_tab_list",
+                description: "List open tabs in the current project workspace",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([String: String]())
+                ]
+            ),
+            execute: { _ in
+                let tabs = AppState.shared.tabs.map { tab in
+                    let kind: String
+                    let attention: Bool
+                    switch tab.kind {
+                    case .terminal(let sessionID):
+                        kind = "terminal"
+                        attention = AppState.shared.terminalRequiresAttention(sessionID)
+                    case .editor:
+                        kind = "editor"
+                        attention = false
+                    }
+                    return "{\"id\":\"\(Self.escape(tab.id))\",\"title\":\"\(Self.escape(tab.title))\",\"kind\":\"\(kind)\",\"selected\":\(AppState.shared.selectedTab?.id == tab.id ? "true" : "false"),\"attention\":\(attention ? "true" : "false")}"
+                }
+                return "[\(tabs.joined(separator: ","))]"
+            }
+        )
+    }
+
+    private var selectTab: MCPTool {
+        MCPTool(
+            name: "xatlas_tab_select",
+            definition: MCPToolDefinition(
+                name: "xatlas_tab_select",
+                description: "Select an open tab by tab ID",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "tabId": ["type": "string", "description": "Open tab ID"]
+                    ]),
+                    "required": AnyCodable(["tabId"])
+                ]
+            ),
+            execute: { args in
+                guard let tabID = args["tabId"] as? String,
+                      let tab = AppState.shared.tabs.first(where: { $0.id == tabID }) else {
+                    return "{\"ok\":false,\"error\":\"tabId not found\"}"
+                }
+                AppState.shared.selectedTab = tab
+                return "{\"ok\":true}"
+            }
+        )
+    }
+
+    private var closeTab: MCPTool {
+        MCPTool(
+            name: "xatlas_tab_close",
+            definition: MCPToolDefinition(
+                name: "xatlas_tab_close",
+                description: "Close an open tab by tab ID",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "tabId": ["type": "string", "description": "Open tab ID"]
+                    ]),
+                    "required": AnyCodable(["tabId"])
+                ]
+            ),
+            execute: { args in
+                guard let tabID = args["tabId"] as? String,
+                      let tab = AppState.shared.tabs.first(where: { $0.id == tabID }) else {
+                    return "{\"ok\":false,\"error\":\"tabId not found\"}"
+                }
+                AppState.shared.closeTab(tab)
+                return "{\"ok\":true}"
+            }
+        )
+    }
+
     private var snapshotTerminal: MCPTool {
         MCPTool(
             name: "xatlas_terminal_snapshot",
@@ -247,6 +331,32 @@ struct TerminalTools: MCPToolSet {
                 }
                 let ok = AppState.shared.selectProject(id: projectID)
                 return "{\"ok\":\(ok ? "true" : "false")}"
+            }
+        )
+    }
+
+    private var removeProject: MCPTool {
+        MCPTool(
+            name: "xatlas_project_remove",
+            definition: MCPToolDefinition(
+                name: "xatlas_project_remove",
+                description: "Remove a project by UUID",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "projectId": ["type": "string", "description": "Project UUID"]
+                    ]),
+                    "required": AnyCodable(["projectId"])
+                ]
+            ),
+            execute: { args in
+                guard let rawProjectID = args["projectId"] as? String,
+                      let projectID = Self.uuid(from: rawProjectID),
+                      let project = AppState.shared.projects.first(where: { $0.id == projectID }) else {
+                    return "{\"ok\":false,\"error\":\"valid projectId is required\"}"
+                }
+                AppState.shared.removeProject(project)
+                return "{\"ok\":true}"
             }
         )
     }

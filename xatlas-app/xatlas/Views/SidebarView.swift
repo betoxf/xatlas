@@ -32,6 +32,7 @@ struct SidebarView: View {
                     ForEach(state.projects) { project in
                         ProjectItemView(
                             project: project,
+                            attentionCount: state.projectAttentionCount(project.id),
                             isSelected: state.selectedSection == .projects && state.selectedProject?.id == project.id,
                             onSelect: {
                                 state.selectedSection = .projects
@@ -84,6 +85,7 @@ struct SidebarView: View {
 
 private struct ProjectItemView: View {
     let project: Project
+    let attentionCount: Int
     let isSelected: Bool
     let onSelect: () -> Void
     let onFileSelect: (String) -> Void
@@ -108,6 +110,17 @@ private struct ProjectItemView: View {
                     .lineLimit(1)
 
                 Spacer()
+
+                if attentionCount > 0 {
+                    Text("\(attentionCount)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule().fill(.red.opacity(isSelected ? 0.82 : 0.72))
+                        )
+                }
 
                 // Git status button
                 if let status = gitStatus, status.isRepo {

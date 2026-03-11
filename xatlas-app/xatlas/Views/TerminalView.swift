@@ -61,13 +61,13 @@ struct StyledTerminalView: View {
 
             Spacer()
 
-            Text(session.activityState.label)
+            Text(statusLabel(for: session))
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(activityColor(for: session.activityState))
+                .foregroundStyle(statusColor(for: session))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(
-                    Capsule().fill(activityColor(for: session.activityState).opacity(0.12))
+                    Capsule().fill(statusColor(for: session).opacity(0.12))
                 )
         }
         .padding(.horizontal, 14)
@@ -93,6 +93,14 @@ struct StyledTerminalView: View {
         case .exited: return .secondary
         case .error: return .red.opacity(0.8)
         }
+    }
+
+    private func statusColor(for session: TerminalSession) -> SwiftUI.Color {
+        session.requiresAttention ? .red.opacity(0.82) : activityColor(for: session.activityState)
+    }
+
+    private func statusLabel(for session: TerminalSession) -> String {
+        session.requiresAttention ? "1" : session.activityState.label
     }
 
     private func refreshSession() {
