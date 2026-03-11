@@ -54,14 +54,9 @@ struct CommandBarView: View {
             return
         }
 
-        let session = TerminalService.shared.createSession(
-            projectID: state.selectedProject?.id,
-            workingDirectory: state.selectedProject?.path
-        )
-        let tab = TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
-        state.openTab(tab)
+        let tab = state.createTerminalForSelectedProject()
         DispatchQueue.main.async {
-            _ = TerminalService.shared.sendCommand(command, to: session.id)
+            _ = TerminalService.shared.sendCommand(command, to: tab.id)
         }
     }
 
@@ -71,11 +66,7 @@ struct CommandBarView: View {
 
         switch action {
         case "new":
-            let session = TerminalService.shared.createSession(
-                projectID: state.selectedProject?.id,
-                workingDirectory: state.selectedProject?.path
-            )
-            state.openTab(TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id)))
+            _ = state.createTerminalForSelectedProject()
         case "open":
             if let path = parts.dropFirst().first {
                 let p = String(path)

@@ -71,7 +71,10 @@ struct ToolbarView: View {
     }
 
     private var toolbarTitle: String {
-        state.selectedTab?.title ?? "xatlas"
+        if state.selectedSection != .projects {
+            return state.selectedSection.title
+        }
+        return state.selectedTab?.title ?? "xatlas"
     }
 }
 
@@ -87,9 +90,15 @@ private struct ToolbarCircleButton: View {
                 .frame(width: 30, height: 30)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: Circle())
+        .background(
+            Circle()
+                .fill(.white.opacity(isHovered ? 0.42 : 0.26))
+                .overlay(
+                    Circle().stroke(.white.opacity(0.28), lineWidth: 1)
+                )
+        )
         .onHover { isHovered = $0 }
-        .scaleEffect(isHovered ? 1.08 : 1.0)
+        .scaleEffect(isHovered ? 1.03 : 1.0)
         .animation(.easeOut(duration: 0.15), value: isHovered)
     }
 }

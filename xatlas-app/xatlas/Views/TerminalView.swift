@@ -16,13 +16,6 @@ struct StyledTerminalView: View {
                         .padding(.horizontal, 6)
                         .padding(.bottom, 6)
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(.white.opacity(0.75))
-                        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
-                        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .padding(10)
             } else {
                 VStack(spacing: 10) {
@@ -78,8 +71,18 @@ struct StyledTerminalView: View {
                 )
         }
         .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.white.opacity(0.32))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(.white.opacity(0.22), lineWidth: 1)
+                )
+        )
+        .padding(.horizontal, 4)
+        .padding(.top, 6)
+        .padding(.bottom, 8)
     }
 
     private func activityColor(for state: TerminalActivityState) -> SwiftUI.Color {
@@ -128,7 +131,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
     private func configure(_ terminal: ManagedLocalProcessTerminalView) {
         terminal.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         terminal.nativeForegroundColor = NSColor(white: 0.14, alpha: 1.0)
-        terminal.nativeBackgroundColor = NSColor(white: 0.98, alpha: 1.0)
+        terminal.nativeBackgroundColor = .clear
         terminal.caretColor = NSColor(calibratedRed: 0.17, green: 0.43, blue: 0.89, alpha: 1.0)
 
         func c(_ r: UInt16, _ g: UInt16, _ b: UInt16) -> SwiftTerm.Color {
@@ -237,6 +240,18 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
 private final class ManagedLocalProcessTerminalView: LocalProcessTerminalView {
     var inputObserver: ((String) -> Void)?
     var layoutObserver: (() -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)

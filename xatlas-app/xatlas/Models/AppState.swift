@@ -1,10 +1,29 @@
 import SwiftUI
 
+enum WorkspaceSection: String, CaseIterable, Identifiable {
+    case projects
+    case mcp
+    case automations
+    case skills
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .projects: return "Projects"
+        case .mcp: return "MCP"
+        case .automations: return "Automations"
+        case .skills: return "Skills"
+        }
+    }
+}
+
 @Observable
 final class AppState {
     nonisolated(unsafe) static let shared = AppState()
 
     var projects: [Project] = []
+    var selectedSection: WorkspaceSection = .projects
     var selectedProject: Project?
     var selectedTab: TabItem?
     var tabs: [TabItem] = []
@@ -62,6 +81,7 @@ final class AppState {
     }
 
     func switchToProject(_ project: Project) {
+        selectedSection = .projects
         if selectedProject?.id == project.id, !tabs.isEmpty {
             return
         }
@@ -74,8 +94,16 @@ final class AppState {
         selectedProject = project
 
         if let saved = projectTabs[project.id] {
-            tabs = saved
-            selectedTab = projectSelectedTab[project.id] ?? saved.first
+            if saved.isEmpty {
+                let tab = makeTerminalTab(for: project.id, workingDirectory: project.path)
+                tabs = [tab]
+                selectedTab = tab
+                projectTabs[project.id] = tabs
+                projectSelectedTab[project.id] = tab
+            } else {
+                tabs = saved
+                selectedTab = projectSelectedTab[project.id] ?? saved.first
+            }
         } else {
             let recovered = TerminalService.shared.sessionsForProject(project.id)
             if !recovered.isEmpty {
@@ -142,11 +170,64 @@ final class AppState {
         selectedTab = tab
     }
 
+    func openTextFile(path: String, initialContent: String? = nil) {
+        let fileManager = FileManager.default
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        if !fileManager.fileExists(atPath: path), let initialContent {
+            fileManager.createFile(atPath: path, contents: initialContent.data(using: .utf8))
+        }
+
+        openTab(
+            TabItem(
+                id: path,
+                title: URL(fileURLWithPath: path).lastPathComponent,
+                kind: .editor(filePath: path)
+            )
+        )
+    }
+
+    func revealInFinder(path: String, createIfMissing: Bool = false, isDirectory: Bool = false) {
+        let fileManager = FileManager.default
+        if createIfMissing {
+            if isDirectory {
+                try? fileManager.createDirectory(atPath: path, withIntermediateDirectories: true)
+            } else {
+                let directory = URL(fileURLWithPath: path).deletingLastPathComponent().path
+                try? fileManager.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                if !fileManager.fileExists(atPath: path) {
+                    fileManager.createFile(atPath: path, contents: Data())
+                }
+            }
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    @discardableResult
+    func createTerminalForSelectedProject() -> TabItem {
+        let tab = makeTerminalTab(for: selectedProject?.id, workingDirectory: selectedProject?.path)
+        openTab(tab)
+        if let projectID = selectedProject?.id {
+            projectTabs[projectID] = tabs
+            projectSelectedTab[projectID] = tab
+        }
+        return tab
+    }
+
     func closeTab(_ tab: TabItem) {
         tabs.removeAll { $0.id == tab.id }
         if selectedTab?.id == tab.id {
             selectedTab = tabs.last
         }
+    }
+
+    @discardableResult
+    func selectTab(at index: Int) -> Bool {
+        guard tabs.indices.contains(index) else { return false }
+        selectedTab = tabs[index]
+        return true
     }
 
     private func observeTerminalSessions() {
@@ -183,6 +264,11 @@ final class AppState {
             guard case .terminal(let sessionID) = collection[index].kind, sessionID == session.id else { continue }
             collection[index].title = session.displayTitle
         }
+    }
+
+    private func makeTerminalTab(for projectID: UUID?, workingDirectory: String?) -> TabItem {
+        let session = TerminalService.shared.createSession(projectID: projectID, workingDirectory: workingDirectory)
+        return TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
     }
 }
 

@@ -5,21 +5,24 @@ struct ContentAreaView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Minimal tab strip — only if multiple tabs
-            if state.tabs.count > 1 {
-                tabBar
-            }
+            if state.selectedSection == .projects {
+                // Minimal tab strip — only if multiple tabs
+                if state.tabs.count > 1 {
+                    tabBar
+                }
 
-            // Content fills everything
-            if let tab = state.selectedTab {
-                tabContent(tab)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if let tab = state.selectedTab {
+                    tabContent(tab)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    emptyState
+                }
+
+                CommandBarView(state: state)
             } else {
-                emptyState
+                WorkspaceSectionView(state: state)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-
-            // Command bar
-            CommandBarView(state: state)
         }
     }
 
@@ -46,8 +49,10 @@ struct ContentAreaView: View {
         switch tab.kind {
         case .terminal(let sessionID):
             StyledTerminalView(
-                sessionID: sessionID,                appState: state
+                sessionID: sessionID,
+                appState: state
             )
+            .id(sessionID)
         case .editor(let filePath):
             EditorView(filePath: filePath)
         }
@@ -58,11 +63,28 @@ struct ContentAreaView: View {
             Image(systemName: "terminal")
                 .font(.system(size: 40))
                 .foregroundStyle(.tertiary)
+            Button {
+                _ = state.createTerminalForSelectedProject()
+            } label: {
+                Label("New Terminal", systemImage: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(.white.opacity(0.52)))
+            }
+            .buttonStyle(.plain)
             Text("Press ⌘K to open command bar")
                 .font(XatlasFont.mono)
                 .foregroundStyle(.secondary)
+            Text("Typing in the command bar will also create one automatically.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            state.isCommandBarFocused = true
+        }
     }
 }
 

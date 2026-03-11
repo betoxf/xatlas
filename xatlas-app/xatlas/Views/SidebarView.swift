@@ -10,9 +10,15 @@ struct SidebarView: View {
 
             // Top actions
             VStack(spacing: 1) {
-                SidebarItem(icon: "server.rack", label: "MCP", isSelected: false) {}
-                SidebarItem(icon: "arrow.triangle.2.circlepath", label: "Automations", isSelected: false) {}
-                SidebarItem(icon: "square.stack.3d.up.fill", label: "Skills", isSelected: false) {}
+                SidebarItem(icon: "server.rack", label: "MCP", isSelected: state.selectedSection == .mcp) {
+                    state.selectedSection = .mcp
+                }
+                SidebarItem(icon: "arrow.triangle.2.circlepath", label: "Automations", isSelected: state.selectedSection == .automations) {
+                    state.selectedSection = .automations
+                }
+                SidebarItem(icon: "square.stack.3d.up.fill", label: "Skills", isSelected: state.selectedSection == .skills) {
+                    state.selectedSection = .skills
+                }
             }
             .padding(.horizontal, 10)
             .padding(.bottom, 14)
@@ -26,8 +32,11 @@ struct SidebarView: View {
                     ForEach(state.projects) { project in
                         ProjectItemView(
                             project: project,
-                            isSelected: state.selectedProject?.id == project.id,
-                            onSelect: { state.switchToProject(project) },
+                            isSelected: state.selectedSection == .projects && state.selectedProject?.id == project.id,
+                            onSelect: {
+                                state.selectedSection = .projects
+                                state.switchToProject(project)
+                            },
                             onFileSelect: { path in
                                 let tab = TabItem(
                                     id: path,
