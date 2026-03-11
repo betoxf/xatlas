@@ -40,6 +40,30 @@ enum ProviderClient: String, CaseIterable, Identifiable {
     }
 }
 
+enum MCPInstallTarget: String, CaseIterable, Identifiable {
+    case codex
+    case claude
+    case project
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .codex: return "Codex"
+        case .claude: return "Claude"
+        case .project: return "Project"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .codex: return "~/.codex/config.toml"
+        case .claude: return "~/.claude/settings.json"
+        case .project: return ".mcp.json"
+        }
+    }
+}
+
 struct ProviderAvailability: Identifiable {
     let client: ProviderClient
     let isInstalled: Bool
@@ -145,6 +169,58 @@ final class AgentCatalogService {
         ProviderClient.allCases.map { client in
             ProviderAvailability(client: client, isInstalled: isInstalled(client))
         }
+    }
+
+    func availableInstallTargets(projectPath: String?) -> [MCPInstallTarget] {
+        var targets: [MCPInstallTarget] = []
+        if isInstalled(.codex) {
+            targets.append(.codex)
+        }
+        if isInstalled(.claude) {
+            targets.append(.claude)
+        }
+        if projectPath?.isEmpty == false {
+            targets.append(.project)
+        }
+        return targets
+    }
+
+    @discardableResult
+    func addMCP(
+        named name: String,
+        configuration: MCPConfiguration,
+        targets: [MCPInstallTarget],
+        projectPath: String?
+    ) -> [MCPInstallTarget: Bool] {
+        var results: [MCPInstallTarget: Bool] = [:]
+
+        for target in targets {
+            let ok: Bool
+            switch target {
+            case .codex:
+                ok = upsertCodexServer(named: name, configuration: configuration, at: codexConfigPath)
+            case .claude:
+                ok = upsertJSONServer(
+                    at: claudeSettingsPath,
+                    keyPath: ["mcpServers"],
+                    name: name,
+                    configuration: configuration
+                )
+            case .project:
+                guard let projectPath else {
+                    results[target] = false
+                    continue
+                }
+                ok = upsertProjectServer(
+                    named: name,
+                    configuration: configuration,
+                    at: projectPath + "/.mcp.json"
+                )
+            }
+            results[target] = ok
+        }
+
+        return results
     }
 
     @discardableResult
@@ -499,6 +575,16 @@ final class AgentCatalogService {
             removeNestedDictionaryValue(&root, keyPath: ["mcpServers", name])
         } else {
             root.removeValue(forKey: name)
+        }
+        return writeJSONObject(root, to: path)
+    }
+
+    private func upsertProjectServer(named name: String, configuration: MCPConfiguration, at path: String) -> Bool {
+        var root = parseJSONDictionary(at: path) ?? [:]
+        if root["mcpServers"] is [String: Any] || root.isEmpty {
+            setNestedDictionaryValue(&root, keyPath: ["mcpServers", name], value: configuration.jsonObject)
+        } else {
+            root[name] = configuration.jsonObject
         }
         return writeJSONObject(root, to: path)
     }

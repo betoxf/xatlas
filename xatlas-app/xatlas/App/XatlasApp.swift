@@ -7,7 +7,7 @@ struct XatlasApp: App {
     var body: some Scene {
         // Window is created manually in AppDelegate for custom corner radius
         Settings {
-            EmptyView()
+            AppSettingsView()
         }
     }
 }

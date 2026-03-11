@@ -3,6 +3,7 @@ import SwiftUI
 struct WorkspaceSectionView: View {
     @Bindable var state: AppState
     @State private var snapshot = AgentCatalogSnapshot(mcpServers: [], skills: [], automations: [], availableProviders: [])
+    @State private var isMCPComposerPresented = false
 
     var body: some View {
         ScrollView {
@@ -49,6 +50,9 @@ struct WorkspaceSectionView: View {
         .onAppear(perform: refresh)
         .onChange(of: state.selectedSection) { _, _ in refresh() }
         .onChange(of: state.selectedProject?.id) { _, _ in refresh() }
+        .sheet(isPresented: $isMCPComposerPresented) {
+            MCPComposerView(projectPath: state.selectedProject?.path, refresh: refresh)
+        }
     }
 
     private var header: some View {
@@ -68,6 +72,17 @@ struct WorkspaceSectionView: View {
             Spacer()
 
             HStack(spacing: 8) {
+                if state.selectedSection == .mcp {
+                    Button("Add MCP") {
+                        isMCPComposerPresented = true
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Capsule().fill(.white.opacity(0.55)))
+                }
+
                 ForEach(quickActions) { action in
                     Button(action.title) {
                         action.handler()

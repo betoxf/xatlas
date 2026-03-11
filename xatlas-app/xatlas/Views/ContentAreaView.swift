@@ -6,18 +6,23 @@ struct ContentAreaView: View {
     var body: some View {
         VStack(spacing: 0) {
             if state.selectedSection == .projects {
-                if !state.tabs.isEmpty {
-                    tabBar
-                }
-
-                if let tab = state.selectedTab {
-                    tabContent(tab)
+                if state.projectSurfaceMode == .dashboard {
+                    ProjectDashboardView(state: state)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    emptyState
-                }
+                    if !state.tabs.isEmpty {
+                        tabBar
+                    }
 
-                CommandBarView(state: state)
+                    if let tab = state.selectedTab {
+                        tabContent(tab)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        emptyState
+                    }
+
+                    CommandBarView(state: state)
+                }
             } else {
                 WorkspaceSectionView(state: state)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

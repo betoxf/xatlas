@@ -61,7 +61,7 @@ ensure_app_running() {
     (cd "$ROOT_DIR" && swift build -c release >/dev/null)
   fi
 
-  XATLAS_MCP_PORT="$PORT" "$BINARY" >"$LOG_FILE" 2>&1 &
+  XATLAS_MCP_PORT="$PORT" XATLAS_HEADLESS=1 "$BINARY" >"$LOG_FILE" 2>&1 &
   APP_PID="$!"
   wait_for_health
 }

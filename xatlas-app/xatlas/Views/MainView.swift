@@ -28,6 +28,9 @@ struct MainView: View {
             .padding(.bottom, 10)
         }
         .background(windowBg)
+        .sheet(isPresented: $state.isSettingsPresented) {
+            AppSettingsView()
+        }
         .onAppear {
             if let project = state.selectedProject {
                 state.switchToProject(project)
@@ -73,6 +76,9 @@ struct ToolbarView: View {
     private var toolbarTitle: String {
         if state.selectedSection != .projects {
             return state.selectedSection.title
+        }
+        if state.projectSurfaceMode == .dashboard {
+            return "Projects"
         }
         return state.selectedTab?.title ?? "xatlas"
     }

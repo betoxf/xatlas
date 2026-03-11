@@ -15,6 +15,10 @@ struct TerminalTools: MCPToolSet {
             listProjects,
             addProject,
             selectProject,
+            showProjectSurface,
+            projectBrief,
+            generateMCP,
+            addMCP,
             removeProject,
             workspaceState,
         ]
@@ -361,6 +365,185 @@ struct TerminalTools: MCPToolSet {
         )
     }
 
+    private var showProjectSurface: MCPTool {
+        MCPTool(
+            name: "xatlas_project_surface",
+            definition: MCPToolDefinition(
+                name: "xatlas_project_surface",
+                description: "Switch the projects section between workspace and dashboard",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "mode": ["type": "string", "description": "workspace or dashboard"]
+                    ]),
+                    "required": AnyCodable(["mode"])
+                ]
+            ),
+            execute: { args in
+                guard let mode = args["mode"] as? String else {
+                    return "{\"ok\":false,\"error\":\"mode is required\"}"
+                }
+                switch mode {
+                case "workspace":
+                    AppState.shared.showProjectWorkspace()
+                case "dashboard":
+                    AppState.shared.showProjectDashboard()
+                default:
+                    return "{\"ok\":false,\"error\":\"mode must be workspace or dashboard\"}"
+                }
+                return "{\"ok\":true,\"mode\":\"\(Self.escape(mode))\"}"
+            }
+        )
+    }
+
+    private var projectBrief: MCPTool {
+        MCPTool(
+            name: "xatlas_project_brief",
+            definition: MCPToolDefinition(
+                name: "xatlas_project_brief",
+                description: "Open a terminal in the project and ask the configured AI for a brief summary of the repo and latest commit",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "projectId": ["type": "string", "description": "Project UUID"],
+                        "provider": ["type": "string", "description": "Optional provider override: builtIn, codex, claude, zai"]
+                    ]),
+                    "required": AnyCodable(["projectId"])
+                ]
+            ),
+            execute: { args in
+                guard let rawProjectID = args["projectId"] as? String,
+                      let projectID = Self.uuid(from: rawProjectID),
+                      let project = AppState.shared.projects.first(where: { $0.id == projectID }) else {
+                    return "{\"ok\":false,\"error\":\"valid projectId is required\"}"
+                }
+
+                let provider: AISyncProvider?
+                if let rawProvider = args["provider"] as? String {
+                    provider = AISyncProvider(rawValue: rawProvider)
+                } else {
+                    provider = nil
+                }
+
+                guard let sessionID = AppState.shared.runProjectBrief(for: project, provider: provider) else {
+                    return "{\"ok\":false,\"error\":\"failed to run project brief\"}"
+                }
+                return "{\"ok\":true,\"sessionId\":\"\(Self.escape(sessionID))\"}"
+            }
+        )
+    }
+
+    private var generateMCP: MCPTool {
+        MCPTool(
+            name: "xatlas_mcp_generate",
+            definition: MCPToolDefinition(
+                name: "xatlas_mcp_generate",
+                description: "Generate an MCP server draft from a natural-language request",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "request": ["type": "string", "description": "Natural-language MCP request"],
+                        "projectId": ["type": "string", "description": "Optional project UUID for context"],
+                        "provider": ["type": "string", "description": "Optional provider override: builtIn, codex, claude, zai"]
+                    ]),
+                    "required": AnyCodable(["request"])
+                ]
+            ),
+            execute: { args in
+                guard let request = args["request"] as? String else {
+                    return "{\"ok\":false,\"error\":\"request is required\"}"
+                }
+
+                let projectPath: String?
+                if let rawProjectID = args["projectId"] as? String,
+                   let projectID = Self.uuid(from: rawProjectID) {
+                    projectPath = AppState.shared.projects.first(where: { $0.id == projectID })?.path
+                } else {
+                    projectPath = AppState.shared.selectedProject?.path
+                }
+
+                let provider = (args["provider"] as? String).flatMap(AISyncProvider.init(rawValue:))
+                guard let draft = MCPAuthoringService.shared.generateDraft(from: request, provider: provider, projectPath: projectPath) else {
+                    return "{\"ok\":false,\"error\":\"generation failed\"}"
+                }
+
+                let argsJSON = draft.args.map { "\"\(Self.escape($0))\"" }.joined(separator: ",")
+                let envJSON = draft.env
+                    .sorted { $0.key < $1.key }
+                    .map { "\"\(Self.escape($0.key))\":\"\(Self.escape($0.value))\"" }
+                    .joined(separator: ",")
+                return "{\"ok\":true,\"draft\":{\"name\":\"\(Self.escape(draft.name))\",\"url\":\"\(Self.escape(draft.url))\",\"command\":\"\(Self.escape(draft.command))\",\"args\":[\(argsJSON)],\"env\":{\(envJSON)}}}"
+            }
+        )
+    }
+
+    private var addMCP: MCPTool {
+        MCPTool(
+            name: "xatlas_mcp_add",
+            definition: MCPToolDefinition(
+                name: "xatlas_mcp_add",
+                description: "Install an MCP server into selected targets or all available targets",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "name": ["type": "string", "description": "Server name"],
+                        "url": ["type": "string", "description": "HTTP MCP URL"],
+                        "command": ["type": "string", "description": "stdio command"],
+                        "args": ["type": "array", "description": "stdio args", "items": ["type": "string"]],
+                        "env": ["type": "object", "description": "Environment variables"],
+                        "targets": ["type": "array", "description": "Targets: codex, claude, project", "items": ["type": "string"]],
+                        "projectId": ["type": "string", "description": "Optional project UUID"],
+                        "allAvailable": ["type": "boolean", "description": "Install to all available targets"]
+                    ]),
+                    "required": AnyCodable(["name"])
+                ]
+            ),
+            execute: { args in
+                guard let name = args["name"] as? String else {
+                    return "{\"ok\":false,\"error\":\"name is required\"}"
+                }
+
+                let projectPath: String?
+                if let rawProjectID = args["projectId"] as? String,
+                   let projectID = Self.uuid(from: rawProjectID) {
+                    projectPath = AppState.shared.projects.first(where: { $0.id == projectID })?.path
+                } else {
+                    projectPath = AppState.shared.selectedProject?.path
+                }
+
+                let configuration = MCPConfiguration(
+                    url: Self.trimmedOrNil(args["url"] as? String),
+                    command: Self.trimmedOrNil(args["command"] as? String),
+                    args: (args["args"] as? [Any])?.compactMap { "\($0)" } ?? [],
+                    env: args["env"] as? [String: String] ?? [:]
+                )
+
+                let targets: [MCPInstallTarget]
+                if args["allAvailable"] as? Bool == true {
+                    targets = AgentCatalogService.shared.availableInstallTargets(projectPath: projectPath)
+                } else if let rawTargets = args["targets"] as? [Any] {
+                    targets = rawTargets.compactMap { value in
+                        guard let raw = value as? String else { return nil }
+                        return MCPInstallTarget(rawValue: raw)
+                    }
+                } else {
+                    targets = AgentCatalogService.shared.availableInstallTargets(projectPath: projectPath)
+                }
+
+                let results = AgentCatalogService.shared.addMCP(
+                    named: name,
+                    configuration: configuration,
+                    targets: targets,
+                    projectPath: projectPath
+                )
+                let encoded = results
+                    .map { "\"\($0.key.rawValue)\":\($0.value ? "true" : "false")" }
+                    .joined(separator: ",")
+                return "{\"ok\":true,\"results\":{\(encoded)}}"
+            }
+        )
+    }
+
     private var workspaceState: MCPTool {
         MCPTool(
             name: "xatlas_workspace_state",
@@ -381,9 +564,9 @@ struct TerminalTools: MCPToolSet {
                     "{\"id\":\"\(Self.escape($0.id.uuidString))\",\"name\":\"\(Self.escape($0.name))\",\"path\":\"\(Self.escape($0.path))\"}"
                 }
                 let sessions = TerminalService.shared.sessions.map {
-                    "{\"id\":\"\(Self.escape($0.id))\",\"title\":\"\(Self.escape($0.displayTitle))\",\"tmuxSession\":\"\(Self.escape($0.tmuxSessionName))\",\"projectId\":\"\(Self.escape($0.projectID?.uuidString ?? ""))\",\"cwd\":\"\(Self.escape($0.currentDirectory ?? $0.workingDirectory ?? ""))\",\"state\":\"\(Self.escape($0.activityState.rawValue))\"}"
+                    "{\"id\":\"\(Self.escape($0.id))\",\"title\":\"\(Self.escape($0.displayTitle))\",\"tmuxSession\":\"\(Self.escape($0.tmuxSessionName))\",\"projectId\":\"\(Self.escape($0.projectID?.uuidString ?? ""))\",\"cwd\":\"\(Self.escape($0.currentDirectory ?? $0.workingDirectory ?? ""))\",\"state\":\"\(Self.escape($0.activityState.rawValue))\",\"attention\":\($0.requiresAttention ? "true" : "false")}"
                 }
-                return "{\"selectedProjectId\":\"\(Self.escape(AppState.shared.selectedProject?.id.uuidString ?? ""))\",\"selectedTabId\":\"\(Self.escape(AppState.shared.selectedTab?.id ?? ""))\",\"selectedSessionId\":\"\(Self.escape(selectedSessionID ?? ""))\",\"projects\":[\(projects.joined(separator: ","))],\"sessions\":[\(sessions.joined(separator: ","))]}"
+                return "{\"selectedProjectId\":\"\(Self.escape(AppState.shared.selectedProject?.id.uuidString ?? ""))\",\"selectedTabId\":\"\(Self.escape(AppState.shared.selectedTab?.id ?? ""))\",\"selectedSessionId\":\"\(Self.escape(selectedSessionID ?? ""))\",\"projectSurface\":\"\(Self.escape(AppState.shared.projectSurfaceMode.rawValue))\",\"projects\":[\(projects.joined(separator: ","))],\"sessions\":[\(sessions.joined(separator: ","))]}"
             }
         )
     }
@@ -398,5 +581,11 @@ struct TerminalTools: MCPToolSet {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
+    private static func trimmedOrNil(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
     }
 }

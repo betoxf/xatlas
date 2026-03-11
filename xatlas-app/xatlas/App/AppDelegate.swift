@@ -4,9 +4,15 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var xatlasWindow: NSWindow?
     var keyMonitor: Any?
+    private let isHeadless = ProcessInfo.processInfo.environment["XATLAS_HEADLESS"] == "1" || CommandLine.arguments.contains("--headless")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.regular)
+        NSApplication.shared.setActivationPolicy(isHeadless ? .accessory : .regular)
+
+        if isHeadless {
+            MCPServer.shared.start()
+            return
+        }
 
         // Create a custom borderless window for full corner control
         let window = NSWindow(
@@ -51,10 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        !isHeadless
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
+        guard !isHeadless else { return }
         xatlasWindow?.makeKeyAndOrderFront(nil)
     }
 

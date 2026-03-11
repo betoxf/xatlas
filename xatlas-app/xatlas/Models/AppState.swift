@@ -18,6 +18,13 @@ enum WorkspaceSection: String, CaseIterable, Identifiable {
     }
 }
 
+enum ProjectSurfaceMode: String, CaseIterable, Identifiable {
+    case workspace
+    case dashboard
+
+    var id: String { rawValue }
+}
+
 @Observable
 final class AppState {
     nonisolated(unsafe) static let shared = AppState()
@@ -28,8 +35,10 @@ final class AppState {
     var selectedTab: TabItem?
     var tabs: [TabItem] = []
     var isCommandBarFocused = false
+    var isSettingsPresented = false
     var sidebarWidth: CGFloat = 220
     var terminalEventVersion: Int = 0
+    var projectSurfaceMode: ProjectSurfaceMode = .workspace
 
     private var terminalSessionObserver: NSObjectProtocol?
 
@@ -83,6 +92,7 @@ final class AppState {
 
     func switchToProject(_ project: Project) {
         selectedSection = .projects
+        projectSurfaceMode = .workspace
         if selectedProject?.id == project.id, !tabs.isEmpty {
             return
         }
@@ -210,11 +220,44 @@ final class AppState {
     func createTerminalForSelectedProject() -> TabItem {
         let tab = makeTerminalTab(for: selectedProject?.id, workingDirectory: selectedProject?.path)
         openTab(tab)
+        selectedSection = .projects
+        projectSurfaceMode = .workspace
         if let projectID = selectedProject?.id {
             projectTabs[projectID] = tabs
             projectSelectedTab[projectID] = tab
         }
         return tab
+    }
+
+    @discardableResult
+    func createTerminal(for project: Project) -> TabItem {
+        if selectedProject?.id != project.id {
+            switchToProject(project)
+        }
+        return createTerminalForSelectedProject()
+    }
+
+    func showProjectDashboard() {
+        selectedSection = .projects
+        projectSurfaceMode = .dashboard
+    }
+
+    func showProjectWorkspace() {
+        selectedSection = .projects
+        projectSurfaceMode = .workspace
+        if selectedProject == nil, let firstProject = projects.first {
+            switchToProject(firstProject)
+        }
+    }
+
+    @discardableResult
+    func runProjectBrief(for project: Project, provider: AISyncProvider? = nil) -> String? {
+        let command = AISyncService.shared.projectBriefCommand(for: project.path, provider: provider)
+        guard !command.isEmpty else { return nil }
+        let tab = createTerminal(for: project)
+        guard case .terminal(let sessionID) = tab.kind else { return nil }
+        guard TerminalService.shared.sendCommand(command, to: sessionID) else { return nil }
+        return sessionID
     }
 
     func closeTab(_ tab: TabItem) {

@@ -24,7 +24,25 @@ struct SidebarView: View {
             .padding(.bottom, 14)
 
             // Section header
-            SectionHeader(title: "Projects")
+            SectionHeader(title: "Projects") {
+                HStack(spacing: 6) {
+                    HeaderModeButton(
+                        icon: "sidebar.left",
+                        isSelected: state.projectSurfaceMode == .workspace
+                    ) {
+                        state.showProjectWorkspace()
+                    }
+                    .accessibilityLabel("Project workspace")
+
+                    HeaderModeButton(
+                        icon: "square.grid.2x2",
+                        isSelected: state.projectSurfaceMode == .dashboard
+                    ) {
+                        state.showProjectDashboard()
+                    }
+                    .accessibilityLabel("Project dashboard")
+                }
+            }
 
             // Project list
             ScrollView {
@@ -57,9 +75,11 @@ struct SidebarView: View {
 
             // Bottom glass buttons
             HStack(spacing: 10) {
-                SidebarCircleButton(icon: "gearshape.fill") {}
+                SidebarCircleButton(icon: "gearshape.fill") { openSettings() }
+                    .accessibilityLabel("Open settings")
                 Spacer()
                 SidebarCircleButton(icon: "plus") { openFolderPicker() }
+                    .accessibilityLabel("Add project")
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
@@ -78,6 +98,10 @@ struct SidebarView: View {
                 state.addProject(name: url.lastPathComponent, path: url.path)
             }
         }
+    }
+
+    private func openSettings() {
+        state.isSettingsPresented = true
     }
 }
 
@@ -129,6 +153,7 @@ private struct ProjectItemView: View {
                         isSelected: isSelected,
                         isSyncing: isSyncing,
                         onSync: { syncProject() },
+                        onRefresh: { refreshGit() },
                         projectPath: project.path
                     )
                 }
@@ -185,11 +210,14 @@ private struct ProjectItemView: View {
         guard !isSyncing, let status = gitStatus else { return }
         isSyncing = true
         let path = project.path
-        let message = GitService.shared.generateCommitMessage(for: status)
         Task.detached {
             GitService.shared.stageAll(at: path)
+            let refreshedStatus = GitService.shared.status(at: path)
+            let message = AISyncService.shared.commitMessage(for: path, status: refreshedStatus.isRepo ? refreshedStatus : status)
             GitService.shared.commit(at: path, message: message)
-            GitService.shared.push(at: path)
+            if AppPreferences.shared.pushAfterSync {
+                GitService.shared.push(at: path)
+            }
             await MainActor.run {
                 isSyncing = false
                 refreshGit()
@@ -205,6 +233,7 @@ private struct GitInlineButton: View {
     let isSelected: Bool
     let isSyncing: Bool
     let onSync: () -> Void
+    let onRefresh: () -> Void
     let projectPath: String
     @State private var isGitHovered = false
 
@@ -244,12 +273,29 @@ private struct GitInlineButton: View {
         .contextMenu {
             Text(status.branch).font(.headline)
             Divider()
-            Button("Commit & Push") { onSync() }
+            Button("AI Sync") { onSync() }
             Button("Pull") {
-                Task.detached { GitService.shared.pull(at: projectPath) }
+                Task.detached {
+                    GitService.shared.pull(at: projectPath)
+                    await MainActor.run { onRefresh() }
+                }
             }
             Button("Push") {
-                Task.detached { GitService.shared.push(at: projectPath) }
+                Task.detached {
+                    GitService.shared.push(at: projectPath)
+                    await MainActor.run { onRefresh() }
+                }
+            }
+            Button("Fetch") {
+                Task.detached {
+                    GitService.shared.fetch(at: projectPath)
+                    await MainActor.run { onRefresh() }
+                }
+            }
+            if GitService.shared.remoteURL(at: projectPath) != nil {
+                Button("Open GitHub Remote") {
+                    GitService.shared.openRemote(at: projectPath)
+                }
             }
             Divider()
             if hasChanges {
@@ -276,17 +322,42 @@ private struct GitInlineButton: View {
 
 // MARK: - Section header
 
-private struct SectionHeader: View {
+private struct SectionHeader<Accessory: View>: View {
     let title: String
+    @ViewBuilder let accessory: () -> Accessory
 
     var body: some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.tertiary)
-            .textCase(.uppercase)
-            .tracking(0.5)
-            .padding(.horizontal, 18)
-            .padding(.bottom, 6)
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+                .tracking(0.5)
+            Spacer()
+            accessory()
+        }
+        .padding(.horizontal, 18)
+        .padding(.bottom, 6)
+    }
+}
+
+private struct HeaderModeButton: View {
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.primary.opacity(0.92) : Color.secondary.opacity(0.65))
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(.white.opacity(isSelected ? 0.54 : 0.28))
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
 

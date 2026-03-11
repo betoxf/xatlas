@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 struct GitStatus {
@@ -83,6 +84,33 @@ final class GitService {
 
     func pull(at path: String) {
         _ = run(["git", "-C", path, "pull"])
+    }
+
+    func fetch(at path: String) {
+        _ = run(["git", "-C", path, "fetch"])
+    }
+
+    func diffSummary(at path: String) -> String {
+        let status = run(["git", "-C", path, "status", "--short"]) ?? ""
+        let diff = run(["git", "-C", path, "diff", "--cached", "--stat"]) ?? ""
+        return """
+        Status:
+        \(status)
+
+        Staged diff stat:
+        \(diff)
+        """
+    }
+
+    func remoteURL(at path: String) -> String? {
+        run(["git", "-C", path, "remote", "get-url", "origin"])?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func openRemote(at path: String) {
+        guard let remote = remoteURL(at: path),
+              let url = githubURL(from: remote) else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func generateCommitMessage(for status: GitStatus) -> String {
@@ -175,5 +203,19 @@ final class GitService {
         } catch {
             return nil
         }
+    }
+
+    private func githubURL(from remote: String) -> URL? {
+        let trimmed = remote.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") {
+            return URL(string: trimmed.replacingOccurrences(of: ".git", with: ""))
+        }
+        if trimmed.hasPrefix("git@github.com:") {
+            let path = trimmed
+                .replacingOccurrences(of: "git@github.com:", with: "")
+                .replacingOccurrences(of: ".git", with: "")
+            return URL(string: "https://github.com/\(path)")
+        }
+        return nil
     }
 }
