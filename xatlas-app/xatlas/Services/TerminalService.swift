@@ -61,6 +61,22 @@ final class TerminalService {
         return sessions.filter { $0.projectID == projectID }
     }
 
+    func visibleSessionsForProject(_ projectID: UUID?, maxDetached: Int = 4) -> [TerminalSession] {
+        let ordered = sessionsForProject(projectID)
+            .filter { $0.activityState != .exited }
+            .sorted(by: Self.sessionPriority)
+
+        let active = ordered.filter { $0.activityState != .detached }
+        let detached = ordered.filter { $0.activityState == .detached }
+        return active + detached.prefix(maxDetached)
+    }
+
+    func hiddenSessionCountForProject(_ projectID: UUID?, maxDetached: Int = 4) -> Int {
+        let visibleCount = visibleSessionsForProject(projectID, maxDetached: maxDetached).count
+        let totalCount = sessionsForProject(projectID).filter { $0.activityState != .exited }.count
+        return max(0, totalCount - visibleCount)
+    }
+
     func displayTitle(for sessionID: String) -> String {
         session(id: sessionID)?.displayTitle ?? "Terminal"
     }
@@ -367,6 +383,26 @@ final class TerminalService {
         return projects.first(where: { project in
             directory == project.path || directory.hasPrefix(project.path + "/")
         })?.id
+    }
+
+    private static func sessionPriority(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
+        let lhsRank = rank(for: lhs)
+        let rhsRank = rank(for: rhs)
+        if lhsRank != rhsRank {
+            return lhsRank < rhsRank
+        }
+        return lhs.updatedAt > rhs.updatedAt
+    }
+
+    private static func rank(for session: TerminalSession) -> Int {
+        if session.requiresAttention { return 0 }
+        switch session.activityState {
+        case .running: return 1
+        case .idle: return 2
+        case .detached: return 3
+        case .error: return 4
+        case .exited: return 5
+        }
     }
 }
 

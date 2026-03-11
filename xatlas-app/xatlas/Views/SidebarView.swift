@@ -25,23 +25,14 @@ struct SidebarView: View {
 
             // Section header
             SectionHeader(title: "Projects") {
-                HStack(spacing: 6) {
-                    HeaderModeButton(
-                        icon: "sidebar.left",
-                        isSelected: state.projectSurfaceMode == .workspace
-                    ) {
+                HeaderModeToggleButton(mode: state.projectSurfaceMode) {
+                    if state.projectSurfaceMode == .workspace {
+                        state.showProjectDashboard()
+                    } else {
                         state.showProjectWorkspace()
                     }
-                    .accessibilityLabel("Project workspace")
-
-                    HeaderModeButton(
-                        icon: "square.grid.2x2",
-                        isSelected: state.projectSurfaceMode == .dashboard
-                    ) {
-                        state.showProjectDashboard()
-                    }
-                    .accessibilityLabel("Project dashboard")
                 }
+                .accessibilityLabel(state.projectSurfaceMode == .workspace ? "Project dashboard" : "Project workspace")
             }
 
             // Project list
@@ -236,6 +227,7 @@ private struct GitInlineButton: View {
     let onRefresh: () -> Void
     let projectPath: String
     @State private var isGitHovered = false
+    @State private var remoteURL: String?
 
     private var changeCount: Int { status.changes.count }
     private var hasChanges: Bool { changeCount > 0 }
@@ -269,6 +261,7 @@ private struct GitInlineButton: View {
         .buttonStyle(.plain)
         .onHover { isGitHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isGitHovered)
+        .onAppear { refreshRemoteURL() }
         .help(hasChanges ? "Commit & push \(changeCount) change\(changeCount == 1 ? "" : "s")" : "Up to date — \(status.branch)")
         .contextMenu {
             Text(status.branch).font(.headline)
@@ -292,7 +285,7 @@ private struct GitInlineButton: View {
                     await MainActor.run { onRefresh() }
                 }
             }
-            if GitService.shared.remoteURL(at: projectPath) != nil {
+            if remoteURL != nil {
                 Button("Open GitHub Remote") {
                     GitService.shared.openRemote(at: projectPath)
                 }
@@ -318,6 +311,15 @@ private struct GitInlineButton: View {
         }
         return hasChanges ? .orange.opacity(0.1) : .green.opacity(0.06)
     }
+
+    private func refreshRemoteURL() {
+        Task.detached { [projectPath] in
+            let url = GitService.shared.remoteURL(at: projectPath)
+            await MainActor.run {
+                remoteURL = url
+            }
+        }
+    }
 }
 
 // MARK: - Section header
@@ -341,20 +343,19 @@ private struct SectionHeader<Accessory: View>: View {
     }
 }
 
-private struct HeaderModeButton: View {
-    let icon: String
-    let isSelected: Bool
+private struct HeaderModeToggleButton: View {
+    let mode: ProjectSurfaceMode
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: icon)
+            Image(systemName: mode == .workspace ? "sidebar.left" : "square.grid.2x2")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(isSelected ? Color.primary.opacity(0.92) : Color.secondary.opacity(0.65))
+                .foregroundStyle(Color.primary.opacity(0.92))
                 .frame(width: 22, height: 22)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(.white.opacity(isSelected ? 0.54 : 0.28))
+                        .fill(.white.opacity(0.44))
                 )
         }
         .buttonStyle(.plain)

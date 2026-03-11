@@ -39,6 +39,7 @@ final class AppState {
     var sidebarWidth: CGFloat = 220
     var terminalEventVersion: Int = 0
     var projectSurfaceMode: ProjectSurfaceMode = .workspace
+    var dashboardQuickViewProjectID: UUID?
 
     private var terminalSessionObserver: NSObjectProtocol?
 
@@ -248,6 +249,19 @@ final class AppState {
         if selectedProject == nil, let firstProject = projects.first {
             switchToProject(firstProject)
         }
+    }
+
+    @discardableResult
+    func openProjectQuickView(id: UUID) -> Bool {
+        guard projects.contains(where: { $0.id == id }) else { return false }
+        selectedSection = .projects
+        projectSurfaceMode = .dashboard
+        dashboardQuickViewProjectID = id
+        return true
+    }
+
+    func closeProjectQuickView() {
+        dashboardQuickViewProjectID = nil
     }
 
     @discardableResult

@@ -1,5 +1,13 @@
 {
   "mcpServers" : {
+    "filesystem" : {
+      "args" : [
+        "-y",
+        "@modelcontextprotocol\/server-filesystem",
+        "\/Users\/iPrado\/xatlas"
+      ],
+      "command" : "npx"
+    },
     "xatlas" : {
       "url" : "http:\/\/127.0.0.1:9012\/mcp"
     }

@@ -16,6 +16,8 @@ struct TerminalTools: MCPToolSet {
             addProject,
             selectProject,
             showProjectSurface,
+            showProjectQuickView,
+            closeProjectQuickView,
             projectBrief,
             generateMCP,
             addMCP,
@@ -42,13 +44,16 @@ struct TerminalTools: MCPToolSet {
             ),
             execute: { args in
                 let name = args["name"] as? String
-                let cwd = args["cwd"] as? String
-                let projectID = Self.uuid(from: args["projectId"] as? String) ?? AppState.shared.selectedProject?.id
+                let projectID = Self.uuid(from: args["projectId"] as? String) ?? Self.onMain { AppState.shared.selectedProject?.id }
+                let cwd = Self.trimmedOrNil(args["cwd"] as? String) ?? {
+                    guard let projectID else { return nil }
+                    return Self.onMain { AppState.shared.projects.first(where: { $0.id == projectID })?.path }
+                }()
                 let select = args["select"] as? Bool ?? true
 
                 let session = TerminalService.shared.createSession(title: name, projectID: projectID, workingDirectory: cwd)
                 if select {
-                    _ = AppState.shared.openTerminalSession(session.id)
+                    _ = Self.onMain { AppState.shared.openTerminalSession(session.id) }
                 }
 
                 return "{\"sessionId\":\"\(Self.escape(session.id))\",\"title\":\"\(Self.escape(session.displayTitle))\",\"tmuxSession\":\"\(Self.escape(session.tmuxSessionName))\",\"selected\":\(select ? "true" : "false")}"
@@ -74,7 +79,7 @@ struct TerminalTools: MCPToolSet {
                 guard let sessionID = args["sessionId"] as? String else {
                     return "{\"ok\":false,\"error\":\"sessionId is required\"}"
                 }
-                let ok = AppState.shared.openTerminalSession(sessionID)
+                let ok = Self.onMain { AppState.shared.openTerminalSession(sessionID) }
                 return "{\"ok\":\(ok ? "true" : "false")}"
             }
         )
@@ -100,7 +105,7 @@ struct TerminalTools: MCPToolSet {
                     return "{\"ok\":false,\"error\":\"sessionId is required\"}"
                 }
                 let killTmux = args["killTmux"] as? Bool ?? false
-                let ok = AppState.shared.closeTerminalSession(sessionID, killTmux: killTmux)
+                let ok = Self.onMain { AppState.shared.closeTerminalSession(sessionID, killTmux: killTmux) }
                 return "{\"ok\":\(ok ? "true" : "false"),\"killedTmux\":\(killTmux ? "true" : "false")}"
             }
         )
@@ -119,7 +124,7 @@ struct TerminalTools: MCPToolSet {
             ),
             execute: { _ in
                 let selectedSessionID: String? = {
-                    guard case .terminal(let sessionID) = AppState.shared.selectedTab?.kind else { return nil }
+                    guard case .terminal(let sessionID) = Self.onMain({ AppState.shared.selectedTab?.kind }) else { return nil }
                     return sessionID
                 }()
 
@@ -170,18 +175,19 @@ struct TerminalTools: MCPToolSet {
                 ]
             ),
             execute: { _ in
-                let tabs = AppState.shared.tabs.map { tab in
+                let tabs = Self.onMain { AppState.shared.tabs }.map { tab in
                     let kind: String
                     let attention: Bool
                     switch tab.kind {
                     case .terminal(let sessionID):
                         kind = "terminal"
-                        attention = AppState.shared.terminalRequiresAttention(sessionID)
+                        attention = Self.onMain { AppState.shared.terminalRequiresAttention(sessionID) }
                     case .editor:
                         kind = "editor"
                         attention = false
                     }
-                    return "{\"id\":\"\(Self.escape(tab.id))\",\"title\":\"\(Self.escape(tab.title))\",\"kind\":\"\(kind)\",\"selected\":\(AppState.shared.selectedTab?.id == tab.id ? "true" : "false"),\"attention\":\(attention ? "true" : "false")}"
+                    let isSelected = Self.onMain { AppState.shared.selectedTab?.id == tab.id }
+                    return "{\"id\":\"\(Self.escape(tab.id))\",\"title\":\"\(Self.escape(tab.title))\",\"kind\":\"\(kind)\",\"selected\":\(isSelected ? "true" : "false"),\"attention\":\(attention ? "true" : "false")}"
                 }
                 return "[\(tabs.joined(separator: ","))]"
             }
@@ -204,10 +210,12 @@ struct TerminalTools: MCPToolSet {
             ),
             execute: { args in
                 guard let tabID = args["tabId"] as? String,
-                      let tab = AppState.shared.tabs.first(where: { $0.id == tabID }) else {
+                      let tab = Self.onMain({ AppState.shared.tabs.first(where: { $0.id == tabID }) }) else {
                     return "{\"ok\":false,\"error\":\"tabId not found\"}"
                 }
-                AppState.shared.selectedTab = tab
+                Self.onMain {
+                    AppState.shared.selectedTab = tab
+                }
                 return "{\"ok\":true}"
             }
         )
@@ -229,10 +237,12 @@ struct TerminalTools: MCPToolSet {
             ),
             execute: { args in
                 guard let tabID = args["tabId"] as? String,
-                      let tab = AppState.shared.tabs.first(where: { $0.id == tabID }) else {
+                      let tab = Self.onMain({ AppState.shared.tabs.first(where: { $0.id == tabID }) }) else {
                     return "{\"ok\":false,\"error\":\"tabId not found\"}"
                 }
-                AppState.shared.closeTab(tab)
+                Self.onMain {
+                    AppState.shared.closeTab(tab)
+                }
                 return "{\"ok\":true}"
             }
         )
@@ -278,8 +288,8 @@ struct TerminalTools: MCPToolSet {
                 ]
             ),
             execute: { _ in
-                let selectedProjectID = AppState.shared.selectedProject?.id
-                let projects = AppState.shared.projects.map {
+                let selectedProjectID = Self.onMain { AppState.shared.selectedProject?.id }
+                let projects = Self.onMain { AppState.shared.projects }.map {
                     "{\"id\":\"\(Self.escape($0.id.uuidString))\",\"name\":\"\(Self.escape($0.name))\",\"path\":\"\(Self.escape($0.path))\",\"selected\":\($0.id == selectedProjectID ? "true" : "false")}"
                 }
                 return "[\(projects.joined(separator: ","))]"
@@ -308,7 +318,9 @@ struct TerminalTools: MCPToolSet {
                 }
                 let name = (args["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let displayName = name?.isEmpty == false ? name! : URL(fileURLWithPath: path).lastPathComponent
-                AppState.shared.addProject(name: displayName, path: path)
+                Self.onMain {
+                    AppState.shared.addProject(name: displayName, path: path)
+                }
                 return "{\"ok\":true,\"name\":\"\(Self.escape(displayName))\",\"path\":\"\(Self.escape(path))\"}"
             }
         )
@@ -333,7 +345,7 @@ struct TerminalTools: MCPToolSet {
                       let projectID = Self.uuid(from: rawProjectID) else {
                     return "{\"ok\":false,\"error\":\"valid projectId is required\"}"
                 }
-                let ok = AppState.shared.selectProject(id: projectID)
+                let ok = Self.onMain { AppState.shared.selectProject(id: projectID) }
                 return "{\"ok\":\(ok ? "true" : "false")}"
             }
         )
@@ -356,10 +368,12 @@ struct TerminalTools: MCPToolSet {
             execute: { args in
                 guard let rawProjectID = args["projectId"] as? String,
                       let projectID = Self.uuid(from: rawProjectID),
-                      let project = AppState.shared.projects.first(where: { $0.id == projectID }) else {
+                      let project = Self.onMain({ AppState.shared.projects.first(where: { $0.id == projectID }) }) else {
                     return "{\"ok\":false,\"error\":\"valid projectId is required\"}"
                 }
-                AppState.shared.removeProject(project)
+                Self.onMain {
+                    AppState.shared.removeProject(project)
+                }
                 return "{\"ok\":true}"
             }
         )
@@ -385,13 +399,64 @@ struct TerminalTools: MCPToolSet {
                 }
                 switch mode {
                 case "workspace":
-                    AppState.shared.showProjectWorkspace()
+                    Self.onMain {
+                        AppState.shared.showProjectWorkspace()
+                    }
                 case "dashboard":
-                    AppState.shared.showProjectDashboard()
+                    Self.onMain {
+                        AppState.shared.showProjectDashboard()
+                    }
                 default:
                     return "{\"ok\":false,\"error\":\"mode must be workspace or dashboard\"}"
                 }
                 return "{\"ok\":true,\"mode\":\"\(Self.escape(mode))\"}"
+            }
+        )
+    }
+
+    private var showProjectQuickView: MCPTool {
+        MCPTool(
+            name: "xatlas_project_quick_view_open",
+            definition: MCPToolDefinition(
+                name: "xatlas_project_quick_view_open",
+                description: "Open the dashboard quick-view sheet for a project",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([
+                        "projectId": ["type": "string", "description": "Project UUID"]
+                    ]),
+                    "required": AnyCodable(["projectId"])
+                ]
+            ),
+            execute: { args in
+                guard let rawProjectID = args["projectId"] as? String,
+                      let projectID = Self.uuid(from: rawProjectID) else {
+                    return "{\"ok\":false,\"error\":\"valid projectId is required\"}"
+                }
+                let ok = Self.onMain {
+                    AppState.shared.openProjectQuickView(id: projectID)
+                }
+                return "{\"ok\":\(ok ? "true" : "false")}"
+            }
+        )
+    }
+
+    private var closeProjectQuickView: MCPTool {
+        MCPTool(
+            name: "xatlas_project_quick_view_close",
+            definition: MCPToolDefinition(
+                name: "xatlas_project_quick_view_close",
+                description: "Close the dashboard quick-view sheet if it is open",
+                inputSchema: [
+                    "type": AnyCodable("object"),
+                    "properties": AnyCodable([String: String]())
+                ]
+            ),
+            execute: { _ in
+                Self.onMain {
+                    AppState.shared.closeProjectQuickView()
+                }
+                return "{\"ok\":true}"
             }
         )
     }
@@ -414,7 +479,7 @@ struct TerminalTools: MCPToolSet {
             execute: { args in
                 guard let rawProjectID = args["projectId"] as? String,
                       let projectID = Self.uuid(from: rawProjectID),
-                      let project = AppState.shared.projects.first(where: { $0.id == projectID }) else {
+                      let project = Self.onMain({ AppState.shared.projects.first(where: { $0.id == projectID }) }) else {
                     return "{\"ok\":false,\"error\":\"valid projectId is required\"}"
                 }
 
@@ -425,7 +490,7 @@ struct TerminalTools: MCPToolSet {
                     provider = nil
                 }
 
-                guard let sessionID = AppState.shared.runProjectBrief(for: project, provider: provider) else {
+                guard let sessionID = Self.onMain({ AppState.shared.runProjectBrief(for: project, provider: provider) }) else {
                     return "{\"ok\":false,\"error\":\"failed to run project brief\"}"
                 }
                 return "{\"ok\":true,\"sessionId\":\"\(Self.escape(sessionID))\"}"
@@ -457,9 +522,9 @@ struct TerminalTools: MCPToolSet {
                 let projectPath: String?
                 if let rawProjectID = args["projectId"] as? String,
                    let projectID = Self.uuid(from: rawProjectID) {
-                    projectPath = AppState.shared.projects.first(where: { $0.id == projectID })?.path
+                    projectPath = Self.onMain { AppState.shared.projects.first(where: { $0.id == projectID })?.path }
                 } else {
-                    projectPath = AppState.shared.selectedProject?.path
+                    projectPath = Self.onMain { AppState.shared.selectedProject?.path }
                 }
 
                 let provider = (args["provider"] as? String).flatMap(AISyncProvider.init(rawValue:))
@@ -506,9 +571,9 @@ struct TerminalTools: MCPToolSet {
                 let projectPath: String?
                 if let rawProjectID = args["projectId"] as? String,
                    let projectID = Self.uuid(from: rawProjectID) {
-                    projectPath = AppState.shared.projects.first(where: { $0.id == projectID })?.path
+                    projectPath = Self.onMain { AppState.shared.projects.first(where: { $0.id == projectID })?.path }
                 } else {
-                    projectPath = AppState.shared.selectedProject?.path
+                    projectPath = Self.onMain { AppState.shared.selectedProject?.path }
                 }
 
                 let configuration = MCPConfiguration(
@@ -557,16 +622,20 @@ struct TerminalTools: MCPToolSet {
             ),
             execute: { _ in
                 let selectedSessionID: String? = {
-                    guard case .terminal(let sessionID) = AppState.shared.selectedTab?.kind else { return nil }
+                    guard case .terminal(let sessionID) = Self.onMain({ AppState.shared.selectedTab?.kind }) else { return nil }
                     return sessionID
                 }()
-                let projects = AppState.shared.projects.map {
+                let selectedProjectID = Self.onMain { AppState.shared.selectedProject?.id.uuidString ?? "" }
+                let selectedTabID = Self.onMain { AppState.shared.selectedTab?.id ?? "" }
+                let projectSurface = Self.onMain { AppState.shared.projectSurfaceMode.rawValue }
+                let quickViewProjectID = Self.onMain { AppState.shared.dashboardQuickViewProjectID?.uuidString ?? "" }
+                let projects = Self.onMain { AppState.shared.projects }.map {
                     "{\"id\":\"\(Self.escape($0.id.uuidString))\",\"name\":\"\(Self.escape($0.name))\",\"path\":\"\(Self.escape($0.path))\"}"
                 }
                 let sessions = TerminalService.shared.sessions.map {
                     "{\"id\":\"\(Self.escape($0.id))\",\"title\":\"\(Self.escape($0.displayTitle))\",\"tmuxSession\":\"\(Self.escape($0.tmuxSessionName))\",\"projectId\":\"\(Self.escape($0.projectID?.uuidString ?? ""))\",\"cwd\":\"\(Self.escape($0.currentDirectory ?? $0.workingDirectory ?? ""))\",\"state\":\"\(Self.escape($0.activityState.rawValue))\",\"attention\":\($0.requiresAttention ? "true" : "false")}"
                 }
-                return "{\"selectedProjectId\":\"\(Self.escape(AppState.shared.selectedProject?.id.uuidString ?? ""))\",\"selectedTabId\":\"\(Self.escape(AppState.shared.selectedTab?.id ?? ""))\",\"selectedSessionId\":\"\(Self.escape(selectedSessionID ?? ""))\",\"projectSurface\":\"\(Self.escape(AppState.shared.projectSurfaceMode.rawValue))\",\"projects\":[\(projects.joined(separator: ","))],\"sessions\":[\(sessions.joined(separator: ","))]}"
+                return "{\"selectedProjectId\":\"\(Self.escape(selectedProjectID))\",\"selectedTabId\":\"\(Self.escape(selectedTabID))\",\"selectedSessionId\":\"\(Self.escape(selectedSessionID ?? ""))\",\"projectSurface\":\"\(Self.escape(projectSurface))\",\"quickViewProjectId\":\"\(Self.escape(quickViewProjectID))\",\"projects\":[\(projects.joined(separator: ","))],\"sessions\":[\(sessions.joined(separator: ","))]}"
             }
         )
     }
@@ -587,5 +656,13 @@ struct TerminalTools: MCPToolSet {
         guard let value else { return nil }
         let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return cleaned.isEmpty ? nil : cleaned
+    }
+
+    private static func onMain<T>(_ work: () -> T) -> T {
+        if Thread.isMainThread {
+            return work()
+        }
+
+        return DispatchQueue.main.sync(execute: work)
     }
 }
