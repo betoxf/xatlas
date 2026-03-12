@@ -4,10 +4,35 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_DIR="$("$ROOT/scripts/package-app.sh" | tail -n 1)"
 
-OPEN_ARGS=(-na)
-if [[ "${1:-}" == "--background" ]]; then
-  OPEN_ARGS=(-g -na)
-fi
+mode="${1:-normal}"
 
-open "${OPEN_ARGS[@]}" "$APP_DIR"
-echo "$APP_DIR"
+case "$mode" in
+  normal)
+    open -na "$APP_DIR"
+    echo "$APP_DIR"
+    ;;
+  --background|background)
+    LOG_PATH="${XATLAS_APP_LOG:-/tmp/xatlas-app-background.log}"
+    pkill -f "$APP_DIR/Contents/MacOS/xatlas" >/dev/null 2>&1 || true
+    XATLAS_LAUNCH_MODE=background \
+      nohup "$APP_DIR/Contents/MacOS/xatlas" >"$LOG_PATH" 2>&1 &
+    PID=$!
+    echo "$PID"
+    echo "$APP_DIR"
+    echo "$LOG_PATH"
+    ;;
+  --minimized|minimized)
+    LOG_PATH="${XATLAS_APP_LOG:-/tmp/xatlas-app-minimized.log}"
+    pkill -f "$APP_DIR/Contents/MacOS/xatlas" >/dev/null 2>&1 || true
+    XATLAS_LAUNCH_MODE=minimized \
+      nohup "$APP_DIR/Contents/MacOS/xatlas" >"$LOG_PATH" 2>&1 &
+    PID=$!
+    echo "$PID"
+    echo "$APP_DIR"
+    echo "$LOG_PATH"
+    ;;
+  *)
+    echo "unknown mode: $mode" >&2
+    exit 1
+    ;;
+esac

@@ -2,10 +2,39 @@ import AppKit
 import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private enum LaunchMode {
+        case normal
+        case backgroundWindow
+        case minimizedWindow
+        case headless
+    }
+
     var xatlasWindow: NSWindow?
     var keepAliveWindow: NSWindow?
     var keyMonitor: Any?
-    private let isHeadless = ProcessInfo.processInfo.environment["XATLAS_HEADLESS"] == "1" || CommandLine.arguments.contains("--headless")
+    private lazy var launchMode: LaunchMode = {
+        let environment = ProcessInfo.processInfo.environment
+        let arguments = CommandLine.arguments
+
+        if environment["XATLAS_HEADLESS"] == "1" || arguments.contains("--headless") {
+            return .headless
+        }
+
+        let mode = environment["XATLAS_LAUNCH_MODE"]?.lowercased()
+        if mode == "background" || arguments.contains("--background-window") {
+            return .backgroundWindow
+        }
+
+        if mode == "minimized" || arguments.contains("--minimized-window") {
+            return .minimizedWindow
+        }
+
+        return .normal
+    }()
+
+    private var isHeadless: Bool {
+        launchMode == .headless
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(isHeadless ? .accessory : .regular)
@@ -41,13 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hostingView.layer?.masksToBounds = true
 
         window.contentView = hostingView
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
-
         self.xatlasWindow = window
 
-        NSApplication.shared.activate(ignoringOtherApps: true)
         installKeyMonitor()
+        presentMainWindow(window)
         MCPServer.shared.start()
     }
 
@@ -63,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        guard !isHeadless else { return }
+        guard launchMode == .normal else { return }
         xatlasWindow?.makeKeyAndOrderFront(nil)
     }
 
@@ -98,5 +124,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         window.makeKeyAndOrderFront(nil)
         keepAliveWindow = window
+    }
+
+    @MainActor
+    private func presentMainWindow(_ window: NSWindow) {
+        switch launchMode {
+        case .normal:
+            window.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        case .backgroundWindow:
+            window.orderFront(nil)
+        case .minimizedWindow:
+            window.orderFront(nil)
+            window.miniaturize(nil)
+        case .headless:
+            break
+        }
     }
 }
