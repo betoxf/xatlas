@@ -1,6 +1,11 @@
 import Foundation
 
 final class MCPHandler {
+    enum ResponseDisposition {
+        case json(body: String, headers: [String: String] = [:])
+        case accepted
+    }
+
     private let decoder = JSONDecoder()
     private let encoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -8,39 +13,51 @@ final class MCPHandler {
         return e
     }()
 
-    func handle(json: String) -> String {
+    func handle(json: String) -> ResponseDisposition {
         guard let data = json.data(using: .utf8),
               let request = try? decoder.decode(JSONRPCRequest.self, from: data) else {
-            return encodeError(id: nil, code: -32700, message: "Parse error")
+            return .json(body: encodeError(id: nil, code: -32700, message: "Parse error"))
         }
 
         switch request.method {
         case "initialize":
-            return encodeResult(id: request.id, result: [
+            return .json(
+                body: encodeResult(id: request.id, result: [
                 "protocolVersion": AnyCodable("2024-11-05"),
                 "capabilities": AnyCodable(["tools": ["listChanged": true]]),
                 "serverInfo": AnyCodable(["name": "xatlas", "version": "0.1.0"])
-            ])
+                ]),
+                headers: ["MCP-Session-Id": UUID().uuidString]
+            )
+
+        case "notifications/initialized":
+            return .accepted
+
+        case let method where request.id == nil && method.hasPrefix("notifications/"):
+            return .accepted
 
         case "tools/list":
             let tools = ToolRegistry.shared.allDefinitions()
-            return encodeResult(id: request.id, result: ["tools": AnyCodable(tools.map { [
+            return .json(body: encodeResult(id: request.id, result: ["tools": AnyCodable(tools.map { [
                 "name": AnyCodable($0.name),
                 "description": AnyCodable($0.description),
                 "inputSchema": AnyCodable($0.inputSchema)
-            ] as [String: AnyCodable] })])
+            ] as [String: AnyCodable] })]))
 
         case "tools/call":
             let params = request.params ?? [:]
             let toolName = (params["name"]?.value as? String) ?? ""
             let args = (params["arguments"]?.value as? [String: Any]) ?? [:]
             let result = ToolRegistry.shared.call(tool: toolName, arguments: args)
-            return encodeResult(id: request.id, result: [
+            return .json(body: encodeResult(id: request.id, result: [
                 "content": AnyCodable([["type": "text", "text": result]])
-            ])
+            ]))
 
         default:
-            return encodeError(id: request.id, code: -32601, message: "Method not found: \(request.method)")
+            if request.id == nil {
+                return .accepted
+            }
+            return .json(body: encodeError(id: request.id, code: -32601, message: "Method not found: \(request.method)"))
         }
     }
 

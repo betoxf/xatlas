@@ -7,6 +7,7 @@ final class ToolRegistry {
 
     private init() {
         register(TerminalTools())
+        register(OperatorTools())
         register(FileTools())
     }
 

@@ -172,6 +172,12 @@ final class TerminalService {
             updateActivityState(.running, for: sessionID)
         } else {
             updateActivityState(.error, for: sessionID)
+            OperatorEventStore.shared.record(
+                kind: .commandFailed,
+                session: session,
+                command: trimmed,
+                details: "tmux could not send the command"
+            )
         }
         return success
     }
@@ -182,12 +188,14 @@ final class TerminalService {
 
         var updatedSessionName: String?
         var updatedTitle: String?
+        var currentSession: TerminalSession?
 
         updateSession(sessionID) { session in
             session.lastCommand = cleaned
             session.updatedAt = .now
             session.activityState = .running
             session.requiresAttention = false
+            currentSession = session
 
             guard session.pinnedTitle == nil else { return }
             guard let semantic = TerminalTitleHeuristics.semanticKey(for: cleaned) else { return }
@@ -207,6 +215,14 @@ final class TerminalService {
 
         if let updatedSessionName, let updatedTitle {
             _ = tmux.setSessionTitle(name: updatedSessionName, title: updatedTitle)
+        }
+
+        if let currentSession {
+            OperatorEventStore.shared.record(
+                kind: .commandStarted,
+                session: currentSession,
+                command: cleaned
+            )
         }
 
         startCompletionMonitor(for: sessionID, command: cleaned)
@@ -289,20 +305,57 @@ final class TerminalService {
     private func markCommandFinished(for sessionID: String, observedTail: String) {
         completionMonitorTokens.removeValue(forKey: sessionID)
 
+        var completedSession: TerminalSession?
         updateSession(sessionID) { session in
             guard session.activityState == .running else { return }
             session.activityState = .idle
             session.requiresAttention = true
             session.updatedAt = .now
+            completedSession = session
+        }
+
+        if let completedSession, let command = completedSession.lastCommand {
+            OperatorEventStore.shared.record(
+                kind: .commandFinished,
+                session: completedSession,
+                command: command,
+                details: Self.completionSummary(from: observedTail)
+            )
         }
     }
 
     private static func relevantTail(from snapshot: String) -> String {
         snapshot
             .components(separatedBy: .newlines)
-            .suffix(8)
+            .suffix(16)
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func completionSummary(from tail: String) -> String? {
+        let lines = tail
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return lines
+            .reversed()
+            .first { line in
+                guard !(line.contains("❯") || line.hasSuffix("$") || line.hasSuffix("%") || line.hasSuffix("#")) else {
+                    return false
+                }
+                let lowered = line.lowercased()
+                if lowered == "codex" || lowered == "claude" || lowered == "zai" {
+                    return false
+                }
+                if lowered.hasPrefix("mcp ") || lowered.hasPrefix("tokens used") || lowered.hasPrefix("session id:") {
+                    return false
+                }
+                if lowered.hasPrefix("openai codex") || lowered.hasPrefix("workdir:") || lowered.hasPrefix("model:") {
+                    return false
+                }
+                return true
+            }
     }
 
     private static func snapshotShowsReadyState(_ snapshot: String) -> Bool {

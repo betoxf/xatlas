@@ -5,7 +5,7 @@ struct ProjectDashboardView: View {
     @Bindable var state: AppState
 
     private let columns = [
-        GridItem(.adaptive(minimum: 260, maximum: 340), spacing: 18, alignment: .top)
+        GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 16, alignment: .top)
     ]
 
     private var quickViewProject: Project? {
@@ -92,7 +92,6 @@ private struct ProjectDashboardCard: View {
     @State private var gitStatus = GitStatus(branch: "", changes: [], isRepo: false)
     @State private var previewText = "No terminal output yet."
     @State private var isHovered = false
-    @State private var isSummarizing = false
 
     private var sessions: [TerminalSession] {
         TerminalService.shared.visibleSessionsForProject(project.id, maxDetached: 3)
@@ -110,6 +109,41 @@ private struct ProjectDashboardCard: View {
         state.projectAttentionCount(project.id)
     }
 
+    private var badgeCount: Int {
+        var count = 2
+        if gitStatus.isRepo {
+            count += 1
+        }
+        if hiddenSessionCount > 0 {
+            count += 1
+        }
+        return count
+    }
+
+    private var compactBadges: Bool {
+        badgeCount >= 4
+    }
+
+    private var branchBadgeText: String {
+        gitStatus.isRepo ? gitStatus.branch : "folder"
+    }
+
+    private var visibleBadgeText: String {
+        compactBadges ? "\(sessions.count) live" : "\(sessions.count) visible"
+    }
+
+    private var changesBadgeText: String {
+        let count = gitStatus.changes.count
+        if compactBadges {
+            return "\(count) chg"
+        }
+        return "\(count) change\(count == 1 ? "" : "s")"
+    }
+
+    private var olderBadgeText: String {
+        compactBadges ? "+\(hiddenSessionCount)" : "+\(hiddenSessionCount) older"
+    }
+
     private var isSelected: Bool {
         state.selectedProject?.id == project.id && state.projectSurfaceMode == .workspace
     }
@@ -117,12 +151,12 @@ private struct ProjectDashboardCard: View {
     var body: some View {
         let _ = state.terminalEventVersion
 
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text(project.name)
-                            .font(.system(size: 20, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
 
@@ -149,81 +183,41 @@ private struct ProjectDashboardCard: View {
                     .foregroundStyle(.secondary.opacity(0.55))
             }
 
-            HStack(spacing: 8) {
-                dashboardBadge(text: gitStatus.isRepo ? gitStatus.branch : "folder", tint: .blue)
-                dashboardBadge(text: "\(sessions.count) visible", tint: .green)
+            HStack(spacing: compactBadges ? 5 : 8) {
+                dashboardBadge(text: branchBadgeText, tint: .blue, compact: compactBadges)
+                dashboardBadge(text: visibleBadgeText, tint: .green, compact: compactBadges)
                 if gitStatus.isRepo {
-                    dashboardBadge(text: "\(gitStatus.changes.count) change\(gitStatus.changes.count == 1 ? "" : "s")", tint: gitStatus.changes.isEmpty ? .gray : .orange)
+                    dashboardBadge(
+                        text: changesBadgeText,
+                        tint: gitStatus.changes.isEmpty ? .gray : .orange,
+                        compact: compactBadges
+                    )
                 }
                 if hiddenSessionCount > 0 {
-                    dashboardBadge(text: "+\(hiddenSessionCount) older", tint: .secondary)
+                    dashboardBadge(text: olderBadgeText, tint: .secondary, compact: compactBadges)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(primarySessionTitle)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.78))
-                    .lineLimit(1)
-
-                Text(primarySessionSubtitle)
-                    .font(.system(size: 12, weight: .medium))
+                Text("Live Preview")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.white.opacity(0.34))
-            )
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Live Preview")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(previewStateLabel)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(previewStateColor)
-                }
 
                 Text(previewText)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundStyle(.primary.opacity(0.72))
-                    .frame(maxWidth: .infinity, minHeight: 74, alignment: .topLeading)
-                    .lineLimit(5)
+                    .frame(maxWidth: .infinity, minHeight: 100, maxHeight: 100, alignment: .topLeading)
+                    .lineLimit(7)
             }
             .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.black.opacity(0.045))
             )
-
-            HStack(spacing: 8) {
-                actionButton(label: "Open", icon: "rectangle.stack") {
-                    state.switchToProject(project)
-                }
-
-                actionButton(label: "Quick View", icon: "macwindow") {
-                    onQuickView()
-                }
-
-                actionButton(label: isSummarizing ? "Running" : "Brief", icon: "sparkles", disabled: isSummarizing) {
-                    isSummarizing = true
-                    let sessionID = state.runProjectBrief(for: project)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
-                        isSummarizing = false
-                        if sessionID == nil {
-                            NSSound.beep()
-                        }
-                    }
-                }
-            }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, minHeight: 306, alignment: .topLeading)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 236, maxHeight: 236, alignment: .topLeading)
         .background(cardBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -231,7 +225,7 @@ private struct ProjectDashboardCard: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .onTapGesture {
-            state.switchToProject(project)
+            onQuickView()
         }
         .onHover { isHovered = $0 }
         .onAppear {
@@ -240,35 +234,6 @@ private struct ProjectDashboardCard: View {
         }
         .onChange(of: state.terminalEventVersion) { _, _ in
             refreshPreview()
-        }
-    }
-
-    private var primarySessionTitle: String {
-        primarySession?.displayTitle ?? "No terminal yet"
-    }
-
-    private var primarySessionSubtitle: String {
-        if let session = primarySession {
-            if session.requiresAttention {
-                return "Finished work and waiting for review."
-            }
-            return session.activityState.label
-        }
-        return "Open the project to start a terminal or run a brief AI summary."
-    }
-
-    private var previewStateLabel: String {
-        primarySession?.activityState.label ?? "Idle"
-    }
-
-    private var previewStateColor: Color {
-        guard let state = primarySession?.activityState else { return .secondary }
-        switch state {
-        case .idle: return .blue.opacity(0.78)
-        case .running: return .green.opacity(0.82)
-        case .detached: return .orange.opacity(0.82)
-        case .exited: return .secondary
-        case .error: return .red.opacity(0.82)
         }
     }
 
@@ -308,33 +273,17 @@ private struct ProjectDashboardCard: View {
         previewText = lines.suffix(5).joined(separator: "\n")
     }
 
-    private func dashboardBadge(text: String, tint: Color) -> some View {
+    private func dashboardBadge(text: String, tint: Color, compact: Bool) -> some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .font(.system(size: compact ? 8 : 9.25, weight: .semibold, design: .rounded))
             .foregroundStyle(tint.opacity(0.8))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, compact ? 5 : 8)
+            .padding(.vertical, compact ? 2.5 : 4)
             .background(Capsule().fill(tint.opacity(0.08)))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
     }
 
-    private func actionButton(label: String, icon: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(label)
-                    .font(.system(size: 11, weight: .semibold))
-            }
-            .foregroundStyle(disabled ? Color.secondary : Color.primary.opacity(0.8))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                Capsule().fill(.white.opacity(disabled ? 0.18 : 0.42))
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled)
-    }
 }
 
 private struct ProjectQuickViewSheet: View {
@@ -345,6 +294,8 @@ private struct ProjectQuickViewSheet: View {
     @State private var showAllSessions = false
     @State private var selectedSessionID: String?
     @State private var snapshotText = "No terminal selected."
+    @State private var commandInput = ""
+    @FocusState private var isCommandFieldFocused: Bool
 
     private var sessions: [TerminalSession] {
         if showAllSessions {
@@ -464,7 +415,7 @@ private struct ProjectQuickViewSheet: View {
 
             ScrollView {
                 Text(snapshotText)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(.primary.opacity(0.8))
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     .padding(16)
@@ -475,6 +426,37 @@ private struct ProjectQuickViewSheet: View {
             )
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
+
+            HStack(spacing: 10) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+
+                TextField("Send a command to this terminal...", text: $commandInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .focused($isCommandFieldFocused)
+                    .onSubmit { submitCommand() }
+
+                Button("Send") {
+                    submitCommand()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(.white.opacity(0.52)))
+                .disabled(commandInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(
+                Capsule()
+                    .fill(.white.opacity(0.72))
+                    .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
 
             HStack(spacing: 10) {
                 Button("Open Workspace") {
@@ -517,6 +499,7 @@ private struct ProjectQuickViewSheet: View {
         .onAppear {
             selectedSessionID = sessions.first?.id
             refreshSnapshot()
+            isCommandFieldFocused = true
         }
         .onChange(of: state.terminalEventVersion) { _, _ in
             refreshSnapshot()
@@ -534,6 +517,28 @@ private struct ProjectQuickViewSheet: View {
             return
         }
         snapshotText = snapshot
+    }
+
+    private func submitCommand() {
+        let command = commandInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return }
+
+        let targetSessionID: String
+        if let session = selectedSession {
+            targetSessionID = session.id
+        } else {
+            let tab = state.createTerminal(for: project)
+            guard case .terminal(let sessionID) = tab.kind else { return }
+            selectedSessionID = sessionID
+            targetSessionID = sessionID
+        }
+
+        commandInput = ""
+        _ = TerminalService.shared.sendCommand(command, to: targetSessionID)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            refreshSnapshot()
+        }
+        isCommandFieldFocused = true
     }
 
     private func sessionPriority(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
@@ -571,7 +576,7 @@ private struct AddProjectTile: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, minHeight: 306)
+            .frame(maxWidth: .infinity, minHeight: 236, maxHeight: 236)
             .background(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [7, 7]))

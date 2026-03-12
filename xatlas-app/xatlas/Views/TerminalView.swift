@@ -172,7 +172,9 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         func attachIfNeeded(_ terminal: ManagedLocalProcessTerminalView) {
             guard let session = TerminalService.shared.session(id: sessionID) else { return }
             let sessionName = session.tmuxSessionName
-            let isRunning = terminal.process?.running ?? false
+            let isRunning = MainActor.assumeIsolated {
+                terminal.process?.running ?? false
+            }
             guard attachedSessionName != sessionName || !isRunning else { return }
             guard hasUsableGrid(terminal) else { return }
             guard TerminalService.shared.ensureBackingSession(for: sessionID) else { return }
@@ -182,18 +184,22 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             discardingEscapeSequence = false
 
             let command = TmuxService.shared.attachCommand(for: sessionName)
-            terminal.startProcess(
-                executable: command.executable,
-                args: command.args,
-                environment: nil,
-                execName: command.execName,
-                currentDirectory: session.currentDirectory ?? session.workingDirectory
-            )
+            MainActor.assumeIsolated {
+                terminal.startProcess(
+                    executable: command.executable,
+                    args: command.args,
+                    environment: nil,
+                    execName: command.execName,
+                    currentDirectory: session.currentDirectory ?? session.workingDirectory
+                )
+            }
             TerminalService.shared.handleAttached(sessionID: sessionID)
         }
 
         private func hasUsableGrid(_ terminal: ManagedLocalProcessTerminalView) -> Bool {
-            terminal.terminal.cols >= Self.minimumCols && terminal.terminal.rows >= Self.minimumRows
+            MainActor.assumeIsolated {
+                terminal.terminal.cols >= Self.minimumCols && terminal.terminal.rows >= Self.minimumRows
+            }
         }
 
         func captureInput(_ text: String) {

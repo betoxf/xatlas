@@ -3,6 +3,7 @@ import SwiftUI
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var xatlasWindow: NSWindow?
+    var keepAliveWindow: NSWindow?
     var keyMonitor: Any?
     private let isHeadless = ProcessInfo.processInfo.environment["XATLAS_HEADLESS"] == "1" || CommandLine.arguments.contains("--headless")
 
@@ -10,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApplication.shared.setActivationPolicy(isHeadless ? .accessory : .regular)
 
         if isHeadless {
+            installHeadlessKeepAliveWindow()
             MCPServer.shared.start()
             return
         }
@@ -78,5 +80,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let handled = AppState.shared.selectTab(at: digit - 1)
             return handled ? nil : event
         }
+    }
+
+    @MainActor
+    private func installHeadlessKeepAliveWindow() {
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: 1, height: 1),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.hasShadow = false
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+        window.level = .statusBar
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        window.makeKeyAndOrderFront(nil)
+        keepAliveWindow = window
     }
 }

@@ -26,8 +26,8 @@ enum ProjectSurfaceMode: String, CaseIterable, Identifiable {
 }
 
 @Observable
-final class AppState {
-    nonisolated(unsafe) static let shared = AppState()
+final class AppState: @unchecked Sendable {
+    static let shared = AppState()
 
     var projects: [Project] = []
     var selectedSection: WorkspaceSection = .projects
@@ -294,6 +294,21 @@ final class AppState {
 
     func projectAttentionCount(_ projectID: UUID?) -> Int {
         TerminalService.shared.sessionsForProject(projectID).filter(\.requiresAttention).count
+    }
+
+    @discardableResult
+    func clearAttention(for sessionID: String) -> Bool {
+        guard TerminalService.shared.session(id: sessionID) != nil else { return false }
+        TerminalService.shared.clearAttention(for: sessionID)
+        return true
+    }
+
+    @discardableResult
+    func retryLastCommand(for sessionID: String) -> Bool {
+        guard let session = TerminalService.shared.session(id: sessionID),
+              let command = session.lastCommand?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !command.isEmpty else { return false }
+        return TerminalService.shared.sendCommand(command, to: sessionID)
     }
 
     private func observeTerminalSessions() {

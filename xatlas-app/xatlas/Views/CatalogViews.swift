@@ -4,6 +4,7 @@ struct WorkspaceSectionView: View {
     @Bindable var state: AppState
     @State private var snapshot = AgentCatalogSnapshot(mcpServers: [], skills: [], automations: [], availableProviders: [])
     @State private var isMCPComposerPresented = false
+    @State private var operatorVersion = 0
 
     var body: some View {
         ScrollView {
@@ -34,6 +35,7 @@ struct WorkspaceSectionView: View {
                         }
                     }
                 case .automations:
+                    operatorSection
                     catalogSection(
                         title: "Automations",
                         subtitle: "Claude custom commands and project-level automation entry points",
@@ -50,6 +52,9 @@ struct WorkspaceSectionView: View {
         .onAppear(perform: refresh)
         .onChange(of: state.selectedSection) { _, _ in refresh() }
         .onChange(of: state.selectedProject?.id) { _, _ in refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .xatlasTerminalSessionDidChange)) { _ in
+            operatorVersion &+= 1
+        }
         .sheet(isPresented: $isMCPComposerPresented) {
             MCPComposerView(projectPath: state.selectedProject?.path, refresh: refresh)
         }
@@ -142,6 +147,47 @@ struct WorkspaceSectionView: View {
         snapshot = AgentCatalogService.shared.snapshot(projectPath: state.selectedProject?.path)
     }
 
+    @ViewBuilder
+    private var operatorSection: some View {
+        let events = OperatorEventStore.shared.recentEvents(limit: 12)
+
+        catalogSection(
+            title: "Operator Feed",
+            subtitle: "Cross-project command starts, completions, and failures collected from the terminals inside xatlas",
+            count: events.count
+        ) {
+            VStack(spacing: 10) {
+                OperatorSummaryRow(
+                    runningCount: TerminalService.shared.sessions.filter { $0.activityState == .running }.count,
+                    attentionCount: TerminalService.shared.sessions.filter(\.requiresAttention).count,
+                    projectCount: Set(TerminalService.shared.sessions.compactMap(\.projectID)).count
+                )
+
+                if events.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("No operator events yet.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(.white.opacity(0.38))
+                    )
+                } else {
+                    ForEach(events) { event in
+                        OperatorEventRow(
+                            event: event,
+                            projectName: state.projects.first(where: { $0.id == event.projectID })?.name,
+                            state: state
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     private var quickActions: [CatalogQuickAction] {
         let home = NSHomeDirectory()
         switch state.selectedSection {
@@ -199,6 +245,126 @@ struct WorkspaceSectionView: View {
             }
             return actions
         }
+    }
+}
+
+private struct OperatorSummaryRow: View {
+    let runningCount: Int
+    let attentionCount: Int
+    let projectCount: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ScopeBadge(text: "\(runningCount) running")
+            ScopeBadge(text: "\(attentionCount) attention")
+            ScopeBadge(text: "\(projectCount) projects")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct OperatorEventRow: View {
+    let event: OperatorEvent
+    let projectName: String?
+    @Bindable var state: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Circle()
+                    .fill(tint)
+                    .frame(width: 9, height: 9)
+                    .padding(.top, 5)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text(title)
+                            .font(.system(size: 13, weight: .semibold))
+                        ScopeBadge(text: projectName ?? "Global")
+                        ScopeBadge(text: event.sessionTitle)
+                        Text(relativeTime)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.tertiary)
+                    }
+
+                    Text(event.command)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.primary.opacity(0.82))
+                        .lineLimit(2)
+
+                    if let details = event.details, !details.isEmpty {
+                        Text(details)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+
+                Spacer()
+            }
+
+            HStack(spacing: 8) {
+                Button("Open Terminal") {
+                    _ = state.openTerminalSession(event.sessionID)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(.white.opacity(0.36)))
+
+                Button("Retry") {
+                    _ = state.retryLastCommand(for: event.sessionID)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(.white.opacity(0.36)))
+
+                Button("Clear Attention") {
+                    _ = state.clearAttention(for: event.sessionID)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Capsule().fill(.white.opacity(0.36)))
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.white.opacity(0.5))
+        )
+    }
+
+    private var title: String {
+        switch event.kind {
+        case .commandStarted:
+            return "Started"
+        case .commandFinished:
+            return "Finished"
+        case .commandFailed:
+            return "Failed"
+        }
+    }
+
+    private var tint: Color {
+        switch event.kind {
+        case .commandStarted:
+            return .blue.opacity(0.75)
+        case .commandFinished:
+            return .green.opacity(0.78)
+        case .commandFailed:
+            return .red.opacity(0.8)
+        }
+    }
+
+    private var relativeTime: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: event.timestamp, relativeTo: .now)
     }
 }
 
