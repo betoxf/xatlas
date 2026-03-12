@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 struct TmuxSessionDescriptor {
@@ -19,6 +20,7 @@ final class TmuxService {
     static let managedSessionPrefix = "xatlas_"
     private let titleOptionName = "@xatlas_title"
     private lazy var executablePath = resolveExecutablePath()
+    private let tmuxQueue = DispatchQueue(label: "com.xatlas.tmux-service")
 
     func isAvailable() -> Bool {
         runTmux(["-V"]).status == 0
@@ -147,22 +149,63 @@ final class TmuxService {
 
     @discardableResult
     private func runTmux(_ args: [String]) -> (status: Int32, output: String?) {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = args
-        process.standardOutput = pipe
-        process.standardError = pipe
+        tmuxQueue.sync {
+            let process = Process()
+            let pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: executablePath)
+            process.arguments = args
+            process.standardOutput = pipe
+            process.standardError = pipe
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)
-            return (process.terminationStatus, output)
-        } catch {
-            return (-1, nil)
+            do {
+                try process.run()
+                let terminationStatus = waitForProcessExit(process)
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8)
+                return (terminationStatus, output)
+            } catch {
+                return (-1, nil)
+            }
         }
+    }
+
+    private func waitForProcessExit(_ process: Process) -> Int32 {
+        var status: Int32 = 0
+        let pid = process.processIdentifier
+
+        while true {
+            let result = waitpid(pid, &status, 0)
+            if result == pid { break }
+            if result == -1 && errno == EINTR { continue }
+            return -1
+        }
+
+        if didExit(status) {
+            return exitStatus(status)
+        }
+
+        if didReceiveSignal(status) {
+            return -terminatingSignal(status)
+        }
+
+        return -1
+    }
+
+    private func didExit(_ status: Int32) -> Bool {
+        (status & 0x7f) == 0
+    }
+
+    private func exitStatus(_ status: Int32) -> Int32 {
+        (status >> 8) & 0xff
+    }
+
+    private func didReceiveSignal(_ status: Int32) -> Bool {
+        let signal = terminatingSignal(status)
+        return signal != 0 && signal != 0x7f
+    }
+
+    private func terminatingSignal(_ status: Int32) -> Int32 {
+        status & 0x7f
     }
 
     private func resolveExecutablePath() -> String {

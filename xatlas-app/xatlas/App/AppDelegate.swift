@@ -38,10 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(isHeadless ? .accessory : .regular)
+        MCPServer.shared.start()
 
         if isHeadless {
             installHeadlessKeepAliveWindow()
-            MCPServer.shared.start()
             return
         }
 
@@ -74,7 +74,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         installKeyMonitor()
         presentMainWindow(window)
-        MCPServer.shared.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

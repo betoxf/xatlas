@@ -5,7 +5,8 @@ const http = require('node:http');
 const https = require('node:https');
 const { URL } = require('node:url');
 
-const targetUrl = new URL(process.env.XATLAS_MCP_URL || 'http://127.0.0.1:9012/mcp');
+const fallbackUrl = process.env.XATLAS_MCP_URL || 'http://127.0.0.1:9012/mcp';
+const stateFile = process.env.XATLAS_MCP_STATE_FILE || `${process.env.HOME || ''}/Library/Application Support/xatlas/mcp-server.json`;
 const logPath = process.env.XATLAS_MCP_BRIDGE_LOG || '';
 let sessionId = process.env.XATLAS_MCP_SESSION_ID || '';
 let inputBuffer = Buffer.alloc(0);
@@ -62,7 +63,7 @@ function parseContentLength(headerText) {
 
 async function forwardMessage(body) {
   logEvent(`stdin ${body}`);
-  const response = await postMessage(body);
+  const response = await postMessageWithRetry(body);
   logEvent(`http ${response.statusCode} ${response.body}`);
 
   const responseSessionId = response.headers['mcp-session-id'];
@@ -81,7 +82,22 @@ async function forwardMessage(body) {
   writeFramedMessage(response.body);
 }
 
-function postMessage(body) {
+async function postMessageWithRetry(body) {
+  let lastError;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const targetUrl = resolveTargetUrl();
+    try {
+      return await postMessage(body, targetUrl);
+    } catch (error) {
+      lastError = error;
+      logEvent(`retry ${attempt + 1} ${error.message}`);
+      await sleep(attempt < 5 ? 150 : 300);
+    }
+  }
+  throw lastError || new Error('xatlas bridge failed without an explicit error');
+}
+
+function postMessage(body, targetUrl) {
   const transport = targetUrl.protocol === 'https:' ? https : http;
   const headers = {
     'content-type': 'application/json',
@@ -117,10 +133,37 @@ function postMessage(body) {
       }
     );
 
+    request.setTimeout(2000, () => {
+      request.destroy(new Error('request timeout'));
+    });
+
     request.on('error', reject);
     request.write(body);
     request.end();
   });
+}
+
+function resolveTargetUrl() {
+  try {
+    if (fs.existsSync(stateFile)) {
+      const raw = fs.readFileSync(stateFile, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed.url === 'string' && parsed.url) {
+        return new URL(parsed.url);
+      }
+      if (parsed && Number.isInteger(parsed.port)) {
+        return new URL(`http://127.0.0.1:${parsed.port}/mcp`);
+      }
+    }
+  } catch (error) {
+    logEvent(`state-read-error ${error.message}`);
+  }
+
+  return new URL(fallbackUrl);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function writeFramedMessage(body) {

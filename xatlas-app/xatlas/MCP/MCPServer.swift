@@ -9,6 +9,7 @@ final class MCPServer: @unchecked Sendable {
     private let handler = MCPHandler()
     private let preferredPort: UInt16
     private(set) var boundPort: UInt16?
+    private let stateFileURL: URL
 
     private init() {
         if let envPort = ProcessInfo.processInfo.environment["XATLAS_MCP_PORT"],
@@ -17,6 +18,12 @@ final class MCPServer: @unchecked Sendable {
         } else {
             preferredPort = 9012
         }
+
+        let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support", isDirectory: true)
+        stateFileURL = supportDirectory
+            .appendingPathComponent("xatlas", isDirectory: true)
+            .appendingPathComponent("mcp-server.json", isDirectory: false)
     }
 
     func start() {
@@ -31,6 +38,7 @@ final class MCPServer: @unchecked Sendable {
                 }
                 listener?.start(queue: .global(qos: .userInitiated))
                 boundPort = candidate
+                persistState(port: candidate)
                 print("[MCP] Server listening on localhost:\(candidate)")
                 return
             } catch {
@@ -46,6 +54,7 @@ final class MCPServer: @unchecked Sendable {
         listener?.cancel()
         listener = nil
         boundPort = nil
+        clearPersistedState()
     }
 
     private func handleConnection(_ connection: NWConnection) {
@@ -214,5 +223,24 @@ final class MCPServer: @unchecked Sendable {
         connection.send(content: response.data(using: .utf8), completion: .contentProcessed { _ in
             connection.cancel()
         })
+    }
+
+    private func persistState(port: UInt16) {
+        let directory = stateFileURL.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let payload = [
+                "port": Int(port),
+                "url": "http://127.0.0.1:\(port)/mcp"
+            ] as [String: Any]
+            let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: stateFileURL, options: .atomic)
+        } catch {
+            print("[MCP] Failed to persist state: \(error.localizedDescription)")
+        }
+    }
+
+    private func clearPersistedState() {
+        try? FileManager.default.removeItem(at: stateFileURL)
     }
 }

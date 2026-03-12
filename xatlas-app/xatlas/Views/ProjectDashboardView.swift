@@ -302,10 +302,7 @@ private struct ProjectQuickViewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showAllSessions = false
     @State private var selectedSessionID: String?
-    @State private var snapshotText = "No terminal selected."
-    @State private var commandInput = ""
     @State private var pendingCloseSessionID: String?
-    @FocusState private var isCommandFieldFocused: Bool
 
     private var sessions: [TerminalSession] {
         if showAllSessions {
@@ -351,8 +348,7 @@ private struct ProjectQuickViewSheet: View {
                 if showAllSessions || hiddenSessionCount > 0 {
                     Button(showAllSessions ? "Recent" : "Show All \(totalVisibleSessionCount)") {
                         showAllSessions.toggle()
-                        selectedSessionID = sessions.first?.id
-                        refreshSnapshot()
+                        syncSelectedSession()
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
@@ -378,7 +374,6 @@ private struct ProjectQuickViewSheet: View {
                     ForEach(sessions) { session in
                         Button {
                             selectedSessionID = session.id
-                            refreshSnapshot()
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "terminal")
@@ -409,7 +404,6 @@ private struct ProjectQuickViewSheet: View {
                         if case .terminal(let sessionID) = tab.kind {
                             selectedSessionID = sessionID
                         }
-                        refreshSnapshot()
                     } label: {
                         Image(systemName: "plus")
                             .font(.system(size: 10, weight: .bold))
@@ -423,12 +417,22 @@ private struct ProjectQuickViewSheet: View {
             }
             .padding(.bottom, 12)
 
-            ScrollView {
-                Text(snapshotText)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.primary.opacity(0.8))
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            Group {
+                if let selectedSession {
+                    StyledTerminalView(sessionID: selectedSession.id, appState: state)
+                        .id(selectedSession.id)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("No terminal selected")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(16)
+                }
             }
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -436,37 +440,6 @@ private struct ProjectQuickViewSheet: View {
             )
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
-
-            HStack(spacing: 10) {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-
-                TextField("Send a command to this terminal...", text: $commandInput)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .focused($isCommandFieldFocused)
-                    .onSubmit { submitCommand() }
-
-                Button("Send") {
-                    submitCommand()
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Capsule().fill(.white.opacity(0.52)))
-                .disabled(commandInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(
-                Capsule()
-                    .fill(.white.opacity(0.72))
-                    .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
-            )
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
 
             HStack(spacing: 10) {
                 Button("Open Workspace") {
@@ -480,7 +453,7 @@ private struct ProjectQuickViewSheet: View {
                 .background(Capsule().fill(.white.opacity(0.5)))
 
                 Button("Refresh") {
-                    refreshSnapshot()
+                    syncSelectedSession()
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 12)
@@ -505,12 +478,10 @@ private struct ProjectQuickViewSheet: View {
         .frame(width: 860, height: 620)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear {
-            selectedSessionID = sessions.first?.id
-            refreshSnapshot()
-            isCommandFieldFocused = true
+            syncSelectedSession()
         }
         .onChange(of: state.terminalEventVersion) { _, _ in
-            refreshSnapshot()
+            syncSelectedSession()
         }
         .confirmationDialog(
             "Close running terminal?",
@@ -536,35 +507,12 @@ private struct ProjectQuickViewSheet: View {
         }
     }
 
-    private func refreshSnapshot() {
-        guard let session = selectedSession,
-              let snapshot = TerminalService.shared.snapshot(for: session.id, lines: 160) else {
-            snapshotText = "No terminal selected."
+    private func syncSelectedSession() {
+        if let selectedSessionID,
+           sessions.contains(where: { $0.id == selectedSessionID }) {
             return
         }
-        snapshotText = snapshot
-    }
-
-    private func submitCommand() {
-        let command = commandInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !command.isEmpty else { return }
-
-        let targetSessionID: String
-        if let session = selectedSession {
-            targetSessionID = session.id
-        } else {
-            let tab = state.createTerminal(for: project)
-            guard case .terminal(let sessionID) = tab.kind else { return }
-            selectedSessionID = sessionID
-            targetSessionID = sessionID
-        }
-
-        commandInput = ""
-        _ = TerminalService.shared.sendCommand(command, to: targetSessionID)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            refreshSnapshot()
-        }
-        isCommandFieldFocused = true
+        self.selectedSessionID = sessions.first?.id
     }
 
     private func requestClose(_ sessionID: String) {
@@ -580,7 +528,6 @@ private struct ProjectQuickViewSheet: View {
         _ = state.closeTerminalSession(sessionID, killTmux: true)
         pendingCloseSessionID = nil
         selectedSessionID = nextSessionID
-        refreshSnapshot()
     }
 
     private func sessionPriority(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {

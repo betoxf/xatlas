@@ -162,6 +162,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
 
         var sessionID: String
         private var attachedSessionName: String?
+        private var attachmentInFlight = false
         private var inputBuffer = ""
         private var discardingEscapeSequence = false
 
@@ -175,9 +176,14 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             let isRunning = MainActor.assumeIsolated {
                 terminal.process?.running ?? false
             }
+            guard !attachmentInFlight else { return }
             guard attachedSessionName != sessionName || !isRunning else { return }
             guard hasUsableGrid(terminal) else { return }
-            guard TerminalService.shared.ensureBackingSession(for: sessionID) else { return }
+            attachmentInFlight = true
+            guard TerminalService.shared.ensureBackingSession(for: sessionID) else {
+                attachmentInFlight = false
+                return
+            }
 
             attachedSessionName = sessionName
             inputBuffer = ""
@@ -193,6 +199,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
                     currentDirectory: session.currentDirectory ?? session.workingDirectory
                 )
             }
+            attachmentInFlight = false
             TerminalService.shared.handleAttached(sessionID: sessionID)
         }
 
@@ -247,6 +254,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         func processTerminated(source: TerminalView, exitCode: Int32?) {
             TerminalService.shared.handleProcessTerminated(sessionID: sessionID)
             attachedSessionName = nil
+            attachmentInFlight = false
         }
     }
 }
