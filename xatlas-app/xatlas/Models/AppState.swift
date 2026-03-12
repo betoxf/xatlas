@@ -154,7 +154,7 @@ final class AppState: @unchecked Sendable {
     }
 
     @discardableResult
-    func closeTerminalSession(_ sessionID: String, killTmux: Bool = false) -> Bool {
+    func closeTerminalSession(_ sessionID: String, killTmux: Bool = true) -> Bool {
         guard TerminalService.shared.session(id: sessionID) != nil else { return false }
 
         tabs.removeAll { $0.id == sessionID }
@@ -173,6 +173,11 @@ final class AppState: @unchecked Sendable {
 
         TerminalService.shared.removeSession(sessionID, killTmux: killTmux)
         return true
+    }
+
+    func terminalNeedsCloseConfirmation(_ sessionID: String) -> Bool {
+        guard let session = TerminalService.shared.session(id: sessionID) else { return false }
+        return session.activityState == .running
     }
 
     func openTab(_ tab: TabItem) {
@@ -275,9 +280,14 @@ final class AppState: @unchecked Sendable {
     }
 
     func closeTab(_ tab: TabItem) {
-        tabs.removeAll { $0.id == tab.id }
-        if selectedTab?.id == tab.id {
-            selectedTab = tabs.last
+        switch tab.kind {
+        case .terminal(let sessionID):
+            _ = closeTerminalSession(sessionID, killTmux: true)
+        case .editor:
+            tabs.removeAll { $0.id == tab.id }
+            if selectedTab?.id == tab.id {
+                selectedTab = tabs.last
+            }
         }
     }
 

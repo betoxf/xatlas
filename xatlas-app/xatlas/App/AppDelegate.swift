@@ -133,9 +133,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate(ignoringOtherApps: true)
         case .backgroundWindow:
-            window.orderFront(nil)
+            window.orderFrontRegardless()
         case .minimizedWindow:
-            window.orderFront(nil)
+            window.orderFrontRegardless()
             window.miniaturize(nil)
         case .headless:
             break

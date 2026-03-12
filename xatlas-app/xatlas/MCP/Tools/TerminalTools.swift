@@ -99,7 +99,8 @@ struct TerminalTools: MCPToolSet {
                     "type": AnyCodable("object"),
                     "properties": AnyCodable([
                         "sessionId": ["type": "string", "description": "Tracked terminal session ID"],
-                        "killTmux": ["type": "boolean", "description": "Also kill the backing tmux session"]
+                        "killTmux": ["type": "boolean", "description": "Also kill the backing tmux session"],
+                        "force": ["type": "boolean", "description": "Force close even if the terminal looks active"]
                     ]),
                     "required": AnyCodable(["sessionId"])
                 ]
@@ -108,7 +109,12 @@ struct TerminalTools: MCPToolSet {
                 guard let sessionID = args["sessionId"] as? String else {
                     return "{\"ok\":false,\"error\":\"sessionId is required\"}"
                 }
-                let killTmux = args["killTmux"] as? Bool ?? false
+                let killTmux = args["killTmux"] as? Bool ?? true
+                let force = args["force"] as? Bool ?? false
+                let needsConfirmation = Self.onMain { AppState.shared.terminalNeedsCloseConfirmation(sessionID) }
+                if needsConfirmation && !force {
+                    return "{\"ok\":false,\"needsConfirmation\":true,\"error\":\"terminal is active; pass force=true to kill it\"}"
+                }
                 let ok = Self.onMain { AppState.shared.closeTerminalSession(sessionID, killTmux: killTmux) }
                 return "{\"ok\":\(ok ? "true" : "false"),\"killedTmux\":\(killTmux ? "true" : "false")}"
             }

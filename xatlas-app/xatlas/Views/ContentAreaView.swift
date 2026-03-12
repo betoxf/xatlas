@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentAreaView: View {
     @Bindable var state: AppState
+    @State private var pendingCloseSessionID: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,6 +29,25 @@ struct ContentAreaView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .confirmationDialog(
+            "Close running terminal?",
+            isPresented: Binding(
+                get: { pendingCloseSessionID != nil },
+                set: { if !$0 { pendingCloseSessionID = nil } }
+            )
+        ) {
+            Button("Close and Kill Terminal", role: .destructive) {
+                if let pendingCloseSessionID {
+                    _ = state.closeTerminalSession(pendingCloseSessionID, killTmux: true)
+                    self.pendingCloseSessionID = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingCloseSessionID = nil
+            }
+        } message: {
+            Text("This terminal looks active. Closing it will kill the backing tmux session everywhere.")
+        }
     }
 
     private var tabBar: some View {
@@ -39,7 +59,7 @@ struct ContentAreaView: View {
                         requiresAttention: requiresAttention(for: tab),
                         isSelected: state.selectedTab?.id == tab.id,
                         onSelect: { state.selectedTab = tab },
-                        onClose: { state.closeTab(tab) }
+                        onClose: { requestClose(for: tab) }
                     )
                 }
 
@@ -67,6 +87,19 @@ struct ContentAreaView: View {
         guard case .terminal(let sessionID) = tab.kind else { return false }
         _ = state.terminalEventVersion
         return state.terminalRequiresAttention(sessionID)
+    }
+
+    private func requestClose(for tab: TabItem) {
+        switch tab.kind {
+        case .terminal(let sessionID):
+            if state.terminalNeedsCloseConfirmation(sessionID) {
+                pendingCloseSessionID = sessionID
+            } else {
+                _ = state.closeTerminalSession(sessionID, killTmux: true)
+            }
+        case .editor:
+            state.closeTab(tab)
+        }
     }
 
     @ViewBuilder

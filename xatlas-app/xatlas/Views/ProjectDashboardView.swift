@@ -201,16 +201,19 @@ private struct ProjectDashboardCard: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Live Preview")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
 
                 Text(previewText)
-                    .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                    .font(.system(size: 7.25, weight: .medium, design: .monospaced))
                     .foregroundStyle(.primary.opacity(0.72))
-                    .frame(maxWidth: .infinity, minHeight: 100, maxHeight: 100, alignment: .topLeading)
-                    .lineLimit(7)
+                    .lineSpacing(0)
+                    .frame(maxWidth: .infinity, minHeight: 88, maxHeight: 88, alignment: .topLeading)
+                    .lineLimit(8)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .clipped()
             }
-            .padding(12)
+            .padding(10)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.black.opacity(0.045))
@@ -270,7 +273,13 @@ private struct ProjectDashboardCard: View {
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        previewText = lines.suffix(5).joined(separator: "\n")
+            .map { line in
+                if line.count > 28 {
+                    return String(line.prefix(28)) + "…"
+                }
+                return line
+            }
+        previewText = lines.suffix(6).joined(separator: "\n")
     }
 
     private func dashboardBadge(text: String, tint: Color, compact: Bool) -> some View {
@@ -295,6 +304,7 @@ private struct ProjectQuickViewSheet: View {
     @State private var selectedSessionID: String?
     @State private var snapshotText = "No terminal selected."
     @State private var commandInput = ""
+    @State private var pendingCloseSessionID: String?
     @FocusState private var isCommandFieldFocused: Bool
 
     private var sessions: [TerminalSession] {
@@ -479,9 +489,7 @@ private struct ProjectQuickViewSheet: View {
 
                 if let selectedSession {
                     Button("Close Terminal") {
-                        _ = state.closeTerminalSession(selectedSession.id)
-                        selectedSessionID = sessions.first(where: { $0.id != selectedSession.id })?.id
-                        refreshSnapshot()
+                        requestClose(selectedSession.id)
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, 12)
@@ -503,6 +511,24 @@ private struct ProjectQuickViewSheet: View {
         }
         .onChange(of: state.terminalEventVersion) { _, _ in
             refreshSnapshot()
+        }
+        .confirmationDialog(
+            "Close running terminal?",
+            isPresented: Binding(
+                get: { pendingCloseSessionID != nil },
+                set: { if !$0 { pendingCloseSessionID = nil } }
+            )
+        ) {
+            Button("Close and Kill Terminal", role: .destructive) {
+                if let pendingCloseSessionID {
+                    completeClose(for: pendingCloseSessionID)
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingCloseSessionID = nil
+            }
+        } message: {
+            Text("This terminal looks active. Closing it will kill the backing tmux session everywhere.")
         }
         .onExitCommand {
             state.closeProjectQuickView()
@@ -539,6 +565,22 @@ private struct ProjectQuickViewSheet: View {
             refreshSnapshot()
         }
         isCommandFieldFocused = true
+    }
+
+    private func requestClose(_ sessionID: String) {
+        if state.terminalNeedsCloseConfirmation(sessionID) {
+            pendingCloseSessionID = sessionID
+        } else {
+            completeClose(for: sessionID)
+        }
+    }
+
+    private func completeClose(for sessionID: String) {
+        let nextSessionID = sessions.first(where: { $0.id != sessionID })?.id
+        _ = state.closeTerminalSession(sessionID, killTmux: true)
+        pendingCloseSessionID = nil
+        selectedSessionID = nextSessionID
+        refreshSnapshot()
     }
 
     private func sessionPriority(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
