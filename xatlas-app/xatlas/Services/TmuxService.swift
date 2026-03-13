@@ -5,6 +5,8 @@ struct TmuxSessionDescriptor {
     let name: String
     let title: String?
     let currentDirectory: String?
+    let lastActivityAt: Date?
+    let createdAt: Date?
 }
 
 struct TmuxLaunchCommand {
@@ -81,13 +83,18 @@ final class TmuxService {
     }
 
     func listManagedSessions() -> [TmuxSessionDescriptor] {
-        listSessions()
+        let timestampMap = sessionTimestamps()
+
+        return listSessions()
             .filter { $0.hasPrefix(Self.managedSessionPrefix) }
             .map { sessionName in
-                TmuxSessionDescriptor(
+                let timestamps = timestampMap[sessionName]
+                return TmuxSessionDescriptor(
                     name: sessionName,
                     title: sessionTitle(for: sessionName),
-                    currentDirectory: currentDirectory(for: sessionName)
+                    currentDirectory: currentDirectory(for: sessionName),
+                    lastActivityAt: timestamps?.lastActivityAt,
+                    createdAt: timestamps?.createdAt
                 )
             }
     }
@@ -231,5 +238,28 @@ final class TmuxService {
         }
 
         return "/usr/bin/tmux"
+    }
+
+    private func sessionTimestamps() -> [String: (lastActivityAt: Date?, createdAt: Date?)] {
+        let result = runTmux(["list-sessions", "-F", "#S\t#{session_activity}\t#{session_created}"])
+        guard result.status == 0, let output = result.output else { return [:] }
+
+        var timestamps: [String: (lastActivityAt: Date?, createdAt: Date?)] = [:]
+        for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+            let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard let name = parts.first, !name.isEmpty else { continue }
+            let lastActivity = parts.count > 1 ? Date(timeIntervalSince1970: TimeInterval(parts[1]) ?? 0) : nil
+            let createdAt = parts.count > 2 ? Date(timeIntervalSince1970: TimeInterval(parts[2]) ?? 0) : nil
+            timestamps[name] = (
+                lastActivityAt: normalizeTimestamp(lastActivity),
+                createdAt: normalizeTimestamp(createdAt)
+            )
+        }
+        return timestamps
+    }
+
+    private func normalizeTimestamp(_ date: Date?) -> Date? {
+        guard let date, date.timeIntervalSince1970 > 0 else { return nil }
+        return date
     }
 }

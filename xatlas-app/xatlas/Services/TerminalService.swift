@@ -26,7 +26,8 @@ final class TerminalService {
             activityState: .idle,
             requiresAttention: false,
             lastCommand: nil,
-            semanticTaskKey: nil
+            semanticTaskKey: nil,
+            lastActivityAt: .now
         )
 
         if tmux.isAvailable(), tmux.ensureSession(name: tmuxSessionName, cwd: workingDirectory, title: defaultTitle) {
@@ -102,12 +103,13 @@ final class TerminalService {
                         session.currentDirectory = cwd
                         session.workingDirectory = session.workingDirectory ?? cwd
                     }
+                    session.lastActivityAt = descriptor.lastActivityAt ?? descriptor.createdAt ?? session.lastActivityAt
                     session.projectID = Self.matchingProjectID(
                         for: descriptor.currentDirectory,
                         in: projects
                     )
                     session.activityState = .detached
-                    session.updatedAt = .now
+                    session.updatedAt = descriptor.lastActivityAt ?? .now
                 }
                 continue
             }
@@ -126,8 +128,9 @@ final class TerminalService {
                 requiresAttention: false,
                 lastCommand: nil,
                 semanticTaskKey: nil,
-                createdAt: .now,
-                updatedAt: .now
+                lastActivityAt: descriptor.lastActivityAt ?? descriptor.createdAt,
+                createdAt: descriptor.createdAt ?? .now,
+                updatedAt: descriptor.lastActivityAt ?? .now
             )
             sessions.append(restored)
             notifyChange(for: restored)
@@ -142,6 +145,8 @@ final class TerminalService {
                 in: projects
             )
         }
+
+        cleanupDetachedSessions()
     }
 
     @discardableResult
@@ -232,6 +237,7 @@ final class TerminalService {
         guard let directory, !directory.isEmpty else { return }
         updateSession(sessionID) { session in
             session.currentDirectory = directory
+            session.lastActivityAt = .now
             session.updatedAt = .now
         }
     }
@@ -269,6 +275,9 @@ final class TerminalService {
     func updateActivityState(_ state: TerminalActivityState, for sessionID: String) {
         updateSession(sessionID) { session in
             session.activityState = state
+            if state == .running || state == .idle {
+                session.lastActivityAt = .now
+            }
             session.updatedAt = .now
         }
     }
@@ -286,6 +295,44 @@ final class TerminalService {
         mutate(&sessions[index])
         guard sessions[index] != previous else { return }
         notifyChange(for: sessions[index])
+    }
+
+    private func cleanupDetachedSessions(maxPerProject: Int = 3) {
+        let grouped = Dictionary(grouping: sessions.enumerated().filter { _, session in
+            session.activityState == .detached && !session.requiresAttention
+        }) { _, session in
+            session.projectID?.uuidString ?? session.currentDirectory ?? session.workingDirectory ?? "__global__"
+        }
+
+        var indexesToRemove: [Int] = []
+        for (_, entries) in grouped {
+            let sorted = entries.sorted { lhs, rhs in
+                let lhsDate = lhs.element.lastActivityAt ?? lhs.element.updatedAt
+                let rhsDate = rhs.element.lastActivityAt ?? rhs.element.updatedAt
+                if lhsDate != rhsDate {
+                    return lhsDate > rhsDate
+                }
+                return lhs.element.createdAt > rhs.element.createdAt
+            }
+
+            let overflow = sorted.dropFirst(maxPerProject)
+            for entry in overflow {
+                _ = tmux.killSession(name: entry.element.tmuxSessionName)
+                indexesToRemove.append(entry.offset)
+            }
+        }
+
+        guard !indexesToRemove.isEmpty else { return }
+        let removedCount = indexesToRemove.count
+        for index in indexesToRemove.sorted(by: >) {
+            let session = sessions.remove(at: index)
+            notifyChange(for: session)
+        }
+        NotificationCenter.default.post(
+            name: .xatlasDetachedSessionCleanupDidRun,
+            object: self,
+            userInfo: ["count": removedCount]
+        )
     }
 
     private func notifyChange(for session: TerminalSession) {

@@ -28,6 +28,14 @@ struct MainView: View {
             .padding(.bottom, 10)
         }
         .background(windowBg)
+        .overlay(alignment: .bottomTrailing) {
+            if let toast = state.activeToast {
+                AppToastView(toast: toast)
+                    .padding(.trailing, 18)
+                    .padding(.bottom, 18)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .sheet(isPresented: $state.isSettingsPresented) {
             AppSettingsView()
         }
@@ -48,6 +56,55 @@ struct MainView: View {
                     state.openTab(tab)
                 }
             }
+        }
+    }
+}
+
+private struct AppToastView: View {
+    let toast: AppToast
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Circle()
+                .fill(accentColor)
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(toast.title)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                if let message = toast.message, !message.isEmpty {
+                    Text(message)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.white.opacity(0.82))
+                .shadow(color: .black.opacity(0.1), radius: 14, y: 6)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.45), lineWidth: 1)
+        )
+    }
+
+    private var accentColor: Color {
+        switch toast.style {
+        case .neutral:
+            return .secondary.opacity(0.7)
+        case .success:
+            return .green.opacity(0.82)
+        case .warning:
+            return .orange.opacity(0.82)
+        case .error:
+            return .red.opacity(0.82)
         }
     }
 }

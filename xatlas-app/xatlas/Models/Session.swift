@@ -31,6 +31,7 @@ struct TerminalSession: Identifiable, Codable, Equatable {
     var requiresAttention: Bool = false
     var lastCommand: String?
     var semanticTaskKey: String?
+    var lastActivityAt: Date?
     var createdAt: Date = .now
     var updatedAt: Date = .now
 
@@ -46,4 +47,5 @@ struct TerminalSession: Identifiable, Codable, Equatable {
 
 extension Notification.Name {
     static let xatlasTerminalSessionDidChange = Notification.Name("xatlas.terminalSessionDidChange")
+    static let xatlasDetachedSessionCleanupDidRun = Notification.Name("xatlas.detachedSessionCleanupDidRun")
 }

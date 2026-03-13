@@ -26,6 +26,20 @@ enum ProjectSurfaceMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum AppToastStyle: Equatable {
+    case neutral
+    case success
+    case warning
+    case error
+}
+
+struct AppToast: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let message: String?
+    let style: AppToastStyle
+}
+
 @Observable
 final class AppState: @unchecked Sendable {
     static let shared = AppState()
@@ -41,9 +55,12 @@ final class AppState: @unchecked Sendable {
     var terminalEventVersion: Int = 0
     var projectSurfaceMode: ProjectSurfaceMode = .workspace
     var dashboardQuickViewProjectID: UUID?
+    var activeToast: AppToast?
     private(set) var isProjectPickerPresented = false
 
     private var terminalSessionObserver: NSObjectProtocol?
+    private var detachedCleanupObserver: NSObjectProtocol?
+    private var toastDismissWorkItem: DispatchWorkItem?
 
     // Per-project tab storage
     private var projectTabs: [UUID: [TabItem]] = [:]
@@ -58,6 +75,10 @@ final class AppState: @unchecked Sendable {
         if let terminalSessionObserver {
             NotificationCenter.default.removeObserver(terminalSessionObserver)
         }
+        if let detachedCleanupObserver {
+            NotificationCenter.default.removeObserver(detachedCleanupObserver)
+        }
+        toastDismissWorkItem?.cancel()
     }
 
     func loadProjects() {
@@ -74,6 +95,11 @@ final class AppState: @unchecked Sendable {
         TerminalService.shared.rehydrateSessions(projects: projects)
         switchToProject(project)
         ProjectManager.shared.saveProjects(projects)
+        showToast(
+            title: "Project added",
+            message: project.name,
+            style: .success
+        )
     }
 
     @MainActor
@@ -120,6 +146,11 @@ final class AppState: @unchecked Sendable {
             }
         }
         ProjectManager.shared.saveProjects(projects)
+        showToast(
+            title: "Project removed",
+            message: project.name,
+            style: .neutral
+        )
     }
 
     func switchToProject(_ project: Project) {
@@ -186,7 +217,7 @@ final class AppState: @unchecked Sendable {
 
     @discardableResult
     func closeTerminalSession(_ sessionID: String, killTmux: Bool = true) -> Bool {
-        guard TerminalService.shared.session(id: sessionID) != nil else { return false }
+        guard let session = TerminalService.shared.session(id: sessionID) else { return false }
 
         tabs.removeAll { $0.id == sessionID }
         if selectedTab?.id == sessionID {
@@ -203,6 +234,11 @@ final class AppState: @unchecked Sendable {
         }
 
         TerminalService.shared.removeSession(sessionID, killTmux: killTmux)
+        showToast(
+            title: "Terminal closed",
+            message: session.displayTitle,
+            style: .neutral
+        )
         return true
     }
 
@@ -363,6 +399,36 @@ final class AppState: @unchecked Sendable {
             self.terminalEventVersion &+= 1
             self.syncTitles(for: session)
         }
+
+        detachedCleanupObserver = NotificationCenter.default.addObserver(
+            forName: .xatlasDetachedSessionCleanupDidRun,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            let count = note.userInfo?["count"] as? Int ?? 0
+            guard count > 0 else { return }
+            self.showToast(
+                title: "Cleaned old terminals",
+                message: "Removed \(count) detached session\(count == 1 ? "" : "s")",
+                style: .warning
+            )
+        }
+    }
+
+    func showToast(title: String, message: String? = nil, style: AppToastStyle = .neutral) {
+        let toast = AppToast(title: title, message: message, style: style)
+        activeToast = toast
+
+        toastDismissWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard self?.activeToast?.id == toast.id else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                self?.activeToast = nil
+            }
+        }
+        toastDismissWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.6, execute: workItem)
     }
 
     private func syncTitles(for session: TerminalSession) {
