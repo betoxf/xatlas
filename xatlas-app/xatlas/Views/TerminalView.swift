@@ -192,13 +192,6 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
 
             let command = TmuxService.shared.attachCommand(for: sessionName)
             MainActor.assumeIsolated {
-                let existingBuffer = terminal.terminal.getBufferAsData()
-                if existingBuffer.trimmingTerminalContent().isEmpty,
-                   let snapshot = TmuxService.shared.capturePane(session: sessionName, lines: 2_000),
-                   !snapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    terminal.terminal.resetToInitialState()
-                    terminal.feed(text: snapshot + "\n")
-                }
                 terminal.startProcess(
                     executable: command.executable,
                     args: command.args,

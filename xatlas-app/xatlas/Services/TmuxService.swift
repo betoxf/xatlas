@@ -20,6 +20,7 @@ final class TmuxService {
     nonisolated(unsafe) static let shared = TmuxService()
 
     static let managedSessionPrefix = "xatlas_"
+    private let socketName = "xatlas"
     private let titleOptionName = "@xatlas_title"
     private lazy var executablePath = resolveExecutablePath()
     private let tmuxQueue = DispatchQueue(label: "com.xatlas.tmux-service")
@@ -30,6 +31,7 @@ final class TmuxService {
 
     func ensureSession(name: String, cwd: String? = nil, title: String? = nil) -> Bool {
         if sessionExists(name) {
+            configureSession(name: name)
             if let title {
                 _ = setSessionTitle(name: name, title: title)
             }
@@ -54,7 +56,7 @@ final class TmuxService {
     func attachCommand(for sessionName: String) -> TmuxLaunchCommand {
         TmuxLaunchCommand(
             executable: executablePath,
-            args: ["attach-session", "-t", sessionName],
+            args: socketArguments + ["attach-session", "-t", sessionName],
             execName: "tmux"
         )
     }
@@ -160,7 +162,7 @@ final class TmuxService {
             let process = Process()
             let pipe = Pipe()
             process.executableURL = URL(fileURLWithPath: executablePath)
-            process.arguments = args
+            process.arguments = socketArguments + args
             process.standardOutput = pipe
             process.standardError = pipe
 
@@ -240,6 +242,10 @@ final class TmuxService {
         return "/usr/bin/tmux"
     }
 
+    private var socketArguments: [String] {
+        ["-L", socketName]
+    }
+
     private func sessionTimestamps() -> [String: (lastActivityAt: Date?, createdAt: Date?)] {
         let result = runTmux(["list-sessions", "-F", "#S\t#{session_activity}\t#{session_created}"])
         guard result.status == 0, let output = result.output else { return [:] }
@@ -256,6 +262,12 @@ final class TmuxService {
             )
         }
         return timestamps
+    }
+
+    func normalizeManagedSessions() {
+        for sessionName in listSessions().filter({ $0.hasPrefix(Self.managedSessionPrefix) }) {
+            configureSession(name: sessionName)
+        }
     }
 
     private func normalizeTimestamp(_ date: Date?) -> Date? {

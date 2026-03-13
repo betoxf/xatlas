@@ -89,6 +89,7 @@ final class TerminalService {
 
     func rehydrateSessions(projects: [Project]) {
         guard tmux.isAvailable() else { return }
+        tmux.normalizeManagedSessions()
 
         let liveSessions = tmux.listManagedSessions()
         let liveNames = Set(liveSessions.map(\.name))
