@@ -141,6 +141,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         terminal.nativeForegroundColor = NSColor(white: 0.14, alpha: 1.0)
         terminal.nativeBackgroundColor = .clear
         terminal.caretColor = NSColor(calibratedRed: 0.17, green: 0.43, blue: 0.89, alpha: 1.0)
+        terminal.terminal.changeHistorySize(10_000)
 
         func c(_ r: UInt16, _ g: UInt16, _ b: UInt16) -> SwiftTerm.Color {
             SwiftTerm.Color(red: r * 257, green: g * 257, blue: b * 257)
@@ -191,6 +192,13 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
 
             let command = TmuxService.shared.attachCommand(for: sessionName)
             MainActor.assumeIsolated {
+                let existingBuffer = terminal.terminal.getBufferAsData()
+                if existingBuffer.trimmingTerminalContent().isEmpty,
+                   let snapshot = TmuxService.shared.capturePane(session: sessionName, lines: 2_000),
+                   !snapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    terminal.terminal.resetToInitialState()
+                    terminal.feed(text: snapshot + "\n")
+                }
                 terminal.startProcess(
                     executable: command.executable,
                     args: command.args,
@@ -265,14 +273,18 @@ private final class ManagedLocalProcessTerminalView: LocalProcessTerminalView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
+        commonInit()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+        registerForDraggedTypes([.fileURL, .URL, .tiff, .png])
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -285,5 +297,76 @@ private final class ManagedLocalProcessTerminalView: LocalProcessTerminalView {
             inputObserver?(text)
         }
         super.send(source: source, data: data)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        droppedShellFragments(from: sender.draggingPasteboard).isEmpty ? [] : .copy
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let fragments = droppedShellFragments(from: sender.draggingPasteboard)
+        guard !fragments.isEmpty else { return false }
+        window?.makeFirstResponder(self)
+        insertDroppedText(fragments.joined(separator: " "))
+        return true
+    }
+
+    private func insertDroppedText(_ text: String) {
+        guard !text.isEmpty else { return }
+        inputObserver?(text)
+        process.send(data: ArraySlice(text.utf8))
+    }
+
+    private func droppedShellFragments(from pasteboard: NSPasteboard) -> [String] {
+        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !fileURLs.isEmpty {
+            return fileURLs.map { $0.path.shellQuotedForTerminal() }
+        }
+
+        if let imageURL = writeDroppedImage(from: pasteboard) {
+            return [imageURL.path.shellQuotedForTerminal()]
+        }
+
+        return []
+    }
+
+    private func writeDroppedImage(from pasteboard: NSPasteboard) -> URL? {
+        guard let image = NSImage(pasteboard: pasteboard),
+              let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("xatlas-drops", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let fileURL = directory.appendingPathComponent("drop-\(UUID().uuidString).png")
+        do {
+            try pngData.write(to: fileURL, options: .atomic)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+}
+
+private extension Data {
+    func trimmingTerminalContent() -> Data {
+        var copy = self
+        while let last = copy.last, last == 0 || last == 10 || last == 13 || last == 32 {
+            copy.removeLast()
+        }
+        return copy
+    }
+}
+
+private extension String {
+    func shellQuotedForTerminal() -> String {
+        if isEmpty {
+            return "''"
+        }
+        return "'" + replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 }

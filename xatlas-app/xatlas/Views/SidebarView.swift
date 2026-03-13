@@ -69,25 +69,11 @@ struct SidebarView: View {
                 SidebarCircleButton(icon: "gearshape.fill") { openSettings() }
                     .accessibilityLabel("Open settings")
                 Spacer()
-                SidebarCircleButton(icon: "plus") { openFolderPicker() }
+                SidebarCircleButton(icon: "plus") { state.presentProjectPicker() }
                     .accessibilityLabel("Add project")
             }
             .padding(.horizontal, 14)
             .padding(.bottom, 14)
-        }
-    }
-
-    private func openFolderPicker() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Select a project folder"
-        panel.prompt = "Open"
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                state.addProject(name: url.lastPathComponent, path: url.path)
-            }
         }
     }
 

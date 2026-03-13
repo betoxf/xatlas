@@ -28,7 +28,7 @@ struct ProjectDashboardView: View {
                     Spacer()
 
                     Button {
-                        openFolderPicker()
+                        state.presentProjectPicker()
                     } label: {
                         Label("Add Project", systemImage: "plus")
                             .font(.system(size: 12, weight: .semibold))
@@ -50,7 +50,7 @@ struct ProjectDashboardView: View {
                         )
                     }
 
-                    AddProjectTile(action: openFolderPicker)
+                    AddProjectTile(action: state.presentProjectPicker)
                 }
             }
             .padding(18)
@@ -69,19 +69,6 @@ struct ProjectDashboardView: View {
         }
     }
 
-    private func openFolderPicker() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.message = "Select a project folder"
-        panel.prompt = "Open"
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                state.addProject(name: url.lastPathComponent, path: url.path)
-            }
-        }
-    }
 }
 
 private struct ProjectDashboardCard: View {

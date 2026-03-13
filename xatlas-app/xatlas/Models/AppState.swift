@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum WorkspaceSection: String, CaseIterable, Identifiable {
@@ -40,6 +41,7 @@ final class AppState: @unchecked Sendable {
     var terminalEventVersion: Int = 0
     var projectSurfaceMode: ProjectSurfaceMode = .workspace
     var dashboardQuickViewProjectID: UUID?
+    private(set) var isProjectPickerPresented = false
 
     private var terminalSessionObserver: NSObjectProtocol?
 
@@ -72,6 +74,35 @@ final class AppState: @unchecked Sendable {
         TerminalService.shared.rehydrateSessions(projects: projects)
         switchToProject(project)
         ProjectManager.shared.saveProjects(projects)
+    }
+
+    @MainActor
+    func presentProjectPicker() {
+        guard !isProjectPickerPresented else { return }
+        isProjectPickerPresented = true
+
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Select a project folder"
+        panel.prompt = "Open"
+
+        let complete: (NSApplication.ModalResponse) -> Void = { [weak self, weak panel] response in
+            guard let self else { return }
+            defer { self.isProjectPickerPresented = false }
+            guard response == .OK, let url = panel?.url else { return }
+            self.addProject(name: url.lastPathComponent, path: url.path)
+        }
+
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            panel.beginSheetModal(for: window, completionHandler: complete)
+            return
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        let response = panel.runModal()
+        complete(response)
     }
 
     func removeProject(_ project: Project) {
