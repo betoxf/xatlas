@@ -440,35 +440,48 @@ final class TerminalService {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [sessionID, token, remainingChecks, lastTail, readyHits] in
             guard TerminalService.shared.completionMonitorTokens[sessionID] == token else { return }
-            guard let snapshot = TerminalService.shared.snapshot(for: sessionID, lines: 60) else {
+            guard let session = TerminalService.shared.session(id: sessionID) else {
                 TerminalService.shared.completionMonitorTokens.removeValue(forKey: sessionID)
                 return
             }
 
-            let tail = Self.relevantTail(from: snapshot)
-            if Self.snapshotShowsReadyState(tail) {
-                let nextHits = (tail == lastTail) ? (readyHits + 1) : 1
-                if nextHits >= 2 {
-                    TerminalService.shared.markCommandFinished(for: sessionID, observedTail: tail)
-                    return
-                }
-                TerminalService.shared.pollCompletion(
-                    sessionID: sessionID,
-                    token: token,
-                    remainingChecks: remainingChecks - 1,
-                    lastTail: tail,
-                    readyHits: nextHits
-                )
-                return
-            }
+            let tmuxName = session.tmuxSessionName
+            DispatchQueue.global(qos: .utility).async {
+                let snapshot = TmuxService.shared.capturePane(session: tmuxName, lines: 60)
+                let tail = snapshot.map { Self.relevantTail(from: $0) }
 
-            TerminalService.shared.pollCompletion(
-                sessionID: sessionID,
-                token: token,
-                remainingChecks: remainingChecks - 1,
-                lastTail: tail,
-                readyHits: 0
-            )
+                DispatchQueue.main.async {
+                    guard TerminalService.shared.completionMonitorTokens[sessionID] == token else { return }
+                    guard let tail else {
+                        TerminalService.shared.completionMonitorTokens.removeValue(forKey: sessionID)
+                        return
+                    }
+
+                    if Self.snapshotShowsReadyState(tail) {
+                        let nextHits = (tail == lastTail) ? (readyHits + 1) : 1
+                        if nextHits >= 2 {
+                            TerminalService.shared.markCommandFinished(for: sessionID, observedTail: tail)
+                            return
+                        }
+                        TerminalService.shared.pollCompletion(
+                            sessionID: sessionID,
+                            token: token,
+                            remainingChecks: remainingChecks - 1,
+                            lastTail: tail,
+                            readyHits: nextHits
+                        )
+                        return
+                    }
+
+                    TerminalService.shared.pollCompletion(
+                        sessionID: sessionID,
+                        token: token,
+                        remainingChecks: remainingChecks - 1,
+                        lastTail: tail,
+                        readyHits: 0
+                    )
+                }
+            }
         }
     }
 

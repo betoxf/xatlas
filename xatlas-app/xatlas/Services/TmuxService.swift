@@ -31,7 +31,6 @@ final class TmuxService {
 
     func ensureSession(name: String, cwd: String? = nil, title: String? = nil) -> Bool {
         if sessionExists(name) {
-            configureSession(name: name)
             if let title {
                 _ = setSessionTitle(name: name, title: title)
             }

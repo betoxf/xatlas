@@ -440,7 +440,9 @@ final class AppState: @unchecked Sendable {
 
         for projectID in projectTabs.keys {
             guard var storedTabs = projectTabs[projectID] else { continue }
+            let before = storedTabs
             syncTitles(in: &storedTabs, for: session)
+            guard storedTabs != before else { continue }
             projectTabs[projectID] = storedTabs
             if projectSelectedTab[projectID]?.id == session.id {
                 projectSelectedTab[projectID] = storedTabs.first(where: { $0.id == session.id })

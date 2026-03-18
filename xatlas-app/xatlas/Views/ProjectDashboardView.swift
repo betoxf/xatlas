@@ -55,18 +55,24 @@ struct ProjectDashboardView: View {
             }
             .padding(18)
         }
-        .sheet(item: Binding(
-            get: { quickViewProject },
-            set: { newValue in
-                if let newValue {
-                    state.dashboardQuickViewProjectID = newValue.id
-                } else {
-                    state.closeProjectQuickView()
+        .overlay {
+            if let project = quickViewProject {
+                ZStack {
+                    Color.black.opacity(0.25)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            state.closeProjectQuickView()
+                        }
+
+                    ProjectQuickViewSheet(project: project, state: state)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 }
             }
-        )) { project in
-            ProjectQuickViewSheet(project: project, state: state)
         }
+        .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
     }
 
 }
@@ -286,7 +292,6 @@ private struct ProjectQuickViewSheet: View {
     let project: Project
     @Bindable var state: AppState
 
-    @Environment(\.dismiss) private var dismiss
     @State private var showAllSessions = false
     @State private var selectedSessionID: String?
     @State private var pendingCloseSessionID: String?
@@ -346,7 +351,6 @@ private struct ProjectQuickViewSheet: View {
 
                 Button("Done") {
                     state.closeProjectQuickView()
-                    dismiss()
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
@@ -432,7 +436,6 @@ private struct ProjectQuickViewSheet: View {
                 Button("Open Workspace") {
                     state.switchToProject(project)
                     state.closeProjectQuickView()
-                    dismiss()
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 12)
@@ -490,7 +493,6 @@ private struct ProjectQuickViewSheet: View {
         }
         .onExitCommand {
             state.closeProjectQuickView()
-            dismiss()
         }
     }
 
