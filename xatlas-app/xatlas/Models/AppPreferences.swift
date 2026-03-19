@@ -34,17 +34,23 @@ final class AppPreferences {
         didSet { defaults.set(pushAfterSync, forKey: Keys.pushAfterSync) }
     }
 
+    var remoteAccessEnabled: Bool {
+        didSet { defaults.set(remoteAccessEnabled, forKey: Keys.remoteAccessEnabled) }
+    }
+
     private let defaults = UserDefaults.standard
 
     private enum Keys {
         static let syncProvider = "xatlas.syncProvider"
         static let useAIForSync = "xatlas.useAIForSync"
         static let pushAfterSync = "xatlas.pushAfterSync"
+        static let remoteAccessEnabled = "xatlas.remoteAccessEnabled"
     }
 
     private init() {
         syncProvider = AISyncProvider(rawValue: defaults.string(forKey: Keys.syncProvider) ?? "") ?? .codex
         useAIForSync = defaults.object(forKey: Keys.useAIForSync) as? Bool ?? true
         pushAfterSync = defaults.object(forKey: Keys.pushAfterSync) as? Bool ?? true
+        remoteAccessEnabled = defaults.object(forKey: Keys.remoteAccessEnabled) as? Bool ?? false
     }
 }

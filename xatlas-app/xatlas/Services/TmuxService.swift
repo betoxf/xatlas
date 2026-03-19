@@ -75,6 +75,28 @@ final class TmuxService {
         return result.output?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Capture pane with ANSI escape sequences preserved (for remote terminal rendering)
+    func capturePaneWithEscapes(session: String, lines: Int = 500) -> String? {
+        let result = runTmux(["capture-pane", "-t", session, "-p", "-e", "-S", "-\(max(20, lines))"])
+        guard result.status == 0 else { return nil }
+        return result.output
+    }
+
+    /// Start piping pane output to a file/FIFO for streaming
+    func pipePaneStart(session: String, target: String) -> Bool {
+        runTmux(["pipe-pane", "-o", "-t", session, "cat > \(target)"]).status == 0
+    }
+
+    /// Stop pipe-pane for a session
+    func pipePaneStop(session: String) {
+        _ = runTmux(["pipe-pane", "-t", session])
+    }
+
+    /// Resize a tmux pane (for iOS client resize events)
+    func resizePane(session: String, cols: Int, rows: Int) {
+        _ = runTmux(["resize-window", "-t", session, "-x", "\(cols)", "-y", "\(rows)"])
+    }
+
     func listSessions() -> [String] {
         let result = runTmux(["list-sessions", "-F", "#{session_name}"])
         guard result.status == 0, let output = result.output else { return [] }

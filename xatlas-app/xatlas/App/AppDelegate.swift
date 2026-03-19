@@ -39,6 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(isHeadless ? .accessory : .regular)
         MCPServer.shared.start()
+        if AppPreferences.shared.remoteAccessEnabled {
+            StreamingServer.shared.start()
+        }
 
         if isHeadless {
             installHeadlessKeepAliveWindow()
@@ -80,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
         }
+        StreamingServer.shared.stop()
         MCPServer.shared.stop()
     }
 
