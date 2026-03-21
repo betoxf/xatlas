@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreImage.CIFilterBuiltins
 
 struct AppSettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -62,19 +63,30 @@ struct AppSettingsView: View {
                         }
 
                     if preferences.remoteAccessEnabled {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Pairing Code")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(.secondary)
+                        // QR Code — scan from iOS app to pair instantly
+                        VStack(spacing: 10) {
+                            if let qrImage = generateQRCode() {
+                                Text("Scan with xatlas iOS")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(.secondary)
+
+                                Image(nsImage: qrImage)
+                                    .interpolation(.none)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .frame(width: 180, height: 180)
+                                    .background(Color.white)
+                                    .cornerRadius(8)
+                            }
 
                             HStack(spacing: 4) {
+                                Text("Code:")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
                                 Text(pairingCode)
-                                    .font(.system(size: 28, weight: .bold, design: .monospaced))
-                                    .tracking(6)
+                                    .font(.system(size: 14, weight: .bold, design: .monospaced))
                                     .textSelection(.enabled)
-
                                 Spacer()
-
                                 Button("Regenerate") {
                                     PairingService.shared.regenerateCode()
                                     pairingCode = PairingService.shared.pairingCode
@@ -86,6 +98,7 @@ struct AppSettingsView: View {
                                 .background(Capsule().fill(.secondary.opacity(0.15)))
                             }
                         }
+                        .frame(maxWidth: .infinity)
 
                         if let ip = MCPServer.lanIPAddress(), let port = MCPServer.shared.boundPort {
                             HStack {
@@ -126,21 +139,49 @@ struct AppSettingsView: View {
                                 }
                             }
                         }
-
-                        Text("Open the xatlas iOS app and enter this code to pair your device for remote terminal access.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
             .formStyle(.grouped)
             .padding(.horizontal, 8)
         }
-        .frame(width: 440, height: preferences.remoteAccessEnabled ? 520 : 280)
+        .frame(width: 440, height: preferences.remoteAccessEnabled ? 580 : 280)
         .background(Color(nsColor: .windowBackgroundColor))
         .animation(.easeInOut(duration: 0.2), value: preferences.remoteAccessEnabled)
         .onExitCommand {
             dismiss()
         }
+    }
+
+    // MARK: - QR Code Generation
+
+    private func generateQRCode() -> NSImage? {
+        guard let ip = MCPServer.lanIPAddress(),
+              let port = MCPServer.shared.boundPort else { return nil }
+
+        let streamPort = StreamingServer.shared.boundPort ?? 0
+        let payload: [String: Any] = [
+            "host": ip,
+            "port": Int(port),
+            "streamPort": Int(streamPort),
+            "code": pairingCode
+        ]
+
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonString = String(data: jsonData, encoding: .utf8) else { return nil }
+
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(jsonString.utf8)
+        filter.correctionLevel = "M"
+
+        guard let ciImage = filter.outputImage else { return nil }
+
+        // Scale up for crisp rendering
+        let scale = 10.0
+        let scaled = ciImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return NSImage(cgImage: cgImage, size: NSSize(width: scaled.extent.width, height: scaled.extent.height))
     }
 }

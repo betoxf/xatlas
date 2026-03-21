@@ -295,6 +295,8 @@ private struct ProjectQuickViewSheet: View {
     @State private var showAllSessions = false
     @State private var selectedSessionID: String?
     @State private var pendingCloseSessionID: String?
+    @State private var dragOffset: CGSize = .zero
+    @State private var dragAccumulated: CGSize = .zero
 
     private var sessions: [TerminalSession] {
         if showAllSessions {
@@ -326,6 +328,7 @@ private struct ProjectQuickViewSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Draggable title bar
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(project.name)
@@ -359,6 +362,18 @@ private struct ProjectQuickViewSheet: View {
                 .background(Capsule().fill(.white.opacity(0.55)))
             }
             .padding(20)
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        dragOffset = CGSize(
+                            width: dragAccumulated.width + value.translation.width,
+                            height: dragAccumulated.height + value.translation.height
+                        )
+                    }
+                    .onEnded { value in
+                        dragAccumulated = dragOffset
+                    }
+            )
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -408,21 +423,25 @@ private struct ProjectQuickViewSheet: View {
             }
             .padding(.bottom, 12)
 
-            Group {
-                if let selectedSession {
-                    StyledTerminalView(sessionID: selectedSession.id, appState: state)
-                        .id(selectedSession.id)
-                } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 26, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text("No terminal selected")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.secondary)
+            // Terminal area — scrollable
+            ScrollView {
+                Group {
+                    if let selectedSession {
+                        StyledTerminalView(sessionID: selectedSession.id, appState: state)
+                            .id(selectedSession.id)
+                            .frame(minHeight: 400)
+                    } else {
+                        VStack(spacing: 10) {
+                            Image(systemName: "terminal")
+                                .font(.system(size: 26, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text("No terminal selected")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 400)
+                        .padding(16)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(16)
                 }
             }
             .background(
@@ -467,6 +486,7 @@ private struct ProjectQuickViewSheet: View {
         }
         .frame(width: 860, height: 620)
         .background(Color(nsColor: .windowBackgroundColor))
+        .offset(dragOffset)
         .onAppear {
             syncSelectedSession()
         }
