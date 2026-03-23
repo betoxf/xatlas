@@ -53,7 +53,7 @@ final class AppState: @unchecked Sendable {
     var isSettingsPresented = false
     var sidebarWidth: CGFloat = 220
     var terminalEventVersion: Int = 0
-    var projectSurfaceMode: ProjectSurfaceMode = .workspace
+    var projectSurfaceMode: ProjectSurfaceMode = .dashboard
     var dashboardQuickViewProjectID: UUID?
     var activeToast: AppToast?
     private(set) var isProjectPickerPresented = false
@@ -153,9 +153,11 @@ final class AppState: @unchecked Sendable {
         )
     }
 
-    func switchToProject(_ project: Project) {
+    func switchToProject(_ project: Project, forceWorkspace: Bool = true) {
         selectedSection = .projects
-        projectSurfaceMode = .workspace
+        if forceWorkspace {
+            projectSurfaceMode = .workspace
+        }
         if selectedProject?.id == project.id, !tabs.isEmpty {
             return
         }
@@ -294,7 +296,6 @@ final class AppState: @unchecked Sendable {
         let tab = makeTerminalTab(for: selectedProject?.id, workingDirectory: selectedProject?.path)
         openTab(tab)
         selectedSection = .projects
-        projectSurfaceMode = .workspace
         if let projectID = selectedProject?.id {
             projectTabs[projectID] = tabs
             projectSelectedTab[projectID] = tab
@@ -305,7 +306,7 @@ final class AppState: @unchecked Sendable {
     @discardableResult
     func createTerminal(for project: Project) -> TabItem {
         if selectedProject?.id != project.id {
-            switchToProject(project)
+            switchToProject(project, forceWorkspace: false)
         }
         return createTerminalForSelectedProject()
     }

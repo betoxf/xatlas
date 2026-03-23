@@ -8,11 +8,6 @@ struct ProjectDashboardView: View {
         GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 16, alignment: .top)
     ]
 
-    private var quickViewProject: Project? {
-        guard let projectID = state.dashboardQuickViewProjectID else { return nil }
-        return state.projects.first(where: { $0.id == projectID })
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -55,24 +50,6 @@ struct ProjectDashboardView: View {
             }
             .padding(18)
         }
-        .overlay {
-            if let project = quickViewProject {
-                ZStack {
-                    Color.black.opacity(0.25)
-                        .ignoresSafeArea()
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            state.closeProjectQuickView()
-                        }
-
-                    ProjectQuickViewSheet(project: project, state: state)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
-                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                }
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
     }
 
 }
@@ -201,8 +178,8 @@ private struct ProjectDashboardCard: View {
                     .font(.system(size: 7.25, weight: .medium, design: .monospaced))
                     .foregroundStyle(.primary.opacity(0.72))
                     .lineSpacing(0)
-                    .frame(maxWidth: .infinity, minHeight: 88, maxHeight: 88, alignment: .topLeading)
-                    .lineLimit(8)
+                    .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .topLeading)
+                    .lineLimit(5)
                     .fixedSize(horizontal: false, vertical: true)
                     .clipped()
             }
@@ -213,7 +190,7 @@ private struct ProjectDashboardCard: View {
             )
         }
         .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 236, maxHeight: 236, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 200, alignment: .topLeading)
         .background(cardBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -288,7 +265,7 @@ private struct ProjectDashboardCard: View {
 
 }
 
-private struct ProjectQuickViewSheet: View {
+struct ProjectQuickViewSheet: View {
     let project: Project
     @Bindable var state: AppState
 
@@ -423,27 +400,25 @@ private struct ProjectQuickViewSheet: View {
             }
             .padding(.bottom, 12)
 
-            // Terminal area — scrollable
-            ScrollView {
-                Group {
-                    if let selectedSession {
-                        StyledTerminalView(sessionID: selectedSession.id, appState: state)
-                            .id(selectedSession.id)
-                            .frame(minHeight: 400)
-                    } else {
-                        VStack(spacing: 10) {
-                            Image(systemName: "terminal")
-                                .font(.system(size: 26, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text("No terminal selected")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, minHeight: 400)
-                        .padding(16)
+            // Terminal area
+            Group {
+                if let selectedSession {
+                    StyledTerminalView(sessionID: selectedSession.id, appState: state)
+                        .id(selectedSession.id)
+                } else {
+                    VStack(spacing: 10) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 26, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("No terminal selected")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(16)
                 }
             }
+            .clipped()
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color.black.opacity(0.05))
@@ -574,7 +549,7 @@ private struct AddProjectTile: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, minHeight: 236, maxHeight: 236)
+            .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 200)
             .background(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [7, 7]))

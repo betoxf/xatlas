@@ -45,7 +45,11 @@ struct SidebarView: View {
                             isSelected: state.selectedSection == .projects && state.selectedProject?.id == project.id,
                             onSelect: {
                                 state.selectedSection = .projects
-                                state.switchToProject(project)
+                                if state.projectSurfaceMode == .dashboard {
+                                    state.openProjectQuickView(id: project.id)
+                                } else {
+                                    state.switchToProject(project)
+                                }
                             },
                             onFileSelect: { path in
                                 let tab = TabItem(

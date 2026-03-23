@@ -5,6 +5,11 @@ struct MainView: View {
 
     private let windowBg = Color(nsColor: NSColor(white: 0.93, alpha: 1.0))
 
+    private var quickViewProject: Project? {
+        guard let projectID = state.dashboardQuickViewProjectID else { return nil }
+        return state.projects.first(where: { $0.id == projectID })
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             SidebarView(state: state)
@@ -28,6 +33,22 @@ struct MainView: View {
             .padding(.bottom, 10)
         }
         .background(windowBg)
+        .overlay {
+            if let project = quickViewProject {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        state.closeProjectQuickView()
+                    }
+
+                ProjectQuickViewSheet(project: project, state: state)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
         .overlay(alignment: .bottomTrailing) {
             if let toast = state.activeToast {
                 AppToastView(toast: toast)

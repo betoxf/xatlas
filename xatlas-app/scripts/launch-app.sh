@@ -6,6 +6,11 @@ APP_DIR="$("$ROOT/scripts/package-app.sh" | tail -n 1)"
 
 mode="${1:-normal}"
 
+# Always kill previous xatlas instances before launching
+pkill -f "$APP_DIR/Contents/MacOS/xatlas" >/dev/null 2>&1 || true
+osascript -e 'quit app "xatlas"' >/dev/null 2>&1 || true
+sleep 0.5
+
 case "$mode" in
   normal)
     open -na "$APP_DIR"
@@ -13,7 +18,6 @@ case "$mode" in
     ;;
   --background|background)
     LOG_PATH="${XATLAS_APP_LOG:-/tmp/xatlas-app-background.log}"
-    pkill -f "$APP_DIR/Contents/MacOS/xatlas" >/dev/null 2>&1 || true
     XATLAS_LAUNCH_MODE=background \
       nohup "$APP_DIR/Contents/MacOS/xatlas" >"$LOG_PATH" 2>&1 &
     PID=$!
@@ -23,7 +27,6 @@ case "$mode" in
     ;;
   --minimized|minimized)
     LOG_PATH="${XATLAS_APP_LOG:-/tmp/xatlas-app-minimized.log}"
-    pkill -f "$APP_DIR/Contents/MacOS/xatlas" >/dev/null 2>&1 || true
     XATLAS_LAUNCH_MODE=minimized \
       nohup "$APP_DIR/Contents/MacOS/xatlas" >"$LOG_PATH" 2>&1 &
     PID=$!
