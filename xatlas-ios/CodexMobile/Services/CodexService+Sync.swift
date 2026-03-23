@@ -18,7 +18,7 @@ extension CodexService {
         debugSyncLog("sync loop start")
 
         // Foreground polling is intentionally more aggressive so desktop-authored changes
-        // feel closer to live on iPhone even when xatlas desktop itself doesn't push updates.
+        // feel closer to live on iPhone even when Codex.app itself doesn't push updates.
         let listIntervalForegroundNs: UInt64 = 10_000_000_000
         let listIntervalBackgroundNs: UInt64 = 75_000_000_000
         let historyIntervalForegroundNs: UInt64 = 3_000_000_000
@@ -122,6 +122,20 @@ extension CodexService {
         }
     }
 
+    // Thread opening should refresh the visible chat, not refetch the full sidebar list.
+    func requestImmediateActiveThreadSync(threadId: String? = nil) {
+        guard canRunRealtimeSyncLoop else {
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let threadId = threadId ?? self.activeThreadId {
+                await self.syncActiveThreadState(threadId: threadId)
+            }
+        }
+    }
+
     func syncThreadsList() async {
         guard isConnected, isInitialized else {
             return
@@ -175,7 +189,6 @@ extension CodexService {
         let localByID = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
         let persistedArchivedIDs = locallyArchivedThreadIDs
         let persistedDeletedIDs = locallyDeletedThreadIDs
-        let serverArchivedIDs = Set(serverArchivedThreads.map(\.id))
 
         var merged: [String: CodexThread] = [:]
 

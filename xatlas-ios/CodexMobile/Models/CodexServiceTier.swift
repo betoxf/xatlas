@@ -1,5 +1,5 @@
 // FILE: CodexServiceTier.swift
-// Purpose: User-selectable service tier for xatlas desktop-server speed controls.
+// Purpose: User-selectable service tier for Codex app-server speed controls.
 // Layer: Model
 // Exports: CodexServiceTier
 // Depends on: Foundation

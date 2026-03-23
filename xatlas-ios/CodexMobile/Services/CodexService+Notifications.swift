@@ -122,7 +122,7 @@ extension CodexService {
         await requestNotificationPermission(markPrompted: true)
     }
 
-    // Used by: SettingsView, XatlasIOSApp
+    // Used by: SettingsView, CodexMobileApp
     func requestNotificationPermission(markPrompted: Bool = true) async {
         do {
             _ = try await userNotificationCenter.requestAuthorization(options: [.alert, .sound, .badge])

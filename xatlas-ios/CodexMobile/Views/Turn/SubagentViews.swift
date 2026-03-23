@@ -250,9 +250,7 @@ struct SubagentActionCard: View {
 
     private func sanitizedSubagentModelLabel(_ value: String?) -> String? {
         guard let trimmed = trimmedValue(value) else { return nil }
-        let lower = trimmed.lowercased()
-        // Hide generic provider names — the agent type badge already conveys this.
-        if lower == "openai" || lower == "anthropic" {
+        if trimmed.lowercased() == "openai" {
             return nil
         }
         return trimmed

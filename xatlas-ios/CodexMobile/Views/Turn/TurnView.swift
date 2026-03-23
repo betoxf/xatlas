@@ -28,6 +28,11 @@ struct TurnView: View {
     @State private var isStartingSiblingChat = false
     @State private var isForkingThread = false
     @State private var checkedOutElsewhereAlert: CheckedOutElsewhereAlert?
+    @State private var isVoiceRecording = false
+    @State private var isVoicePreflighting = false
+    @State private var voicePreflightGeneration = 0
+    @State private var isVoiceTranscribing = false
+    @StateObject private var voiceTranscriptionManager = GPTVoiceTranscriptionManager()
 
     // ─── ENTRY POINT ─────────────────────────────────────────────
     var body: some View {
@@ -62,6 +67,7 @@ struct TurnView: View {
                 errorMessage: codex.lastErrorMessage,
                 shouldAnchorToAssistantResponse: shouldAnchorToAssistantResponseBinding,
                 isScrolledToBottom: isScrolledToBottomBinding,
+                isComposerFocused: isInputFocused,
                 emptyState: AnyView(emptyState),
                 composer: AnyView(composerWithSubagentAccessory(
                     currentThread: resolvedThread,
@@ -227,6 +233,12 @@ struct TurnView: View {
                 )
             },
             onConnectionChanged: { wasConnected, isConnected in
+                if !isConnected {
+                    cancelVoiceRecordingIfNeeded()
+                    invalidatePendingVoicePreflight()
+                    return
+                }
+
                 guard !wasConnected, isConnected else { return }
                 viewModel.flushQueueIfPossible(codex: codex, threadID: thread.id)
                 guard showsGitControls else { return }
@@ -236,11 +248,25 @@ struct TurnView: View {
                     threadID: thread.id
                 )
             },
-            onScenePhaseChanged: { _ in },
+            onScenePhaseChanged: { phase in
+                guard phase != .active else { return }
+                cancelVoiceRecordingIfNeeded()
+                invalidatePendingVoicePreflight()
+            },
             onApprovalRequestIDChanged: {
                 alertApprovalRequest = approvalForThread
             }
         )
+        .onDisappear {
+            cancelVoiceRecordingIfNeeded()
+            invalidatePendingVoicePreflight()
+            viewModel.cancelTransientTasks()
+            viewModel.clearComposerAutocomplete()
+        }
+        .onChange(of: isInputFocused) { _, isFocused in
+            guard !isFocused else { return }
+            viewModel.clearComposerAutocomplete()
+        }
         .onChange(of: renderSnapshot.repoRefreshSignal) { _, newValue in
             guard showsGitControls, newValue != nil else { return }
             viewModel.scheduleGitStatusRefresh(
@@ -636,9 +662,12 @@ struct TurnView: View {
     }
 
     private func prepareThreadIfReady(gitWorkingDirectory: String?) async {
-        await codex.prepareThreadForDisplay(threadId: thread.id)
+        let didPrepare = await codex.prepareThreadForDisplay(threadId: thread.id)
+        guard didPrepare, !Task.isCancelled, codex.activeThreadId == thread.id else { return }
         await codex.refreshContextWindowUsage(threadId: thread.id)
+        guard !Task.isCancelled, codex.activeThreadId == thread.id else { return }
         viewModel.flushQueueIfPossible(codex: codex, threadID: thread.id)
+        guard !Task.isCancelled, codex.activeThreadId == thread.id else { return }
         guard gitWorkingDirectory != nil else { return }
         viewModel.refreshGitBranchTargets(
             codex: codex,
@@ -1012,9 +1041,175 @@ struct TurnView: View {
                     isShowingWorktreeHandoff = true
                 },
                 onShowStatus: presentStatusSheet,
+                voiceButtonPresentation: voiceButtonPresentation,
+                isVoiceRecording: isVoiceRecording,
+                voiceAudioLevels: voiceTranscriptionManager.audioLevels,
+                voiceRecordingDuration: voiceTranscriptionManager.recordingDuration,
+                onTapVoice: handleVoiceButtonTap,
+                onCancelVoiceRecording: cancelVoiceRecordingIfNeeded,
                 onSend: handleSend
             )
         }
+    }
+
+    // Mirrors the mic CTA state so the composer can swap between ready, record, and stop.
+    private var voiceButtonPresentation: TurnComposerVoiceButtonPresentation {
+        if isVoiceTranscribing {
+            return TurnComposerVoiceButtonPresentation(
+                systemImageName: "waveform",
+                foregroundColor: Color(.secondaryLabel),
+                backgroundColor: Color(.systemGray5),
+                accessibilityLabel: "Transcribing voice note",
+                isDisabled: true,
+                showsProgress: true,
+                hasCircleBackground: true
+            )
+        }
+
+        if isVoicePreflighting {
+            return TurnComposerVoiceButtonPresentation(
+                systemImageName: "hourglass",
+                foregroundColor: Color(.secondaryLabel),
+                backgroundColor: Color(.systemGray5),
+                accessibilityLabel: "Preparing microphone",
+                isDisabled: true,
+                showsProgress: true,
+                hasCircleBackground: true
+            )
+        }
+
+        if isVoiceRecording {
+            return TurnComposerVoiceButtonPresentation(
+                systemImageName: "stop.fill",
+                foregroundColor: Color(.systemBackground),
+                backgroundColor: Color(.systemRed),
+                accessibilityLabel: "Stop voice recording",
+                isDisabled: false,
+                showsProgress: false,
+                hasCircleBackground: true
+            )
+        }
+
+        return TurnComposerVoiceButtonPresentation(
+            systemImageName: "mic",
+            foregroundColor: Color(.secondaryLabel),
+            backgroundColor: .clear,
+            accessibilityLabel: "Start voice transcription",
+            isDisabled: !codex.isConnected,
+            showsProgress: false,
+            hasCircleBackground: false
+        )
+    }
+
+    // Switches the mic button between login, recording, and transcription states.
+    private func handleVoiceButtonTap() {
+        if isVoiceTranscribing {
+            return
+        }
+
+        if isVoiceRecording {
+            Task { @MainActor in
+                await stopVoiceTranscription()
+            }
+            return
+        }
+
+        Task { @MainActor in
+            await startVoiceRecordingIfReady()
+        }
+    }
+
+    // Stops the recorder, transcribes through the bridge, and appends the final text into the draft.
+    private func stopVoiceTranscription() async {
+        isVoiceTranscribing = true
+        defer { isVoiceTranscribing = false }
+
+        do {
+            guard let clip = try voiceTranscriptionManager.stopRecording() else {
+                isVoiceRecording = false
+                voiceTranscriptionManager.resetMeteringState()
+                return
+            }
+
+            defer {
+                try? FileManager.default.removeItem(at: clip.url)
+            }
+
+            isVoiceRecording = false
+            voiceTranscriptionManager.resetMeteringState()
+            let transcript = try await codex.transcribeVoiceAudioFile(
+                at: clip.url,
+                durationSeconds: clip.durationSeconds
+            )
+            viewModel.appendVoiceTranscript(transcript)
+            // Keep voice flows keyboard-free; users can tap into the draft afterward if they want to edit.
+            isInputFocused = false
+        } catch {
+            isVoiceRecording = false
+            voiceTranscriptionManager.resetMeteringState()
+            codex.lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    // Starts microphone capture directly; auth is resolved when the user stops recording, matching Litter's flow.
+    @MainActor
+    private func startVoiceRecordingIfReady() async {
+        guard !isVoicePreflighting else {
+            return
+        }
+
+        guard codex.isConnected else {
+            codex.lastErrorMessage = "Connect to your Mac before using voice transcription."
+            return
+        }
+
+        codex.lastErrorMessage = nil
+        // Dismiss any active text focus before recording so the keyboard does not
+        // compete with the waveform UI or waste vertical space during capture.
+        isInputFocused = false
+        let preflightGeneration = voicePreflightGeneration + 1
+        voicePreflightGeneration = preflightGeneration
+        isVoicePreflighting = true
+        defer {
+            if isVoicePreflightCurrent(preflightGeneration) {
+                isVoicePreflighting = false
+            }
+        }
+
+        do {
+            guard isVoicePreflightCurrent(preflightGeneration), codex.isConnected else {
+                return
+            }
+            try await voiceTranscriptionManager.startRecording()
+            guard isVoicePreflightCurrent(preflightGeneration), codex.isConnected else {
+                voiceTranscriptionManager.cancelRecording()
+                return
+            }
+            isVoiceRecording = true
+            isInputFocused = false
+        } catch {
+            codex.lastErrorMessage = error.localizedDescription
+        }
+    }
+
+    // Clears any partial microphone capture when the screen leaves the active voice flow.
+    private func cancelVoiceRecordingIfNeeded() {
+        guard isVoiceRecording else {
+            return
+        }
+
+        voiceTranscriptionManager.cancelRecording()
+        isVoiceRecording = false
+    }
+
+    // Invalidates any in-flight async mic startup so it cannot reopen the recorder after leaving the screen.
+    private func invalidatePendingVoicePreflight() {
+        voicePreflightGeneration += 1
+        isVoicePreflighting = false
+    }
+
+    private func isVoicePreflightCurrent(_ generation: Int) -> Bool {
+        generation == voicePreflightGeneration
     }
 
     private var forkLoadingNotice: some View {

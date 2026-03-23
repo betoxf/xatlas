@@ -1,5 +1,5 @@
 // FILE: GitActionModels.swift
-// Purpose: Data models for git operations executed via the xatlas-bridge.
+// Purpose: Data models for git operations executed via the phodex-bridge.
 // Layer: Model
 // Exports: GitDiffTotals, GitChangedFile, GitRepoSyncResult, GitRepoDiffResult, GitCommitResult, GitPushResult, GitBranchesResult, GitCreateBranchResult, GitCreateWorktreeResult, GitCheckoutResult, GitPullResult, GitResetResult, TurnGitActionKind, TurnGitSyncAlert, TurnGitSyncAlertButton, TurnGitSyncAlertAction
 // Depends on: JSONValue

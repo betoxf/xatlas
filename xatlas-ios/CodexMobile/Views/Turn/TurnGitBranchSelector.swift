@@ -7,17 +7,17 @@
 import SwiftUI
 
 // Normalizes newly created local branch names toward the repo's preferred prefix without double-prefixing.
-func xatlasNormalizedCreatedBranchName(_ rawName: String) -> String {
+func remodexNormalizedCreatedBranchName(_ rawName: String) -> String {
     let trimmedName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedName.isEmpty else { return "" }
-    if trimmedName.hasPrefix("xatlas/") {
+    if trimmedName.hasPrefix("remodex/") {
         return trimmedName
     }
-    return "xatlas/\(trimmedName)"
+    return "remodex/\(trimmedName)"
 }
 
 // Leaves "open elsewhere" branches selectable so the caller can surface the right alert or git error.
-func xatlasCurrentBranchSelectionIsDisabled(
+func remodexCurrentBranchSelectionIsDisabled(
     branch: String,
     currentBranch: String,
     gitBranchesCheckedOutElsewhere: Set<String>,
@@ -217,14 +217,14 @@ struct TurnGitBranchPickerSheet: View {
 
     private var isNewBranchNameValid: Bool {
         let trimmed = newBranchName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, trimmed != "xatlas/" else { return false }
+        guard !trimmed.isEmpty, trimmed != "remodex/" else { return false }
         return true
     }
 
     // Suggests quick branch creation when the search query does not match an existing branch.
     private var suggestedCreateBranchName: String? {
         guard allowsSelectingCurrentBranch else { return nil }
-        let candidate = xatlasNormalizedCreatedBranchName(searchText)
+        let candidate = remodexNormalizedCreatedBranchName(searchText)
         guard !candidate.isEmpty else { return nil }
 
         let normalizedCandidate = candidate.lowercased()
@@ -249,7 +249,7 @@ struct TurnGitBranchPickerSheet: View {
         List {
             Section(sectionTitle) {
                 if showsDefaultBranchRow, let defaultBranch {
-                    let isDisabled = xatlasCurrentBranchSelectionIsDisabled(
+                    let isDisabled = remodexCurrentBranchSelectionIsDisabled(
                         branch: defaultBranch,
                         currentBranch: currentBranch,
                         gitBranchesCheckedOutElsewhere: gitBranchesCheckedOutElsewhere,
@@ -273,7 +273,7 @@ struct TurnGitBranchPickerSheet: View {
                 }
 
                 ForEach(orderedBranches, id: \.self) { branch in
-                    let isDisabled = xatlasCurrentBranchSelectionIsDisabled(
+                    let isDisabled = remodexCurrentBranchSelectionIsDisabled(
                         branch: branch,
                         currentBranch: currentBranch,
                         gitBranchesCheckedOutElsewhere: gitBranchesCheckedOutElsewhere,
@@ -320,8 +320,8 @@ struct TurnGitBranchPickerSheet: View {
                     }
 
                     Button {
-                        let fromSearch = xatlasNormalizedCreatedBranchName(searchText)
-                        newBranchName = fromSearch.isEmpty ? "xatlas/" : fromSearch
+                        let fromSearch = remodexNormalizedCreatedBranchName(searchText)
+                        newBranchName = fromSearch.isEmpty ? "remodex/" : fromSearch
                         isShowingCreateBranchPrompt = true
                     } label: {
                         Label("New branch...", systemImage: "plus")
@@ -350,12 +350,12 @@ struct TurnGitBranchPickerSheet: View {
         .environment(\.defaultMinListRowHeight, 28)
         .searchable(text: $searchText, prompt: "Search branches")
         .alert("New branch", isPresented: $isShowingCreateBranchPrompt) {
-            TextField("xatlas/my-feature", text: $newBranchName)
+            TextField("remodex/my-feature", text: $newBranchName)
             Button("Cancel", role: .cancel) {
                 newBranchName = ""
             }
             Button("Create") {
-                let branchName = xatlasNormalizedCreatedBranchName(newBranchName)
+                let branchName = remodexNormalizedCreatedBranchName(newBranchName)
                 guard !branchName.isEmpty else { return }
                 onCreateBranch(branchName)
                 newBranchName = ""
@@ -429,8 +429,8 @@ private struct TurnGitBranchBadge: View {
         branches: [
             "feature/auth-flow",
             "feature/dark-mode",
-            "xatlas/onboarding-v2",
-            "xatlas/sidebar-refactor",
+            "remodex/onboarding-v2",
+            "remodex/sidebar-refactor",
             "fix/crash-on-launch",
             "fix/memory-leak-timeline",
             "chore/bump-dependencies",
@@ -438,9 +438,9 @@ private struct TurnGitBranchBadge: View {
         ],
         gitBranchesCheckedOutElsewhere: ["feature/dark-mode"],
         gitWorktreePathsByBranch: ["feature/dark-mode": "/tmp/worktree"],
-        selectedBranch: "xatlas/onboarding-v2",
+        selectedBranch: "remodex/onboarding-v2",
         defaultBranch: "main",
-        currentBranch: "xatlas/onboarding-v2",
+        currentBranch: "remodex/onboarding-v2",
         allowsSelectingCurrentBranch: true,
         sectionTitle: "Branches",
         navigationTitle: "Current Branch",

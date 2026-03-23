@@ -17,8 +17,8 @@ enum LocalNetworkAuthorizationStatus: Equatable {
 
 @MainActor
 final class LocalNetworkAuthorizationRequester: NSObject, NetServiceDelegate {
-    private let serviceType = "_xatlas-permission._tcp"
-    private let serviceName = "xatlasLocalNetwork"
+    private let serviceType = "_remodex-permission._tcp"
+    private let serviceName = "RemodexLocalNetwork"
 
     private var browser: NWBrowser?
     private var netService: NetService?

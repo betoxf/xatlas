@@ -29,7 +29,7 @@ enum DesktopHandoffError: LocalizedError {
         case "unsupported_platform":
             return "Mac handoff works only when the bridge is running on macOS."
         case "handoff_failed":
-            return fallback ?? "Could not relaunch xatlas desktop on your Mac."
+            return fallback ?? "Could not relaunch Codex.app on your Mac."
         default:
             return fallback ?? "Could not continue this chat on your Mac."
         }

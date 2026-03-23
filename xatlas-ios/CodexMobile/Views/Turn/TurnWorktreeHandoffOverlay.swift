@@ -50,7 +50,7 @@ struct TurnWorktreeHandoffOverlay: View {
     @FocusState private var isBranchNameFocused: Bool
 
     private var normalizedBranchName: String {
-        xatlasNormalizedCreatedBranchName(branchName)
+        remodexNormalizedCreatedBranchName(branchName)
     }
 
     private var trimmedBaseBranch: String {

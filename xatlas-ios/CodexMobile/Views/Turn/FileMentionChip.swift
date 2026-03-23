@@ -49,7 +49,7 @@ struct SkillMentionChip: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: "bolt.horizontal.circle")
+            Image(systemName: "square.stack.3d.up")
                 .font(AppFont.system(size: 9, weight: .semibold))
                 .foregroundStyle(Color.indigo)
 
@@ -272,6 +272,24 @@ enum UserMessageParser {
     private static let leadingFileMentionRegex = try? NSRegularExpression(
         pattern: #"^@((?:[^@\n]+?\.[A-Za-z0-9]+)|(?:[^\s@]+))(?=[\s,.;:!?)\]}>]|$)"#
     )
+    // Prevents Swift property wrappers and attributes from turning into fake file chips.
+    private static let disallowedBareSwiftAttributes: Set<String> = [
+        "Binding",
+        "Environment",
+        "EnvironmentObject",
+        "FocusState",
+        "MainActor",
+        "Namespace",
+        "Observable",
+        "ObservedObject",
+        "Published",
+        "SceneBuilder",
+        "State",
+        "StateObject",
+        "UIApplicationDelegateAdaptor",
+        "ViewBuilder",
+        "testable",
+    ]
 
     /// Splits a user message into leading `@path` mention tokens and the rest of the body.
     /// File mentions can contain spaces as long as they still resolve to a path-like token.
@@ -295,12 +313,31 @@ enum UserMessageParser {
                 break
             }
 
-            mentions.append(String(workingText[mentionRange]))
+            let mention = String(workingText[mentionRange])
+            guard isAllowedFileMentionToken(mention) else {
+                break
+            }
+
+            mentions.append(mention)
             remainingText = workingText[fullMatchRange.upperBound...]
         }
 
         let body = String(remainingText).trimmingCharacters(in: .whitespacesAndNewlines)
 
         return UserMessageParsed(mentions: mentions, body: body)
+    }
+
+    // Keeps legacy `@filename` support while rejecting known Swift attribute syntax.
+    private static func isAllowedFileMentionToken(_ mention: String) -> Bool {
+        let trimmedMention = mention.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMention.isEmpty else {
+            return false
+        }
+
+        if trimmedMention.contains("/") || trimmedMention.contains("\\") || trimmedMention.contains(".") {
+            return true
+        }
+
+        return !disallowedBareSwiftAttributes.contains(trimmedMention)
     }
 }

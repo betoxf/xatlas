@@ -96,9 +96,9 @@ extension CodexService {
 private extension CodexService {
     var threadForkBridgeUpdatePrompt: CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "Update xatlas on your Mac to use /fork",
-            message: "This Mac bridge does not support native conversation forks yet. Update the xatlas npm package to use /fork and worktree fork flows.",
-            command: "npm install -g xatlas@latest"
+            title: "Update Remodex on your Mac to use /fork",
+            message: "This Mac bridge does not support native conversation forks yet. Update the Remodex npm package to use /fork and worktree fork flows.",
+            command: "npm install -g remodex@latest"
         )
     }
 }

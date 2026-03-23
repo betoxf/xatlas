@@ -32,7 +32,8 @@ struct TurnComposerInputTextView: UIViewRepresentable {
         textView.autocapitalizationType = .sentences
         textView.isScrollEnabled = true
         textView.showsVerticalScrollIndicator = false
-        textView.keyboardDismissMode = .none
+        // Lets upward drags that start inside the composer dismiss the keyboard too.
+        textView.keyboardDismissMode = .interactive
         textView.onPasteImageData = onPasteImageData
         textView.runtimeState = runtimeState
         textView.runtimeActions = runtimeActions
@@ -63,6 +64,8 @@ struct TurnComposerInputTextView: UIViewRepresentable {
         uiView.isSelectable = true
         uiView.font = composerUIFont()
         uiView.textContainer.widthTracksTextView = true
+        // Keep drag-to-dismiss active after SwiftUI updates the wrapped text view.
+        uiView.keyboardDismissMode = .interactive
         uiView.onPasteImageData = onPasteImageData
         uiView.runtimeState = runtimeState
         uiView.runtimeActions = runtimeActions
@@ -87,7 +90,7 @@ struct TurnComposerInputTextView: UIViewRepresentable {
 
     // Mirrors the shared font setting so the UIKit composer stays aligned with SwiftUI text.
     private func composerUIFont() -> UIFont {
-        AppFont.uiFont(size: 14, textStyle: .body)
+        AppFont.uiFont(size: 12, textStyle: .body)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -130,6 +133,7 @@ struct TurnComposerInputTextView: UIViewRepresentable {
                 text.wrappedValue = textView.text
             }
             updateHeight(for: textView)
+            keepCaretVisible(in: textView)
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
@@ -182,6 +186,12 @@ struct TurnComposerInputTextView: UIViewRepresentable {
                     self.dynamicHeight.wrappedValue = pendingHeight
                 }
             }
+        }
+
+        // Keeps the newest typed line visible once the composer switches from growing to internal scrolling.
+        private func keepCaretVisible(in textView: UITextView) {
+            guard textView.isScrollEnabled else { return }
+            textView.scrollRangeToVisible(textView.selectedRange)
         }
 
         fileprivate func syncFocusIfNeeded(

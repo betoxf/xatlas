@@ -102,7 +102,7 @@ struct HomeEmptyStateView<AuthSection: View>: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .navigationTitle("xatlas")
+        .navigationTitle("Remodex")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if connectionPhase == .connecting {
@@ -172,11 +172,11 @@ struct HomeEmptyStateView<AuthSection: View>: View {
     }
 
     private var primaryButtonBackground: Color {
-        isSocketReady ? Color(.secondarySystemFill) : .black
+        isSocketReady ? Color(.secondarySystemFill) : Color.primary
     }
 
     private var primaryButtonForeground: Color {
-        isSocketReady ? Color.primary : .white
+        isSocketReady ? Color.primary : Color(.systemBackground)
     }
 
     private var isSocketReady: Bool {

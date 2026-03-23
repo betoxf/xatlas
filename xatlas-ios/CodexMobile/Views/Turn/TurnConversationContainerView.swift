@@ -18,6 +18,7 @@ struct TurnConversationContainerView: View {
     let errorMessage: String?
     let shouldAnchorToAssistantResponse: Binding<Bool>
     let isScrolledToBottom: Binding<Bool>
+    let isComposerFocused: Bool
     let emptyState: AnyView
     let composer: AnyView
     let repositoryLoadingToastOverlay: AnyView
@@ -70,6 +71,7 @@ struct TurnConversationContainerView: View {
                 errorMessage: errorMessage,
                 shouldAnchorToAssistantResponse: shouldAnchorToAssistantResponse,
                 isScrolledToBottom: isScrolledToBottom,
+                isComposerFocused: isComposerFocused,
                 onRetryUserMessage: onRetryUserMessage,
                 onTapAssistantRevert: onTapAssistantRevert,
                 onTapSubagent: onTapSubagent,
@@ -145,8 +147,10 @@ struct TurnConversationContainerView: View {
         var pinnedTaskPlanMessage: CodexMessage?
 
         for message in messages {
-            if message.isPlanSystemMessage {
+            if message.shouldDisplayPinnedPlanAccessory {
                 pinnedTaskPlanMessage = message
+            } else if message.isPlanSystemMessage {
+                continue
             } else {
                 timelineMessages.append(message)
             }
@@ -169,8 +173,26 @@ private struct TimelineMessageLayout: Equatable {
     )
 }
 
-private extension CodexMessage {
+extension CodexMessage {
     var isPlanSystemMessage: Bool {
         role == .system && kind == .plan
+    }
+
+    // Hides terminal 3/3-style plans so only genuinely active plans stay pinned above the composer.
+    var shouldDisplayPinnedPlanAccessory: Bool {
+        guard isPlanSystemMessage else {
+            return false
+        }
+
+        if isStreaming {
+            return true
+        }
+
+        let steps = planState?.steps ?? []
+        guard !steps.isEmpty else {
+            return false
+        }
+
+        return steps.contains { $0.status != .completed }
     }
 }

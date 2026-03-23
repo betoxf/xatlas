@@ -58,9 +58,9 @@ extension CodexService {
 private extension CodexService {
     var serviceTierBridgeUpdatePrompt: CodexBridgeUpdatePrompt {
         CodexBridgeUpdatePrompt(
-            title: "Update xatlas on your Mac to use Speed controls",
-            message: "This Mac bridge does not support the selected speed setting yet. Update the xatlas npm package to use Fast Mode and other speed controls.",
-            command: "npm install -g xatlas@latest"
+            title: "Update Remodex on your Mac to use Speed controls",
+            message: "This Mac bridge does not support the selected speed setting yet. Update the Remodex npm package to use Fast Mode and other speed controls.",
+            command: "npm install -g remodex@latest"
         )
     }
 }

@@ -28,6 +28,8 @@ struct ContentView: View {
     @AppStorage("codex.hasSeenOnboarding") private var hasSeenOnboarding = false
 
     private let sidebarWidth: CGFloat = 330
+    // Lets the drawer gesture start a bit inside the content instead of only on the bezel edge.
+    private let sidebarOpenActivationWidth: CGFloat = 80
     private static let sidebarSpring = Animation.spring(response: 0.35, dampingFraction: 0.85)
 
     var body: some View {
@@ -93,6 +95,13 @@ struct ContentView: View {
                 }
                 Task {
                     await viewModel.attemptAutoReconnectOnForegroundIfNeeded(codex: codex)
+                }
+            }
+            .onChange(of: codex.isConnected) { wasConnected, isNowConnected in
+                if !wasConnected, isNowConnected {
+                    Task {
+                        await codex.requestNotificationPermissionOnFirstLaunchIfNeeded()
+                    }
                 }
             }
             .onChange(of: codex.threadCompletionBanner) { _, banner in
@@ -234,7 +243,7 @@ struct ContentView: View {
                     .onTapGesture { closeSidebar() }
             }
         }
-        .gesture(edgeDragGesture)
+        .simultaneousGesture(edgeDragGesture)
     }
 
     // MARK: - Layers
@@ -350,9 +359,11 @@ struct ContentView: View {
                 guard navigationPath.isEmpty else { return }
 
                 if !isSidebarOpen {
-                    guard value.startLocation.x < 30 else { return }
+                    guard value.startLocation.x < sidebarOpenActivationWidth,
+                          isOpeningSidebarGesture(value) else { return }
                     sidebarDragOffset = max(0, value.translation.width)
                 } else {
+                    guard isClosingSidebarGesture(value) else { return }
                     sidebarDragOffset = min(0, value.translation.width)
                 }
             }
@@ -363,7 +374,8 @@ struct ContentView: View {
                 let threshold = currentWidth * 0.4
 
                 if !isSidebarOpen {
-                    guard value.startLocation.x < 30 else {
+                    guard value.startLocation.x < sidebarOpenActivationWidth,
+                          isOpeningSidebarGesture(value) else {
                         sidebarDragOffset = 0
                         return
                     }
@@ -371,11 +383,28 @@ struct ContentView: View {
                         || value.predictedEndTranslation.width > currentWidth * 0.5
                     finishGesture(open: shouldOpen)
                 } else {
+                    guard isClosingSidebarGesture(value) else {
+                        sidebarDragOffset = 0
+                        return
+                    }
                     let shouldClose = -value.translation.width > threshold
                         || -value.predictedEndTranslation.width > currentWidth * 0.5
                     finishGesture(open: !shouldClose)
                 }
             }
+    }
+
+    // Keeps the sidebar swipe from claiming mostly vertical drags near the screen edge.
+    private func isOpeningSidebarGesture(_ value: DragGesture.Value) -> Bool {
+        let horizontal = value.translation.width
+        let vertical = value.translation.height
+        return horizontal > 0 && abs(horizontal) > abs(vertical) * 1.15
+    }
+
+    private func isClosingSidebarGesture(_ value: DragGesture.Value) -> Bool {
+        let horizontal = value.translation.width
+        let vertical = value.translation.height
+        return horizontal < 0 && abs(horizontal) > abs(vertical) * 1.15
     }
 
     // MARK: - Sidebar Actions
@@ -413,6 +442,7 @@ struct ContentView: View {
         codex.hasReconnectCandidate
             && !isShowingManualScanner
             && (codex.isConnecting
+                || viewModel.isAttemptingManualReconnect
                 || viewModel.isAttemptingAutoReconnect
                 || codex.shouldAutoReconnectOnForeground
                 || isRetryingSavedPairing
@@ -421,7 +451,9 @@ struct ContentView: View {
 
     // Keeps home status honest during reconnect loops while letting post-connect sync show separately.
     private var homeConnectionPhase: CodexConnectionPhase {
-        if viewModel.isAttemptingAutoReconnect && !codex.isConnected {
+        // Only manual reconnect should force a busy shell here; background auto-retry can sit in backoff
+        // while the Mac is asleep, and that should still read as offline until a real connect starts.
+        if viewModel.isAttemptingManualReconnect && !codex.isConnected {
             return .connecting
         }
         return codex.connectionPhase

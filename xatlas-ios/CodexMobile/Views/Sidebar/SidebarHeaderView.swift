@@ -14,7 +14,7 @@ struct SidebarHeaderView: View {
                 .frame(width: 26, height: 26)
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            Text("xatlas")
+            Text("Remodex")
                 .font(AppFont.title3(weight: .medium))
         }
         .padding(.horizontal, 16)
