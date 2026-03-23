@@ -38,6 +38,7 @@ struct AppSettingsView: View {
     var body: some View {
         HStack(spacing: 0) {
             // Settings sidebar
+
             VStack(alignment: .leading, spacing: 0) {
                 Spacer().frame(height: 12)
 
@@ -117,6 +118,11 @@ struct AppSettingsView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .onExitCommand {
             state.isSettingsPresented = false
+        }
+        .onAppear {
+            // Refresh in case PairingService regenerated code after a successful pairing
+            pairingCode = PairingService.shared.pairingCode
+            pairedDevices = PairingService.shared.pairedDevices
         }
     }
 
@@ -445,6 +451,9 @@ struct AppSettingsView: View {
         bridgeStatusTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
             loadRelayPairingPayload()
             loadBridgeStatus()
+            // Keep pairing code & devices in sync if PairingService regenerated after a phone pairing
+            pairingCode = PairingService.shared.pairingCode
+            pairedDevices = PairingService.shared.pairedDevices
         }
     }
 
