@@ -10,6 +10,7 @@ import SwiftUI
 struct QRScannerView: View {
     let onBack: (() -> Void)?
     let onScan: (CodexPairingQRPayload) -> Void
+    let onLANScan: ((XatlasLANPairingPayload) -> Void)?
 
     @State private var scannerError: String?
     @State private var bridgeUpdatePrompt: CodexBridgeUpdatePrompt?
@@ -22,10 +23,12 @@ struct QRScannerView: View {
         initialHasCameraPermission: Bool = false,
         initialIsCheckingPermission: Bool = true,
         onBack: (() -> Void)? = nil,
-        onScan: @escaping (CodexPairingQRPayload) -> Void
+        onScan: @escaping (CodexPairingQRPayload) -> Void,
+        onLANScan: ((XatlasLANPairingPayload) -> Void)? = nil
     ) {
         self.onBack = onBack
         self.onScan = onScan
+        self.onLANScan = onLANScan
         _bridgeUpdatePrompt = State(initialValue: initialBridgeUpdatePrompt)
         _hasCameraPermission = State(initialValue: initialHasCameraPermission)
         _isCheckingPermission = State(initialValue: initialIsCheckingPermission)
@@ -252,6 +255,15 @@ struct QRScannerView: View {
         switch validatePairingQRCode(code) {
         case .success(let payload):
             onScan(payload)
+        case .lanSuccess(let lanPayload):
+            if let onLANScan {
+                onLANScan(lanPayload)
+            } else {
+                // Fallback: use the direct service directly
+                Task {
+                    await XatlasDirectService.shared.pairAndConnect(payload: lanPayload)
+                }
+            }
         case .scanError(let message):
             scannerError = message
             resetScanLock()
