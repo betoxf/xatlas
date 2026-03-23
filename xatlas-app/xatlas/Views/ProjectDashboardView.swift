@@ -16,43 +16,18 @@ struct ProjectDashboardView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Projects")
-                            .font(.system(size: 22, weight: .semibold))
-                        Text("Switch between repos, inspect live terminal activity, and open a quick preview without leaving the overview.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    Button {
-                        state.presentProjectPicker()
-                    } label: {
-                        Label("Add Project", systemImage: "plus")
-                            .font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 9)
-                            .background(Capsule().fill(.white.opacity(0.48)))
-                    }
-                    .buttonStyle(.plain)
+            LazyVGrid(columns: columns, spacing: 18) {
+                ForEach(filteredProjects) { project in
+                    ProjectDashboardCard(
+                        project: project,
+                        state: state,
+                        onQuickView: {
+                            _ = state.openProjectQuickView(id: project.id)
+                        }
+                    )
                 }
 
-                LazyVGrid(columns: columns, spacing: 18) {
-                    ForEach(filteredProjects) { project in
-                        ProjectDashboardCard(
-                            project: project,
-                            state: state,
-                            onQuickView: {
-                                _ = state.openProjectQuickView(id: project.id)
-                            }
-                        )
-                    }
-
-                    AddProjectTile(action: state.presentProjectPicker)
-                }
+                AddProjectTile(action: state.presentProjectPicker)
             }
             .padding(18)
         }
@@ -292,12 +267,11 @@ struct ProjectQuickViewSheet: View {
         return TerminalService.shared.visibleSessionsForProject(project.id, maxDetached: 6)
     }
 
-    private var selectedSession: TerminalSession? {
-        if let selectedSessionID,
-           let session = sessions.first(where: { $0.id == selectedSessionID }) {
-            return session
+    private var activeSessionID: String? {
+        if let selectedSessionID, sessions.contains(where: { $0.id == selectedSessionID }) {
+            return selectedSessionID
         }
-        return sessions.first
+        return sessions.first?.id
     }
 
     private var hiddenSessionCount: Int {
@@ -360,14 +334,14 @@ struct ProjectQuickViewSheet: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(sessions) { session in
+                    ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
                         Button {
                             selectedSessionID = session.id
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "terminal")
                                     .font(.system(size: 10, weight: .semibold))
-                                Text(session.displayTitle)
+                                Text("\(session.displayTitle) \(index + 1)")
                                     .font(.system(size: 11, weight: .semibold))
                                 if session.requiresAttention {
                                     Text("1")
@@ -378,11 +352,11 @@ struct ProjectQuickViewSheet: View {
                                         .background(Capsule().fill(.red.opacity(0.78)))
                                 }
                             }
-                            .foregroundStyle(selectedSession?.id == session.id ? Color.white : Color.primary.opacity(0.75))
+                            .foregroundStyle(activeSessionID == session.id ? Color.white : Color.primary.opacity(0.75))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
                             .background(
-                                Capsule().fill(selectedSession?.id == session.id ? Color.accentColor : Color.white.opacity(0.35))
+                                Capsule().fill(activeSessionID == session.id ? Color.accentColor : Color.white.opacity(0.35))
                             )
                         }
                         .buttonStyle(.plain)
@@ -408,9 +382,9 @@ struct ProjectQuickViewSheet: View {
 
             // Terminal area
             Group {
-                if let selectedSession {
-                    StyledTerminalView(sessionID: selectedSession.id, appState: state)
-                        .id(selectedSession.id)
+                if let sessionID = activeSessionID {
+                    StyledTerminalView(sessionID: sessionID, appState: state)
+                        .id(sessionID)
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "terminal")
@@ -450,9 +424,9 @@ struct ProjectQuickViewSheet: View {
                 .padding(.vertical, 8)
                 .background(Capsule().fill(.white.opacity(0.5)))
 
-                if let selectedSession {
+                if let sessionID = activeSessionID {
                     Button("Close Terminal") {
-                        requestClose(selectedSession.id)
+                        requestClose(sessionID)
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, 12)
@@ -469,9 +443,6 @@ struct ProjectQuickViewSheet: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .offset(dragOffset)
         .onAppear {
-            syncSelectedSession()
-        }
-        .onChange(of: state.terminalEventVersion) { _, _ in
             syncSelectedSession()
         }
         .confirmationDialog(

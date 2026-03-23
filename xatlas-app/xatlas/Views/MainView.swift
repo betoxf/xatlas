@@ -11,44 +11,51 @@ struct MainView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            SidebarView(state: state)
-                .frame(width: 220)
-                .background(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .fill(.white.opacity(0.75))
-                        .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
-                        .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .padding(.leading, 10)
-                .padding(.vertical, 10)
+        Group {
+            if state.isSettingsPresented {
+                AppSettingsView(state: state)
+            } else {
+                ZStack {
+                    HStack(spacing: 10) {
+                        SidebarView(state: state)
+                            .frame(width: 220)
+                            .background(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(.white.opacity(0.75))
+                                    .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+                                    .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                            .padding(.leading, 10)
+                            .padding(.vertical, 10)
 
-            VStack(spacing: 0) {
-                ToolbarView(state: state)
-                    .padding(.top, 10)
-                ContentAreaView(state: state)
+                        VStack(spacing: 0) {
+                            ToolbarView(state: state)
+                            ContentAreaView(state: state)
+                        }
+                        .padding(.trailing, 10)
+                        .padding(.bottom, 10)
+                    }
+                    .allowsHitTesting(quickViewProject == nil)
+
+                    if let project = quickViewProject {
+                        Color.black.opacity(0.25)
+                            .ignoresSafeArea()
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                state.closeProjectQuickView()
+                            }
+
+                        ProjectQuickViewSheet(project: project, state: state)
+                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
+                            .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
             }
-            .padding(.trailing, 10)
-            .padding(.bottom, 10)
         }
         .background(windowBg)
-        .overlay {
-            if let project = quickViewProject {
-                Color.black.opacity(0.25)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        state.closeProjectQuickView()
-                    }
-
-                ProjectQuickViewSheet(project: project, state: state)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
         .overlay(alignment: .bottomTrailing) {
             if let toast = state.activeToast {
                 AppToastView(toast: toast)
@@ -57,12 +64,9 @@ struct MainView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .sheet(isPresented: $state.isSettingsPresented) {
-            AppSettingsView()
-        }
         .onAppear {
             if let project = state.selectedProject {
-                state.switchToProject(project)
+                state.switchToProject(project, forceWorkspace: false)
             } else if state.tabs.isEmpty {
                 if let recovered = TerminalService.shared.sessions.first {
                     let tab = TabItem(
@@ -139,8 +143,16 @@ struct ToolbarView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
-            if !isDashboard {
+        HStack(spacing: 10) {
+            if isDashboard {
+                Text("Projects")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+
+                Text("Overview")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            } else {
                 Text(toolbarTitle)
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.primary)
@@ -187,10 +199,23 @@ struct ToolbarView: View {
                 }
                 ToolbarCircleButton(icon: "square.and.arrow.up") {}
                 ToolbarCircleButton(icon: "ellipsis") {}
+
+                if isDashboard {
+                    Button {
+                        state.presentProjectPicker()
+                    } label: {
+                        Label("Add Project", systemImage: "plus")
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Capsule().fill(.white.opacity(0.48)))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
     }
 
     private var toolbarTitle: String {

@@ -593,7 +593,9 @@ private struct SidebarCircleButton: View {
                 .frame(width: 28, height: 28)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular, in: Circle())
+        .background(
+            Circle().fill(.white.opacity(isHovered ? 0.5 : 0.32))
+        )
         .onHover { isHovered = $0 }
         .scaleEffect(isHovered ? 1.08 : 1.0)
         .animation(.easeOut(duration: 0.15), value: isHovered)

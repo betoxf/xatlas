@@ -36,3 +36,6 @@ xcuserdata/
 
 # Node
 node_modules/
+
+# Reference repos (cloned for study, not project code)
+remodex/

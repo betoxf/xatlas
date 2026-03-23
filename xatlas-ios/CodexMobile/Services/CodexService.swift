@@ -1,5 +1,5 @@
 // FILE: CodexService.swift
-// Purpose: Central state container for xatlas desktop-server communication.
+// Purpose: Central state container for Codex app-server communication.
 // Layer: Service
 // Exports: CodexService, CodexApprovalRequest
 // Depends on: Foundation, Observation, RPCMessage, CodexThread, CodexMessage, UserNotifications
@@ -272,6 +272,8 @@ struct AssistantRevertStateCacheEntry {
 @MainActor
 @Observable
 final class CodexService {
+    static let minimumSupportedBridgePackageVersion = "1.3.5"
+
     // --- Public state ---------------------------------------------------------
 
     var threads: [CodexThread] = [] {
@@ -320,6 +322,14 @@ final class CodexService {
     // Per-chat runtime overrides let the composer diverge from app-wide defaults.
     var threadRuntimeOverridesByThreadID: [String: CodexThreadRuntimeOverride] = [:]
     var selectedAccessMode: CodexAccessMode = .onRequest
+    // Bridge-owned ChatGPT auth snapshot used by Settings and voice gating.
+    var gptAccountSnapshot: CodexGPTAccountSnapshot = codexGPTAccountInitialSnapshot() {
+        didSet {
+            persistGPTAccountSnapshot(gptAccountSnapshot)
+        }
+    }
+    // Holds the most recent account-specific error without colliding with transport-level failures.
+    var gptAccountErrorMessage: String?
     var isLoadingModels = false
     var modelsErrorMessage: String?
     var notificationAuthorizationStatus: UNAuthorizationStatus = .notDetermined
@@ -343,6 +353,10 @@ final class CodexService {
     var relayMacIdentityPublicKey: String?
     var relayProtocolVersion: Int = codexSecureProtocolVersion
     var lastAppliedBridgeOutboundSeq = 0
+    // Mirrors the bridge package version currently running on the Mac, if the bridge reports it.
+    var bridgeInstalledVersion: String?
+    // Mirrors the latest published bridge package version, when the bridge can resolve it.
+    var latestBridgePackageVersion: String?
     // Fresh QR scans must use bootstrap once, even if this Mac was already trusted before.
     var shouldForceQRBootstrapOnNextHandshake = false
     // Stops infinite trusted-reconnect loops by escalating back to QR after repeated handshake failures.
@@ -353,6 +367,7 @@ final class CodexService {
     var bridgeUpdatePrompt: CodexBridgeUpdatePrompt?
     var hasPresentedServiceTierBridgeUpdatePrompt = false
     var hasPresentedThreadForkBridgeUpdatePrompt = false
+    var hasPresentedMinimumBridgePackageUpdatePrompt = false
     // Mirrors the sidebar ready-dot with a tappable in-app banner when another chat finishes.
     var threadCompletionBanner: CodexThreadCompletionBanner?
     // Explains why a push-opened chat could not be restored and offers a recovery path.
@@ -373,6 +388,9 @@ final class CodexService {
     @ObservationIgnored var requestTransportOverride: ((String, JSONValue?) async throws -> RPCMessage)?
     // Test hook: stubs trusted-session lookup without performing a real relay HTTP request.
     @ObservationIgnored var trustedSessionResolverOverride: (() async throws -> CodexTrustedSessionResolveResponse)?
+    // Keeps the trusted-session HTTP lookup cancellable so manual retry can preempt a stuck resolve.
+    @ObservationIgnored var trustedSessionResolveTask: Task<CodexTrustedSessionResolveResponse, Error>?
+    @ObservationIgnored var trustedSessionResolveTaskID: UUID?
     var streamingAssistantMessageByTurnID: [String: String] = [:]
     var streamingSystemMessageByItemID: [String: String] = [:]
     /// Rich metadata for command execution tool calls, keyed by itemId.
@@ -401,6 +419,8 @@ final class CodexService {
     var activeThreadSyncTask: Task<Void, Never>?
     var runningThreadWatchSyncTask: Task<Void, Never>?
     var postConnectSyncTask: Task<Void, Never>?
+    // Keeps the phone-side account UI in sync while ChatGPT login is being completed on the Mac.
+    var gptAccountLoginSyncTask: Task<Void, Never>?
     var postConnectSyncToken: UUID?
     var connectedServerIdentity: String?
     var runningThreadWatchByID: [String: CodexRunningThreadWatch] = [:]
@@ -557,6 +577,30 @@ final class CodexService {
             self.selectedAccessMode = parsedAccessMode
         } else {
             self.selectedAccessMode = .onRequest
+        }
+
+        if let persistedGPTAccountSnapshot = loadPersistedGPTAccountSnapshot() {
+            self.gptAccountSnapshot = persistedGPTAccountSnapshot
+        } else {
+            self.gptAccountSnapshot = codexGPTAccountInitialSnapshot()
+        }
+
+        if let pendingLogin = gptPendingLoginState,
+           !self.gptAccountSnapshot.isAuthenticated,
+           self.gptAccountSnapshot.status != .loginPending {
+            self.gptAccountSnapshot = CodexGPTAccountSnapshot(
+                status: .loginPending,
+                authMethod: .chatgpt,
+                email: nil,
+                displayName: nil,
+                planType: nil,
+                loginInFlight: true,
+                needsReauth: false,
+                expiresAt: pendingLogin.expiresAt,
+                tokenReady: false,
+                tokenUnavailableSince: nil,
+                updatedAt: .now
+            )
         }
 
         // Restore relay session from Keychain

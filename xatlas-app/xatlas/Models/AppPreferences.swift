@@ -38,6 +38,10 @@ final class AppPreferences {
         didSet { defaults.set(remoteAccessEnabled, forKey: Keys.remoteAccessEnabled) }
     }
 
+    var defaultViewIsDashboard: Bool {
+        didSet { defaults.set(defaultViewIsDashboard, forKey: Keys.defaultViewIsDashboard) }
+    }
+
     private let defaults = UserDefaults.standard
 
     private enum Keys {
@@ -45,6 +49,7 @@ final class AppPreferences {
         static let useAIForSync = "xatlas.useAIForSync"
         static let pushAfterSync = "xatlas.pushAfterSync"
         static let remoteAccessEnabled = "xatlas.remoteAccessEnabled"
+        static let defaultViewIsDashboard = "xatlas.defaultViewIsDashboard"
     }
 
     private init() {
@@ -52,5 +57,6 @@ final class AppPreferences {
         useAIForSync = defaults.object(forKey: Keys.useAIForSync) as? Bool ?? true
         pushAfterSync = defaults.object(forKey: Keys.pushAfterSync) as? Bool ?? true
         remoteAccessEnabled = defaults.object(forKey: Keys.remoteAccessEnabled) as? Bool ?? false
+        defaultViewIsDashboard = defaults.object(forKey: Keys.defaultViewIsDashboard) as? Bool ?? true
     }
 }

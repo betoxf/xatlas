@@ -70,10 +70,10 @@ extension CodexService {
         )
         guard serverHello.protocolVersion == codexSecureProtocolVersion else {
             presentBridgeUpdatePrompt(
-                message: "This bridge is using a different secure transport version. Update the xatlas package on your Mac and try again."
+                message: "This bridge is using a different secure transport version. Update the Remodex package on your Mac and try again."
             )
             throw CodexSecureTransportError.incompatibleVersion(
-                "This bridge is using a different secure transport version. Update xatlas on the iPhone or Mac and try again."
+                "This bridge is using a different secure transport version. Update Remodex on the iPhone or Mac and try again."
             )
         }
         guard serverHello.sessionId == sessionId else {
@@ -225,7 +225,7 @@ extension CodexService {
     func secureWireText(for plaintext: String) throws -> String {
         guard var secureSession else {
             throw CodexSecureTransportError.invalidHandshake(
-                "The secure xatlas session is not ready yet. Try reconnecting."
+                "The secure Remodex session is not ready yet. Try reconnecting."
             )
         }
 
@@ -251,7 +251,7 @@ extension CodexService {
         self.secureSession = secureSession
         let data = try JSONEncoder().encode(envelope)
         guard let text = String(data: data, encoding: .utf8) else {
-            throw CodexSecureTransportError.invalidHandshake("Unable to encode the secure xatlas envelope.")
+            throw CodexSecureTransportError.invalidHandshake("Unable to encode the secure Remodex envelope.")
         }
         return text
     }
@@ -277,7 +277,7 @@ extension CodexService {
     }
 
     // Resets volatile secure state while preserving the trusted-device registry.
-    func resetSecureTransportState() {
+    func resetSecureTransportState(preservePendingQRBootstrapState: Bool = false) {
         secureSession = nil
         pendingHandshake = nil
         let continuations = pendingSecureControlContinuations
@@ -295,7 +295,13 @@ extension CodexService {
         }
 
         if shouldForceQRBootstrapOnNextHandshake, normalizedRelaySessionId != nil {
-            secureConnectionState = trustedMacRegistry.records[relayMacDeviceId ?? ""] == nil ? .handshaking : .trustedMac
+            // Fresh scans should stay visually "in progress" while the connect path is spinning up,
+            // but real disconnects still fall back to a stable saved-pair/not-paired presentation.
+            if preservePendingQRBootstrapState {
+                secureConnectionState = trustedMacRegistry.records[relayMacDeviceId ?? ""] == nil ? .handshaking : .trustedMac
+            } else {
+                secureConnectionState = trustedMacRegistry.records[relayMacDeviceId ?? ""] == nil ? .notPaired : .trustedMac
+            }
             secureMacFingerprint = normalizedRelayMacIdentityPublicKey.map { codexSecureFingerprint(for: $0) }
             return
         }
@@ -318,10 +324,38 @@ extension CodexService {
 
     // Used by: ContentViewModel trusted reconnect path.
     func resolveTrustedMacSession() async throws -> CodexTrustedSessionResolveResponse {
-        if let trustedSessionResolverOverride {
-            return try await trustedSessionResolverOverride()
+        let resolver = trustedSessionResolverOverride ?? { [weak self] in
+            guard let self else {
+                throw CancellationError()
+            }
+            return try await self.resolveTrustedMacSessionImpl()
         }
-        return try await resolveTrustedMacSessionImpl()
+        let resolveTaskID = UUID()
+        let task = Task {
+            try await resolver()
+        }
+
+        trustedSessionResolveTask = task
+        trustedSessionResolveTaskID = resolveTaskID
+        defer {
+            if trustedSessionResolveTaskID == resolveTaskID {
+                trustedSessionResolveTask = nil
+                trustedSessionResolveTaskID = nil
+            }
+        }
+
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    // Lets manual reconnect / fresh QR pairing preempt a stuck trusted-session HTTP lookup.
+    func cancelTrustedSessionResolve() {
+        trustedSessionResolveTask?.cancel()
+        trustedSessionResolveTask = nil
+        trustedSessionResolveTaskID = nil
     }
 
     // Persists the resolved live relay session and resets replay cursors when the live session changed.
@@ -340,16 +374,16 @@ private extension CodexService {
     // Centralizes the bridge-update guidance so every mismatch shows the same Mac command.
     func presentBridgeUpdatePrompt(message: String) {
         bridgeUpdatePrompt = CodexBridgeUpdatePrompt(
-            title: "Update the xatlas package on your Mac",
+            title: "Update the Remodex package on your Mac",
             message: message,
-            command: "npm install -g xatlas@latest"
+            command: "npm install -g remodex@latest"
         )
     }
 
     func sendWireControlMessage<Value: Encodable>(_ value: Value) async throws {
         let data = try JSONEncoder().encode(value)
         guard let text = String(data: data, encoding: .utf8) else {
-            throw CodexSecureTransportError.invalidHandshake("Unable to encode the secure xatlas control payload.")
+            throw CodexSecureTransportError.invalidHandshake("Unable to encode the secure Remodex control payload.")
         }
         try await sendRawText(text)
     }
@@ -368,7 +402,7 @@ private extension CodexService {
         }
 
         let waiterID = UUID()
-        let timeoutMessage = "Timed out waiting for the secure xatlas \(kind) message."
+        let timeoutMessage = "Timed out waiting for the secure Remodex \(kind) message."
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
             pendingSecureControlContinuations[kind, default: []].append(
@@ -458,7 +492,7 @@ private extension CodexService {
               envelope.keyEpoch == secureSession.keyEpoch,
               envelope.sender == "mac",
               envelope.counter > secureSession.lastInboundCounter else {
-            lastErrorMessage = "The secure xatlas payload could not be verified."
+            lastErrorMessage = "The secure Remodex payload could not be verified."
             secureConnectionState = .rePairRequired
             return
         }
@@ -556,11 +590,21 @@ private extension CodexService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(requestBody)
 
+        let session = trustedSessionResolveURLSession(for: resolveURL)
+        defer { session.invalidateAndCancel() }
+
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            let nsError = error as NSError
+            if Task.isCancelled
+                || (nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled) {
+                throw CancellationError()
+            }
             throw CodexTrustedSessionResolveError.network("Could not reach the trusted Mac relay. Check your connection and try again.")
         }
 
@@ -651,6 +695,22 @@ private extension CodexService {
         }
 
         return components.url
+    }
+
+    // Uses a non-proxying URLSession for local/private-overlay relays so trusted reconnect
+    // avoids the same iOS proxy path that can break direct websocket pairing.
+    private func trustedSessionResolveURLSession(for url: URL) -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.allowsCellularAccess = true
+        configuration.allowsConstrainedNetworkAccess = true
+        configuration.allowsExpensiveNetworkAccess = true
+
+        if prefersDirectRelayTransport(for: url) {
+            configuration.connectionProxyDictionary = [:]
+        }
+
+        return URLSession(configuration: configuration)
     }
 
     /// Waits for a serverHello whose echoed clientNonce matches the one we sent.
