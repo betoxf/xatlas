@@ -8,6 +8,12 @@ struct ProjectDashboardView: View {
         GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 16, alignment: .top)
     ]
 
+    private var filteredProjects: [Project] {
+        let query = state.dashboardSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return state.projects }
+        return state.projects.filter { $0.name.lowercased().contains(query) }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -35,7 +41,7 @@ struct ProjectDashboardView: View {
                 }
 
                 LazyVGrid(columns: columns, spacing: 18) {
-                    ForEach(state.projects) { project in
+                    ForEach(filteredProjects) { project in
                         ProjectDashboardCard(
                             project: project,
                             state: state,

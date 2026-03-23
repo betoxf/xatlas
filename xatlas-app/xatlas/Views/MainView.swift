@@ -25,8 +25,8 @@ struct MainView: View {
                 .padding(.vertical, 10)
 
             VStack(spacing: 0) {
-                Spacer().frame(height: 38)
                 ToolbarView(state: state)
+                    .padding(.top, 10)
                 ContentAreaView(state: state)
             }
             .padding(.trailing, 10)
@@ -132,19 +132,61 @@ private struct AppToastView: View {
 
 struct ToolbarView: View {
     @Bindable var state: AppState
+    @FocusState private var isSearchFocused: Bool
+
+    private var isDashboard: Bool {
+        state.selectedSection == .projects && state.projectSurfaceMode == .dashboard
+    }
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(toolbarTitle)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.primary)
+            if !isDashboard {
+                Text(toolbarTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.primary)
+            }
+
+            if state.isDashboardSearchActive && isDashboard {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    TextField("Filter projects…", text: $state.dashboardSearchQuery)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, weight: .medium))
+                        .focused($isSearchFocused)
+                        .onSubmit {
+                            if state.dashboardSearchQuery.isEmpty {
+                                state.isDashboardSearchActive = false
+                            }
+                        }
+                        .onExitCommand {
+                            state.dashboardSearchQuery = ""
+                            state.isDashboardSearchActive = false
+                        }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule().fill(.white.opacity(0.5))
+                )
+                .frame(maxWidth: 200)
+                .onChange(of: state.isDashboardSearchActive) { _, active in
+                    if active { isSearchFocused = true }
+                }
+            }
 
             Spacer()
 
             HStack(spacing: 8) {
-                ToolbarCircleButton(icon: "magnifyingglass")
-                ToolbarCircleButton(icon: "square.and.arrow.up")
-                ToolbarCircleButton(icon: "ellipsis")
+                ToolbarCircleButton(icon: "magnifyingglass") {
+                    state.isDashboardSearchActive.toggle()
+                    if !state.isDashboardSearchActive {
+                        state.dashboardSearchQuery = ""
+                    }
+                }
+                ToolbarCircleButton(icon: "square.and.arrow.up") {}
+                ToolbarCircleButton(icon: "ellipsis") {}
             }
         }
         .padding(.horizontal, 16)
@@ -155,19 +197,22 @@ struct ToolbarView: View {
         if state.selectedSection != .projects {
             return state.selectedSection.title
         }
-        if state.projectSurfaceMode == .dashboard {
-            return "Projects"
-        }
         return state.selectedTab?.title ?? "xatlas"
     }
 }
 
 private struct ToolbarCircleButton: View {
     let icon: String
+    let action: () -> Void
     @State private var isHovered = false
 
+    init(icon: String, action: @escaping () -> Void = {}) {
+        self.icon = icon
+        self.action = action
+    }
+
     var body: some View {
-        Button {} label: {
+        Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.primary.opacity(0.55))

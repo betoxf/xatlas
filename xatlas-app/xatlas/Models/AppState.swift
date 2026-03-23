@@ -55,6 +55,8 @@ final class AppState: @unchecked Sendable {
     var terminalEventVersion: Int = 0
     var projectSurfaceMode: ProjectSurfaceMode = .dashboard
     var dashboardQuickViewProjectID: UUID?
+    var dashboardSearchQuery: String = ""
+    var isDashboardSearchActive: Bool = false
     var activeToast: AppToast?
     private(set) var isProjectPickerPresented = false
 
