@@ -196,9 +196,9 @@ function watchThreadRollout(threadId = "") {
   let offset = fs.statSync(rolloutPath).size;
   let partialLine = "";
 
-  console.log(`[xatlas-bridge] Watching thread ${resolvedThreadId}`);
-  console.log(`[xatlas-bridge] Rollout file: ${rolloutPath}`);
-  console.log("[xatlas-bridge] Waiting for new persisted events... (Ctrl+C to stop)");
+  console.log(`[xatlas] Watching thread ${resolvedThreadId}`);
+  console.log(`[xatlas] Rollout file: ${rolloutPath}`);
+  console.log("[xatlas] Waiting for new persisted events... (Ctrl+C to stop)");
 
   const onChange = (current, previous) => {
     if (current.size <= previous.size) {

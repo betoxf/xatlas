@@ -4,7 +4,7 @@
 // Exports: createNotificationsHandler
 // Depends on: none
 
-function createNotificationsHandler({ pushServiceClient, logPrefix = "[xatlas-bridge]" } = {}) {
+function createNotificationsHandler({ pushServiceClient, logPrefix = "[xatlas]" } = {}) {
   function handleNotificationsRequest(rawMessage, sendResponse) {
     let parsed;
     try {

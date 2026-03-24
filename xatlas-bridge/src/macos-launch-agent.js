@@ -1,7 +1,7 @@
 // FILE: macos-launch-agent.js
 // Purpose: Owns macOS-only launchd install/start/stop/status helpers for the background Xatlas bridge.
 // Layer: CLI helper
-// Exports: start/stop/status helpers plus the launchd service runner used by `xatlas-bridge up`.
+// Exports: start/stop/status helpers plus the launchd service runner used by `xatlas up`.
 // Depends on: child_process, fs, os, path, ./bridge, ./daemon-state, ./codex-desktop-refresher, ./qr, ./secure-device-state
 
 const { execFileSync } = require("child_process");
@@ -46,7 +46,7 @@ function runMacOSBridgeService({ env = process.env } = {}) {
       pid: process.pid,
       lastError: message,
     }, { env });
-    console.error(`[xatlas-bridge] ${message}`);
+    console.error(`[xatlas] ${message}`);
     return;
   }
 
@@ -179,15 +179,15 @@ function printMacOSBridgeServiceStatus(options = {}) {
   const bridgeState = status.bridgeStatus?.state || "unknown";
   const connectionStatus = status.bridgeStatus?.connectionStatus || "unknown";
   const pairingCreatedAt = status.pairingSession?.createdAt || "none";
-  console.log(`[xatlas-bridge] Service label: ${status.label}`);
-  console.log(`[xatlas-bridge] Installed: ${status.installed ? "yes" : "no"}`);
-  console.log(`[xatlas-bridge] Launchd loaded: ${status.launchdLoaded ? "yes" : "no"}`);
-  console.log(`[xatlas-bridge] PID: ${status.launchdPid || status.bridgeStatus?.pid || "unknown"}`);
-  console.log(`[xatlas-bridge] Bridge state: ${bridgeState}`);
-  console.log(`[xatlas-bridge] Connection: ${connectionStatus}`);
-  console.log(`[xatlas-bridge] Pairing payload: ${pairingCreatedAt}`);
-  console.log(`[xatlas-bridge] Stdout log: ${status.stdoutLogPath}`);
-  console.log(`[xatlas-bridge] Stderr log: ${status.stderrLogPath}`);
+  console.log(`[xatlas] Service label: ${status.label}`);
+  console.log(`[xatlas] Installed: ${status.installed ? "yes" : "no"}`);
+  console.log(`[xatlas] Launchd loaded: ${status.launchdLoaded ? "yes" : "no"}`);
+  console.log(`[xatlas] PID: ${status.launchdPid || status.bridgeStatus?.pid || "unknown"}`);
+  console.log(`[xatlas] Bridge state: ${bridgeState}`);
+  console.log(`[xatlas] Connection: ${connectionStatus}`);
+  console.log(`[xatlas] Pairing payload: ${pairingCreatedAt}`);
+  console.log(`[xatlas] Stdout log: ${status.stdoutLogPath}`);
+  console.log(`[xatlas] Stderr log: ${status.stderrLogPath}`);
 }
 
 function printMacOSBridgePairingQr({ pairingSession = null, env = process.env, fsImpl = fs } = {}) {

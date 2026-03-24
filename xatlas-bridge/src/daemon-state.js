@@ -70,7 +70,7 @@ function clearPairingSession({ fsImpl = fs, ...options } = {}) {
   removeFile(resolvePairingSessionPath(options), fsImpl);
 }
 
-// Captures the last known service heartbeat so `xatlas-bridge status` does not depend on launchctl output alone.
+// Captures the last known service heartbeat so `xatlas status` does not depend on launchctl output alone.
 function writeBridgeStatus(status, { now = () => Date.now(), ...options } = {}) {
   writeJsonFile(resolveBridgeStatusPath(options), {
     ...status,

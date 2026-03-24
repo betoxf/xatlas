@@ -1,29 +1,51 @@
-# xatlas
+# xatlas CLE
 
-xatlas is the current evolution of the old operator-manager idea: a native workspace for running and supervising AI agents across your projects.
+xatlas CLE is the public CLI/runtime layer for xatlas. It starts the local service, prints the pairing QR, reconnects to the relay, and forwards activity into the native xatlas macOS app.
 
-The Mac-side command runtime is **xatlas CLE**: the xatlas Command Line Environment. It is the terminal-facing bridge/runtime layer that pairs with the desktop app, relay, and iPhone client.
-
-## Components
-
-- `xatlas-app/`: native macOS workspace and MCP server
-- `xatlas-bridge/`: xatlas CLE bridge/runtime package
-- `relay/`: self-hostable relay for pairing and trusted reconnect
-- `xatlas-ios/`: iPhone companion app
-- `vscode-extension/`: legacy VS Code surface still being migrated under the xatlas brand
-
-## Quick Start
+## Install
 
 ```bash
-cd xatlas-app
-swift build
-./scripts/launch-app.sh
+brew tap betoxf/tap
+brew install betoxf/tap/xatlas
 ```
 
-For the bridge/runtime package:
+After install:
+
+```bash
+xatlas up
+```
+
+The package keeps `xatlas-cle` and `xatlas-bridge` as compatibility aliases, but `xatlas` is the primary command name now.
+
+## Commands
+
+- `xatlas up`: start the normal runtime flow and print pairing information when needed
+- `xatlas run`: run the foreground runtime directly
+- `xatlas start`: install or start the macOS background service
+- `xatlas stop`: stop the macOS background service
+- `xatlas status`: show the macOS background service state
+- `xatlas reset-pairing`: clear local pairing state and require a fresh QR bootstrap
+- `xatlas resume`: reopen the last active thread
+- `xatlas watch [threadId]`: tail the persisted rollout for a thread
+
+## Repo Notes
+
+- `xatlas-bridge/` is the current public CLI/runtime package
+- `relay/` is optional and only matters if you want to self-host pairing/reconnect
+- `xatlas-ios/` is still in progress and is not part of the main install story yet
+- `tmux/` and `ghostty/` are vendored sources, not something you need to install separately for the Homebrew flow
+
+## Source Checkout
 
 ```bash
 cd xatlas-bridge
 npm install
-npm start
+node ./bin/xatlas-bridge.js up
 ```
+
+Useful environment variables:
+
+- `XATLAS_RELAY`: override the relay URL used by the runtime
+- `XATLAS_PUSH_SERVICE_URL`: point completion pushes at a custom service
+- `XATLAS_REFRESH_ENABLED`: enable desktop refresh hooks for the macOS app
+- `XATLAS_MCP_PORT`: force the xatlas macOS app MCP port when needed

@@ -51,8 +51,8 @@ function startBridge({
   const config = explicitConfig || readBridgeConfig();
   const relayBaseUrl = config.relayUrl.replace(/\/+$/, "");
   if (!relayBaseUrl) {
-    console.error("[xatlas-bridge] No relay URL configured.");
-    console.error("[xatlas-bridge] In a source checkout, run ./run-local-xatlas.sh or set XATLAS_RELAY.");
+    console.error("[xatlas] No relay URL configured.");
+    console.error("[xatlas] In a source checkout, run ./run-local-xatlas.sh or set XATLAS_RELAY.");
     process.exit(1);
   }
 
@@ -60,7 +60,7 @@ function startBridge({
   try {
     deviceState = loadOrCreateBridgeDeviceState();
   } catch (error) {
-    console.error(`[xatlas-bridge] ${(error && error.message) || "Failed to load the saved bridge pairing state."}`);
+    console.error(`[xatlas] ${(error && error.message) || "Failed to load the saved bridge pairing state."}`);
     process.exit(1);
   }
   const relaySession = resolveBridgeRelaySession(deviceState);
@@ -148,11 +148,11 @@ function startBridge({
   const codex = createCodexTransport({
     endpoint: config.codexEndpoint,
     env: process.env,
-    logPrefix: "[xatlas-bridge]",
+    logPrefix: "[xatlas]",
   });
   const voiceHandler = createVoiceHandler({
     sendCodexRequest,
-    logPrefix: "[xatlas-bridge]",
+    logPrefix: "[xatlas]",
   });
   startBridgeStatusHeartbeat();
   publishBridgeStatus({
@@ -170,11 +170,11 @@ function startBridge({
       lastError: error.message,
     });
     if (config.codexEndpoint) {
-      console.error(`[xatlas-bridge] Failed to connect to Codex endpoint: ${config.codexEndpoint}`);
+      console.error(`[xatlas] Failed to connect to Codex endpoint: ${config.codexEndpoint}`);
     } else {
-      console.error("[xatlas-bridge] Failed to start `codex app-server`.");
-      console.error(`[xatlas-bridge] Launch command: ${codex.describe()}`);
-      console.error("[xatlas-bridge] Make sure the Codex CLI is installed and that the launcher works on this OS.");
+      console.error("[xatlas] Failed to start `codex app-server`.");
+      console.error(`[xatlas] Launch command: ${codex.describe()}`);
+      console.error("[xatlas] Make sure the Codex CLI is installed and that the launcher works on this OS.");
     }
     console.error(error.message);
     process.exit(1);
@@ -243,7 +243,7 @@ function startBridge({
       }
 
       if (hasRelayConnectionGoneStale(lastRelayActivityAt)) {
-        console.warn("[xatlas-bridge] relay heartbeat stalled; forcing reconnect");
+        console.warn("[xatlas] relay heartbeat stalled; forcing reconnect");
         logConnectionStatus("disconnected");
         trackedSocket.terminate();
         return;
@@ -271,7 +271,7 @@ function startBridge({
       pid: process.pid,
       lastError: "",
     });
-    console.log(`[xatlas-bridge] ${status}`);
+    console.log(`[xatlas] ${status}`);
   }
 
   // Retries the relay socket while preserving the active Codex process and session id.

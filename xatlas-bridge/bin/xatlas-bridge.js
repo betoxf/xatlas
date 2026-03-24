@@ -20,6 +20,7 @@ const {
 } = require("../src");
 const { version } = require("../package.json");
 
+const CLI_NAME = "xatlas";
 const command = process.argv[2] || "up";
 
 void main();
@@ -63,14 +64,14 @@ async function main() {
     await startMacOSBridgeService({
       waitForPairing: false,
     });
-    console.log("[xatlas-bridge] macOS bridge service is running.");
+    console.log("[xatlas] macOS bridge service is running.");
     return;
   }
 
   if (command === "stop") {
     assertMacOSCommand(command);
     stopMacOSBridgeService();
-    console.log("[xatlas-bridge] macOS bridge service stopped.");
+    console.log("[xatlas] macOS bridge service stopped.");
     return;
   }
 
@@ -84,13 +85,13 @@ async function main() {
     try {
       if (process.platform === "darwin") {
         resetMacOSBridgePairing();
-        console.log("[xatlas-bridge] Stopped the macOS bridge service and cleared the saved pairing state. Run `xatlas-bridge up` to pair again.");
+        console.log(`[xatlas] Stopped the macOS bridge service and cleared the saved pairing state. Run \`${CLI_NAME} up\` to pair again.`);
       } else {
         resetBridgePairing();
-        console.log("[xatlas-bridge] Cleared the saved pairing state. Run `xatlas-bridge up` to pair again.");
+        console.log(`[xatlas] Cleared the saved pairing state. Run \`${CLI_NAME} up\` to pair again.`);
       }
     } catch (error) {
-      console.error(`[xatlas-bridge] ${(error && error.message) || "Failed to clear the saved pairing state."}`);
+      console.error(`[xatlas] ${(error && error.message) || "Failed to clear the saved pairing state."}`);
       process.exit(1);
     }
     return;
@@ -100,10 +101,10 @@ async function main() {
     try {
       const state = openLastActiveThread();
       console.log(
-        `[xatlas-bridge] Opened last active thread: ${state.threadId} (${state.source || "unknown"})`
+        `[xatlas] Opened last active thread: ${state.threadId} (${state.source || "unknown"})`
       );
     } catch (error) {
-      console.error(`[xatlas-bridge] ${(error && error.message) || "Failed to reopen the last thread."}`);
+      console.error(`[xatlas] ${(error && error.message) || "Failed to reopen the last thread."}`);
       process.exit(1);
     }
     return;
@@ -113,7 +114,7 @@ async function main() {
     try {
       watchThreadRollout(process.argv[3] || "");
     } catch (error) {
-      console.error(`[xatlas-bridge] ${(error && error.message) || "Failed to watch the thread rollout."}`);
+      console.error(`[xatlas] ${(error && error.message) || "Failed to watch the thread rollout."}`);
       process.exit(1);
     }
     return;
@@ -121,8 +122,8 @@ async function main() {
 
   console.error(`Unknown command: ${command}`);
   console.error(
-    "Usage: xatlas-bridge up | xatlas-bridge run | xatlas-bridge start | xatlas-bridge stop | xatlas-bridge status | "
-    + "remodex reset-pairing | remodex resume | remodex watch [threadId] | remodex --version"
+    `Usage: ${CLI_NAME} up | ${CLI_NAME} run | ${CLI_NAME} start | ${CLI_NAME} stop | ${CLI_NAME} status | `
+    + `${CLI_NAME} reset-pairing | ${CLI_NAME} resume | ${CLI_NAME} watch [threadId] | ${CLI_NAME} --version`
   );
   process.exit(1);
 }
@@ -132,7 +133,7 @@ function assertMacOSCommand(name) {
     return;
   }
 
-  console.error(`[xatlas-bridge] \`${name}\` is only available on macOS. Use \`xatlas-bridge up\` or \`xatlas-bridge run\` for the foreground bridge on this OS.`);
+  console.error(`[xatlas] \`${name}\` is only available on macOS. Use \`${CLI_NAME} up\` or \`${CLI_NAME} run\` for the foreground bridge on this OS.`);
   process.exit(1);
 }
 
