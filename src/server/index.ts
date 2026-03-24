@@ -344,6 +344,10 @@ export function getActivePort(): number | null {
   return activePort;
 }
 
+export function isConnectedToExistingServer(): boolean {
+  return connectedToExisting;
+}
+
 export function disposeStatusBar(): void {
   if (statusBarItem) {
     statusBarItem.dispose();
