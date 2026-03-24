@@ -5,12 +5,18 @@ import Network
 /// Uses NWListener for a lightweight, dependency-free approach.
 /// When remote access is enabled, advertises via Bonjour and serves REST endpoints for the iOS companion app.
 final class MCPServer: @unchecked Sendable {
+    private struct MCPSession {
+        let protocolVersion: String
+    }
+
     static let shared = MCPServer()
     private var listener: NWListener?
     private let handler = MCPHandler()
     private let preferredPort: UInt16
     private(set) var boundPort: UInt16?
     private let stateFileURL: URL
+    private let mcpSessionQueue = DispatchQueue(label: "com.xatlas.mcp.sessions")
+    private var mcpSessions: [String: MCPSession] = [:]
 
     private init() {
         if let envPort = ProcessInfo.processInfo.environment["XATLAS_MCP_PORT"],
@@ -33,7 +39,13 @@ final class MCPServer: @unchecked Sendable {
         for candidate in candidatePorts {
             do {
                 let params = NWParameters.tcp
-                listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: candidate)!)
+                let port = NWEndpoint.Port(rawValue: candidate)!
+                if AppPreferences.shared.remoteAccessEnabled {
+                    listener = try NWListener(using: params, on: port)
+                } else {
+                    params.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port)
+                    listener = try NWListener(using: params)
+                }
                 listener?.newConnectionHandler = { [weak self] conn in
                     self?.handleConnection(conn)
                 }
@@ -48,7 +60,7 @@ final class MCPServer: @unchecked Sendable {
                 listener?.start(queue: .global(qos: .userInitiated))
                 boundPort = candidate
                 persistState(port: candidate)
-                print("[MCP] Server listening on \(AppPreferences.shared.remoteAccessEnabled ? "0.0.0.0" : "localhost"):\(candidate)")
+                print("[MCP] Server listening on \(AppPreferences.shared.remoteAccessEnabled ? "0.0.0.0" : "127.0.0.1"):\(candidate)")
                 return
             } catch {
                 listener?.cancel()
@@ -63,6 +75,9 @@ final class MCPServer: @unchecked Sendable {
         listener?.cancel()
         listener = nil
         boundPort = nil
+        mcpSessionQueue.sync {
+            mcpSessions.removeAll()
+        }
         clearPersistedState()
     }
 
@@ -182,44 +197,185 @@ final class MCPServer: @unchecked Sendable {
         sendResponse(connection: connection, status: 404, body: "Not Found")
     }
 
-    // MARK: - MCP protocol (existing behavior)
+    // MARK: - MCP protocol
 
     private func handleMCPRequest(method: String, headers: [String: String], body: String?, connection: NWConnection) {
+        guard allowsLocalMCPAccess(connection) else {
+            sendResponse(connection: connection, status: 403, body: "{\"error\":\"mcp endpoint is only available from localhost\"}")
+            return
+        }
+
         if method == "GET" {
-            let sessionHeader = headers["mcp-session-id"].map { ["MCP-Session-Id": $0] } ?? [:]
+            guard let sessionID = headers["mcp-session-id"], mcpSession(for: sessionID) != nil else {
+                sendResponse(connection: connection, status: 400, body: "{\"error\":\"mcp session required\"}")
+                return
+            }
+
             sendResponse(
                 connection: connection,
-                status: 200,
-                body: ": connected\n\n",
-                contentType: "text/event-stream",
-                headers: sessionHeader.merging([
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no"
-                ]) { _, new in new }
+                status: 405,
+                body: "{\"error\":\"streamable HTTP GET streams are not implemented\"}",
+                headers: [
+                    "Allow": "POST, DELETE",
+                    "MCP-Session-Id": sessionID,
+                ]
             )
             return
         }
 
         if method == "DELETE" {
-            sendResponse(connection: connection, status: 200, body: "", headers: headers["mcp-session-id"].map { ["MCP-Session-Id": $0] } ?? [:])
+            guard let sessionID = headers["mcp-session-id"] else {
+                sendResponse(connection: connection, status: 400, body: "{\"error\":\"mcp session required\"}")
+                return
+            }
+            guard let session = mcpSession(for: sessionID) else {
+                sendResponse(connection: connection, status: 404, body: "{\"error\":\"mcp session not found\"}")
+                return
+            }
+
+            removeMCPSession(id: sessionID)
+            sendResponse(
+                connection: connection,
+                status: 200,
+                body: "",
+                headers: [
+                    "MCP-Session-Id": sessionID,
+                    "MCP-Protocol-Version": session.protocolVersion,
+                ]
+            )
             return
         }
 
         if method == "POST" {
-            if let bodyStr = body, !bodyStr.isEmpty {
+            guard let bodyStr = body, !bodyStr.isEmpty else {
+                sendResponse(connection: connection, status: 400, body: "No body")
+                return
+            }
+
+            guard let request = decodeMCPRequest(from: bodyStr) else {
                 switch handler.handle(json: bodyStr) {
-                case .json(let responseBody, let headers):
-                    sendResponse(connection: connection, status: 200, body: responseBody, headers: headers)
+                case .json(let responseBody, let responseHeaders):
+                    sendResponse(connection: connection, status: 200, body: responseBody, headers: responseHeaders)
                 case .accepted:
                     sendResponse(connection: connection, status: 202, body: "")
                 }
-            } else {
-                sendResponse(connection: connection, status: 400, body: "No body")
+                return
             }
+
+            if request.method == "initialize" {
+                handleMCPInitialize(request: request, headers: headers, connection: connection)
+                return
+            }
+
+            guard let sessionID = headers["mcp-session-id"] else {
+                sendResponse(connection: connection, status: 400, body: "{\"error\":\"mcp session required\"}")
+                return
+            }
+            guard let session = mcpSession(for: sessionID) else {
+                sendResponse(connection: connection, status: 404, body: "{\"error\":\"mcp session not found\"}")
+                return
+            }
+            if let headerProtocolVersion = headers["mcp-protocol-version"],
+               headerProtocolVersion != session.protocolVersion {
+                sendResponse(connection: connection, status: 400, body: "{\"error\":\"mcp protocol version mismatch\"}")
+                return
+            }
+
+            respondToMCPRequest(
+                disposition: handler.handle(
+                    request: request,
+                    context: .init(protocolVersion: session.protocolVersion)
+                ),
+                connection: connection,
+                sessionID: sessionID,
+                protocolVersion: session.protocolVersion
+            )
             return
         }
 
-        sendResponse(connection: connection, status: 404, body: "Not Found")
+        sendResponse(
+            connection: connection,
+            status: 405,
+            body: "{\"error\":\"method not allowed\"}",
+            headers: ["Allow": "GET, POST, DELETE"]
+        )
+    }
+
+    private func handleMCPInitialize(request: JSONRPCRequest, headers: [String: String], connection: NWConnection) {
+        if headers["mcp-session-id"] != nil {
+            sendResponse(connection: connection, status: 400, body: "{\"error\":\"initialize requests must not include mcp-session-id\"}")
+            return
+        }
+
+        let requestedProtocolVersion = request.params?["protocolVersion"]?.value as? String
+        guard let protocolVersion = handler.protocolVersion(for: request) else {
+            sendResponse(
+                connection: connection,
+                status: 200,
+                body: handler.unsupportedProtocolVersionResponse(id: request.id, requestedVersion: requestedProtocolVersion)
+            )
+            return
+        }
+
+        let sessionID = createMCPSession(protocolVersion: protocolVersion)
+        respondToMCPRequest(
+            disposition: handler.handle(
+                request: request,
+                context: .init(protocolVersion: protocolVersion)
+            ),
+            connection: connection,
+            sessionID: sessionID,
+            protocolVersion: protocolVersion
+        )
+    }
+
+    private func respondToMCPRequest(
+        disposition: MCPHandler.ResponseDisposition,
+        connection: NWConnection,
+        sessionID: String,
+        protocolVersion: String
+    ) {
+        let baseHeaders = [
+            "MCP-Session-Id": sessionID,
+            "MCP-Protocol-Version": protocolVersion,
+        ]
+
+        switch disposition {
+        case .json(let responseBody, let responseHeaders):
+            sendResponse(
+                connection: connection,
+                status: 200,
+                body: responseBody,
+                headers: responseHeaders.merging(baseHeaders) { _, new in new }
+            )
+        case .accepted:
+            sendResponse(connection: connection, status: 202, body: "", headers: baseHeaders)
+        }
+    }
+
+    private func decodeMCPRequest(from body: String) -> JSONRPCRequest? {
+        guard let data = body.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(JSONRPCRequest.self, from: data)
+    }
+
+    private func createMCPSession(protocolVersion: String) -> String {
+        let sessionID = UUID().uuidString
+        mcpSessionQueue.sync {
+            mcpSessions[sessionID] = MCPSession(protocolVersion: protocolVersion)
+        }
+        return sessionID
+    }
+
+    private func mcpSession(for sessionID: String) -> MCPSession? {
+        mcpSessionQueue.sync {
+            mcpSessions[sessionID]
+        }
+    }
+
+    private func removeMCPSession(id sessionID: String) {
+        _ = mcpSessionQueue.sync {
+            mcpSessions.removeValue(forKey: sessionID)
+        }
     }
 
     // MARK: - Pairing
@@ -373,6 +529,29 @@ final class MCPServer: @unchecked Sendable {
         return headers
     }
 
+    private func allowsLocalMCPAccess(_ connection: NWConnection) -> Bool {
+        if Self.isLoopbackEndpoint(connection.endpoint) {
+            return true
+        }
+        if let remoteEndpoint = connection.currentPath?.remoteEndpoint,
+           Self.isLoopbackEndpoint(remoteEndpoint) {
+            return true
+        }
+        return false
+    }
+
+    private static func isLoopbackEndpoint(_ endpoint: NWEndpoint) -> Bool {
+        guard case let .hostPort(host, _) = endpoint else {
+            return false
+        }
+        let value = String(describing: host).lowercased()
+        return value == "127.0.0.1"
+            || value == "::1"
+            || value == "::ffff:127.0.0.1"
+            || value == "localhost"
+            || value.hasSuffix(".localhost")
+    }
+
     private func sendResponse(
         connection: NWConnection,
         status: Int,
@@ -388,6 +567,7 @@ final class MCPServer: @unchecked Sendable {
         case 401: statusText = "Unauthorized"
         case 403: statusText = "Forbidden"
         case 404: statusText = "Not Found"
+        case 405: statusText = "Method Not Allowed"
         case 500: statusText = "Internal Server Error"
         default: statusText = "Error"
         }

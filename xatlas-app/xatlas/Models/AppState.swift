@@ -47,8 +47,16 @@ final class AppState: @unchecked Sendable {
     var projects: [Project] = []
     var selectedSection: WorkspaceSection = .projects
     var selectedProject: Project?
-    var selectedTab: TabItem?
-    var tabs: [TabItem] = []
+    var selectedTab: TabItem? {
+        didSet {
+            persistActiveProjectTabState()
+        }
+    }
+    var tabs: [TabItem] = [] {
+        didSet {
+            persistActiveProjectTabState()
+        }
+    }
     var isCommandBarFocused = false
     var isSettingsPresented = false
     var sidebarWidth: CGFloat = 220
@@ -67,6 +75,7 @@ final class AppState: @unchecked Sendable {
     // Per-project tab storage
     private var projectTabs: [UUID: [TabItem]] = [:]
     private var projectSelectedTab: [UUID: TabItem] = [:]
+    private var projectQuickViewSelectedSessionID: [UUID: String] = [:]
 
     private init() {
         observeTerminalSessions()
@@ -139,6 +148,7 @@ final class AppState: @unchecked Sendable {
     func removeProject(_ project: Project) {
         projectTabs.removeValue(forKey: project.id)
         projectSelectedTab.removeValue(forKey: project.id)
+        projectQuickViewSelectedSessionID.removeValue(forKey: project.id)
         projects.removeAll { $0.id == project.id }
         TerminalService.shared.rehydrateSessions(projects: projects)
         if selectedProject?.id == project.id {
@@ -169,8 +179,7 @@ final class AppState: @unchecked Sendable {
         }
 
         if let current = selectedProject {
-            projectTabs[current.id] = tabs
-            projectSelectedTab[current.id] = selectedTab
+            persistTabState(for: current.id, tabs: tabs, selectedTab: selectedTab)
         }
 
         selectedProject = project
@@ -181,7 +190,7 @@ final class AppState: @unchecked Sendable {
                 selectedTab = nil
             } else {
                 tabs = saved
-                selectedTab = projectSelectedTab[project.id] ?? saved.first
+                selectedTab = restoredTab(from: projectSelectedTab[project.id], within: saved) ?? saved.first
             }
         } else {
             let recovered = TerminalService.shared.sessionsForProject(project.id)
@@ -194,8 +203,7 @@ final class AppState: @unchecked Sendable {
                 tabs = []
                 selectedTab = nil
             }
-            projectTabs[project.id] = tabs
-            projectSelectedTab[project.id] = selectedTab
+            persistTabState(for: project.id, tabs: tabs, selectedTab: selectedTab)
         }
     }
 
@@ -223,17 +231,29 @@ final class AppState: @unchecked Sendable {
     func closeTerminalSession(_ sessionID: String, killTmux: Bool = true) -> Bool {
         guard let session = TerminalService.shared.session(id: sessionID) else { return false }
 
+        let replacementSelection = selectedTab?.id == sessionID
+            ? replacementTab(afterRemoving: sessionID, from: tabs)
+            : selectedTab
         tabs.removeAll { $0.id == sessionID }
         if selectedTab?.id == sessionID {
-            selectedTab = tabs.last
+            selectedTab = replacementSelection
         }
 
         for projectID in projectTabs.keys {
             guard var storedTabs = projectTabs[projectID] else { continue }
+            let replacementSelection = projectSelectedTab[projectID]?.id == sessionID
+                ? replacementTab(afterRemoving: sessionID, from: storedTabs)
+                : restoredTab(from: projectSelectedTab[projectID], within: storedTabs)
+            let replacementQuickViewSessionID = projectQuickViewSelectedSessionID[projectID] == sessionID
+                ? replacementTerminalSessionID(afterRemoving: sessionID, from: storedTabs)
+                : projectQuickViewSelectedSessionID[projectID]
             storedTabs.removeAll { $0.id == sessionID }
             projectTabs[projectID] = storedTabs
             if projectSelectedTab[projectID]?.id == sessionID {
-                projectSelectedTab[projectID] = storedTabs.last
+                projectSelectedTab[projectID] = replacementSelection
+            }
+            if projectQuickViewSelectedSessionID[projectID] == sessionID {
+                projectQuickViewSelectedSessionID[projectID] = replacementQuickViewSessionID
             }
         }
 
@@ -298,10 +318,6 @@ final class AppState: @unchecked Sendable {
         let tab = makeTerminalTab(for: selectedProject?.id, workingDirectory: selectedProject?.path)
         openTab(tab)
         selectedSection = .projects
-        if let projectID = selectedProject?.id {
-            projectTabs[projectID] = tabs
-            projectSelectedTab[projectID] = tab
-        }
         return tab
     }
 
@@ -339,6 +355,14 @@ final class AppState: @unchecked Sendable {
         dashboardQuickViewProjectID = nil
     }
 
+    func quickViewSelectedSessionID(for projectID: UUID) -> String? {
+        projectQuickViewSelectedSessionID[projectID]
+    }
+
+    func setQuickViewSelectedSessionID(_ sessionID: String?, for projectID: UUID) {
+        projectQuickViewSelectedSessionID[projectID] = sessionID
+    }
+
     @discardableResult
     func runProjectBrief(for project: Project, provider: AISyncProvider? = nil) -> String? {
         let command = AISyncService.shared.projectBriefCommand(for: project.path, provider: provider)
@@ -354,9 +378,12 @@ final class AppState: @unchecked Sendable {
         case .terminal(let sessionID):
             _ = closeTerminalSession(sessionID, killTmux: true)
         case .editor:
+            let replacementSelection = selectedTab?.id == tab.id
+                ? replacementTab(afterRemoving: tab.id, from: tabs)
+                : selectedTab
             tabs.removeAll { $0.id == tab.id }
             if selectedTab?.id == tab.id {
-                selectedTab = tabs.last
+                selectedTab = replacementSelection
             }
         }
     }
@@ -463,6 +490,52 @@ final class AppState: @unchecked Sendable {
     private func makeTerminalTab(for projectID: UUID?, workingDirectory: String?) -> TabItem {
         let session = TerminalService.shared.createSession(projectID: projectID, workingDirectory: workingDirectory)
         return TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
+    }
+
+    private func persistActiveProjectTabState() {
+        persistTabState(for: selectedProject?.id, tabs: tabs, selectedTab: selectedTab)
+    }
+
+    private func persistTabState(for projectID: UUID?, tabs: [TabItem], selectedTab: TabItem?) {
+        guard let projectID else { return }
+        projectTabs[projectID] = tabs
+        let resolvedSelection = restoredTab(from: selectedTab, within: tabs)
+        projectSelectedTab[projectID] = resolvedSelection
+        if case .terminal(let sessionID) = resolvedSelection?.kind {
+            projectQuickViewSelectedSessionID[projectID] = sessionID
+        }
+    }
+
+    private func restoredTab(from selectedTab: TabItem?, within tabs: [TabItem]) -> TabItem? {
+        guard let selectedTab else { return nil }
+        return tabs.first(where: { $0.id == selectedTab.id })
+    }
+
+    private func replacementTab(afterRemoving tabID: String, from tabs: [TabItem]) -> TabItem? {
+        guard let removedIndex = tabs.firstIndex(where: { $0.id == tabID }) else {
+            return tabs.last
+        }
+
+        var remainingTabs = tabs
+        remainingTabs.remove(at: removedIndex)
+        guard !remainingTabs.isEmpty else { return nil }
+        return remainingTabs[min(removedIndex, remainingTabs.count - 1)]
+    }
+
+    private func replacementTerminalSessionID(afterRemoving sessionID: String, from tabs: [TabItem]) -> String? {
+        let terminalIDs = tabs.compactMap { tab -> String? in
+            guard case .terminal(let candidateSessionID) = tab.kind else { return nil }
+            return candidateSessionID
+        }
+
+        guard let removedIndex = terminalIDs.firstIndex(of: sessionID) else {
+            return terminalIDs.last
+        }
+
+        var remainingTerminalIDs = terminalIDs
+        remainingTerminalIDs.remove(at: removedIndex)
+        guard !remainingTerminalIDs.isEmpty else { return nil }
+        return remainingTerminalIDs[min(removedIndex, remainingTerminalIDs.count - 1)]
     }
 }
 

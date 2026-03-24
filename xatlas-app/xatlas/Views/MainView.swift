@@ -197,7 +197,9 @@ struct ToolbarView: View {
                         state.dashboardSearchQuery = ""
                     }
                 }
-                ToolbarCircleButton(icon: "square.and.arrow.up") {}
+                ToolbarCircleButton(icon: "square.and.arrow.up") {
+                    AppUpdateService.shared.performPrimaryAction(interactive: true)
+                }
                 ToolbarCircleButton(icon: "ellipsis") {}
 
                 if isDashboard {

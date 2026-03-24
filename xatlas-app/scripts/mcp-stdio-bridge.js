@@ -9,6 +9,7 @@ const fallbackUrl = process.env.XATLAS_MCP_URL || 'http://127.0.0.1:9012/mcp';
 const stateFile = process.env.XATLAS_MCP_STATE_FILE || `${process.env.HOME || ''}/Library/Application Support/xatlas/mcp-server.json`;
 const logPath = process.env.XATLAS_MCP_BRIDGE_LOG || '';
 let sessionId = process.env.XATLAS_MCP_SESSION_ID || '';
+let protocolVersion = process.env.XATLAS_MCP_PROTOCOL_VERSION || '';
 let inputBuffer = Buffer.alloc(0);
 let queue = Promise.resolve();
 
@@ -71,6 +72,11 @@ async function forwardMessage(body) {
     sessionId = Array.isArray(responseSessionId) ? responseSessionId[0] : responseSessionId;
   }
 
+  const responseProtocolVersion = extractProtocolVersion(response);
+  if (responseProtocolVersion) {
+    protocolVersion = responseProtocolVersion;
+  }
+
   if (response.statusCode === 202 || response.statusCode === 204) {
     return;
   }
@@ -107,6 +113,9 @@ function postMessage(body, targetUrl) {
 
   if (sessionId) {
     headers['mcp-session-id'] = sessionId;
+  }
+  if (protocolVersion) {
+    headers['mcp-protocol-version'] = protocolVersion;
   }
 
   return new Promise((resolve, reject) => {
@@ -171,6 +180,21 @@ function writeFramedMessage(body) {
   const payload = Buffer.from(body, 'utf8');
   process.stdout.write(`Content-Length: ${payload.length}\r\n\r\n`);
   process.stdout.write(payload);
+}
+
+function extractProtocolVersion(response) {
+  const headerValue = response.headers['mcp-protocol-version'];
+  if (headerValue) {
+    return Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  }
+
+  try {
+    const parsed = JSON.parse(response.body);
+    const version = parsed?.result?.protocolVersion;
+    return typeof version === 'string' && version ? version : '';
+  } catch {
+    return '';
+  }
 }
 
 function logEvent(message) {

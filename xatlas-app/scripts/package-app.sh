@@ -7,12 +7,14 @@ BUILD_DIR="$ROOT/.build/arm64-apple-macosx/release"
 APP_DIR="$ROOT/.dist/$APP_NAME"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
+ICON_FILE="$ROOT/Resources/AppIcon.icns"
 BRIDGE_DIR="$ROOT/../xatlas-bridge"
 RELAY_DIR="$ROOT/../relay"
 PLIST="$APP_DIR/Contents/Info.plist"
 EXECUTABLE="$BUILD_DIR/xatlas"
 
 cd "$ROOT"
+"$ROOT/scripts/sync-brand-assets.sh" >&2
 swift build -c release >&2
 
 rm -rf "$APP_DIR"
@@ -31,6 +33,8 @@ cat >"$PLIST" <<'PLIST'
     <string>com.xatlas.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleName</key>
     <string>xatlas</string>
     <key>CFBundlePackageType</key>
@@ -49,6 +53,10 @@ PLIST
 
 cp "$EXECUTABLE" "$MACOS_DIR/xatlas"
 chmod +x "$MACOS_DIR/xatlas"
+
+if [ -f "$ICON_FILE" ]; then
+    cp "$ICON_FILE" "$RESOURCES_DIR/AppIcon.icns"
+fi
 
 if [ -d "$BRIDGE_DIR" ]; then
     cp -R "$BRIDGE_DIR" "$RESOURCES_DIR/xatlas-bridge"

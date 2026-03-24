@@ -17,7 +17,7 @@ struct WorkspaceSectionView: View {
                 case .mcp:
                     catalogSection(
                         title: "MCP Servers",
-                        subtitle: "Global and project-scoped servers discovered from Codex, Claude, and .mcp.json",
+                        subtitle: "Global, project, and plugin-provided servers discovered from Codex, Claude, and .mcp.json",
                         count: snapshot.mcpServers.count
                     ) {
                         ForEach(snapshot.mcpServers) { server in
@@ -27,7 +27,7 @@ struct WorkspaceSectionView: View {
                 case .skills:
                     catalogSection(
                         title: "Skills",
-                        subtitle: "Reusable skill packs discovered from user and project folders",
+                        subtitle: "Codex skills, Claude skills, and plugin-provided skill packs discovered from config and local folders",
                         count: snapshot.skills.count
                     ) {
                         ForEach(snapshot.skills) { skill in
@@ -38,7 +38,7 @@ struct WorkspaceSectionView: View {
                     operatorSection
                     catalogSection(
                         title: "Automations",
-                        subtitle: "Claude custom commands and project-level automation entry points",
+                        subtitle: "Claude commands, agents, and hooks discovered from user, project, and plugin installs",
                         count: snapshot.automations.count
                     ) {
                         ForEach(snapshot.automations) { automation in
@@ -204,6 +204,14 @@ struct WorkspaceSectionView: View {
             ]
             if let projectPath = state.selectedProject?.path {
                 actions.append(
+                    CatalogQuickAction(title: "Project Codex Config") {
+                        state.openTextFile(
+                            path: projectPath + "/.codex/config.toml",
+                            initialContent: "# Project Codex overrides\n"
+                        )
+                    }
+                )
+                actions.append(
                     CatalogQuickAction(title: "Project .mcp.json") {
                         state.openTextFile(
                             path: projectPath + "/.mcp.json",
@@ -220,6 +228,9 @@ struct WorkspaceSectionView: View {
                 },
                 CatalogQuickAction(title: "Claude Skills") {
                     state.revealInFinder(path: home + "/.claude/skills", createIfMissing: true, isDirectory: true)
+                },
+                CatalogQuickAction(title: "Claude Plugins") {
+                    state.revealInFinder(path: home + "/.claude/plugins", createIfMissing: true, isDirectory: true)
                 }
             ]
             if let projectPath = state.selectedProject?.path {
@@ -234,12 +245,23 @@ struct WorkspaceSectionView: View {
             var actions = [
                 CatalogQuickAction(title: "Claude Commands") {
                     state.revealInFinder(path: home + "/.claude/commands", createIfMissing: true, isDirectory: true)
+                },
+                CatalogQuickAction(title: "Claude Agents") {
+                    state.revealInFinder(path: home + "/.claude/agents", createIfMissing: true, isDirectory: true)
+                },
+                CatalogQuickAction(title: "Claude Settings") {
+                    state.openTextFile(path: home + "/.claude/settings.json", initialContent: "{\n  \"hooks\": {}\n}\n")
                 }
             ]
             if let projectPath = state.selectedProject?.path {
                 actions.append(
                     CatalogQuickAction(title: "Project Commands") {
                         state.revealInFinder(path: projectPath + "/.claude/commands", createIfMissing: true, isDirectory: true)
+                    }
+                )
+                actions.append(
+                    CatalogQuickAction(title: "Project Agents") {
+                        state.revealInFinder(path: projectPath + "/.claude/agents", createIfMissing: true, isDirectory: true)
                     }
                 )
             }
@@ -381,15 +403,17 @@ private struct MCPServerRow: View {
     let refresh: () -> Void
 
     var body: some View {
+        let extraActions: [CardAction] = record.origin == .plugin ? [] : [
+            CardAction(title: "Delete", role: .destructive) {
+                _ = AgentCatalogService.shared.deleteMCP(record)
+                refresh()
+            }
+        ]
+
         CatalogCard(
             state: state,
             sourcePath: record.sourcePath,
-            extraActions: [
-                CardAction(title: "Delete", role: .destructive) {
-                    _ = AgentCatalogService.shared.deleteMCP(record)
-                    refresh()
-                }
-            ]
+            extraActions: extraActions
         ) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -482,15 +506,17 @@ private struct SkillRow: View {
     let refresh: () -> Void
 
     var body: some View {
+        let extraActions: [CardAction] = record.origin == .folder ? [
+            CardAction(title: "Delete", role: .destructive) {
+                _ = AgentCatalogService.shared.deleteSkill(record)
+                refresh()
+            }
+        ] : []
+
         CatalogCard(
             state: state,
             sourcePath: record.sourcePath,
-            extraActions: [
-                CardAction(title: "Delete", role: .destructive) {
-                    _ = AgentCatalogService.shared.deleteSkill(record)
-                    refresh()
-                }
-            ]
+            extraActions: extraActions
         ) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -499,6 +525,7 @@ private struct SkillRow: View {
                             .font(.system(size: 13, weight: .semibold))
                         ScopeBadge(text: record.provider.label)
                         ScopeBadge(text: record.scope.label)
+                        ScopeBadge(text: record.category)
                     }
                     Text(record.detailSummary)
                         .font(.system(size: 12))
@@ -518,15 +545,17 @@ private struct AutomationRow: View {
     let refresh: () -> Void
 
     var body: some View {
+        let extraActions: [CardAction] = record.origin == .folder ? [
+            CardAction(title: "Delete", role: .destructive) {
+                _ = AgentCatalogService.shared.deleteAutomation(record)
+                refresh()
+            }
+        ] : []
+
         CatalogCard(
             state: state,
             sourcePath: record.sourcePath,
-            extraActions: [
-                CardAction(title: "Delete", role: .destructive) {
-                    _ = AgentCatalogService.shared.deleteAutomation(record)
-                    refresh()
-                }
-            ]
+            extraActions: extraActions
         ) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -535,6 +564,7 @@ private struct AutomationRow: View {
                             .font(.system(size: 13, weight: .semibold))
                         ScopeBadge(text: record.provider.label)
                         ScopeBadge(text: record.scope.label)
+                        ScopeBadge(text: record.category)
                     }
                     Text(record.detailSummary)
                         .font(.system(size: 12))

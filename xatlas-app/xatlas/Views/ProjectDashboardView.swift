@@ -250,10 +250,18 @@ struct ProjectQuickViewSheet: View {
     let project: Project
     @Bindable var state: AppState
 
+    private struct SessionChipIdentity {
+        let baseTitle: String
+        let ordinal: Int
+    }
+
     @State private var showAllSessions = false
     @State private var sessionDisplayOrder: [String] = []
     @State private var selectedSessionID: String?
     @State private var pendingCloseSessionID: String?
+    @State private var sessionChipIdentities: [String: SessionChipIdentity] = [:]
+    @State private var nextOrdinalByTitle: [String: Int] = [:]
+    @State private var terminalFocusToken = 0
     @State private var dragOffset: CGSize = .zero
     @State private var dragAccumulated: CGSize = .zero
 
@@ -357,6 +365,8 @@ struct ProjectQuickViewSheet: View {
                     ForEach(sessions) { session in
                         Button {
                             selectedSessionID = session.id
+                            state.setQuickViewSelectedSessionID(session.id, for: project.id)
+                            requestTerminalFocus()
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "terminal")
@@ -386,7 +396,9 @@ struct ProjectQuickViewSheet: View {
                         let tab = state.createTerminal(for: project)
                         if case .terminal(let sessionID) = tab.kind {
                             selectedSessionID = sessionID
+                            state.setQuickViewSelectedSessionID(sessionID, for: project.id)
                             reconcileSessionState()
+                            requestTerminalFocus()
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -404,7 +416,11 @@ struct ProjectQuickViewSheet: View {
             // Terminal area
             Group {
                 if let sessionID = activeSessionID {
-                    StyledTerminalView(sessionID: sessionID, appState: state)
+                    StyledTerminalView(
+                        sessionID: sessionID,
+                        appState: state,
+                        focusToken: terminalFocusToken
+                    )
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "terminal")
@@ -429,6 +445,9 @@ struct ProjectQuickViewSheet: View {
             HStack(spacing: 10) {
                 Button("Open Workspace") {
                     state.switchToProject(project)
+                    if let activeSessionID {
+                        _ = state.openTerminalSession(activeSessionID)
+                    }
                     state.closeProjectQuickView()
                 }
                 .buttonStyle(.plain)
@@ -464,9 +483,14 @@ struct ProjectQuickViewSheet: View {
         .offset(dragOffset)
         .onAppear {
             reconcileSessionState()
+            requestTerminalFocus()
         }
         .onChange(of: state.terminalEventVersion) { _, _ in
             reconcileSessionState()
+        }
+        .onChange(of: activeSessionID) { _, sessionID in
+            state.setQuickViewSelectedSessionID(sessionID, for: project.id)
+            requestTerminalFocus()
         }
         .confirmationDialog(
             "Close running terminal?",
@@ -494,18 +518,42 @@ struct ProjectQuickViewSheet: View {
     private func reconcileSessionState() {
         let liveSessionIDs = Set(allProjectSessions.map(\.id))
         sessionDisplayOrder.removeAll { !liveSessionIDs.contains($0) }
+        sessionChipIdentities = sessionChipIdentities.filter { liveSessionIDs.contains($0.key) }
 
         let knownSessionIDs = Set(sessionDisplayOrder)
         sessionDisplayOrder.append(contentsOf: allProjectSessions
             .filter { !knownSessionIDs.contains($0.id) }
             .sorted(by: sessionCreationOrder)
             .map(\.id))
+        reconcileSessionChipIdentities()
 
         if let selectedSessionID,
            sessions.contains(where: { $0.id == selectedSessionID }) {
             return
         }
+
+        if let rememberedSessionID = state.quickViewSelectedSessionID(for: project.id),
+           sessions.contains(where: { $0.id == rememberedSessionID }) {
+            self.selectedSessionID = rememberedSessionID
+            return
+        }
+
         self.selectedSessionID = sessions.first?.id
+        state.setQuickViewSelectedSessionID(self.selectedSessionID, for: project.id)
+    }
+
+    private func reconcileSessionChipIdentities() {
+        for session in allProjectSessions.sorted(by: sessionCreationOrder) {
+            let title = session.displayTitle
+            if let existing = sessionChipIdentities[session.id],
+               existing.baseTitle == title {
+                continue
+            }
+
+            let ordinal = nextOrdinalByTitle[title] ?? 1
+            sessionChipIdentities[session.id] = SessionChipIdentity(baseTitle: title, ordinal: ordinal)
+            nextOrdinalByTitle[title] = ordinal + 1
+        }
     }
 
     private func requestClose(_ sessionID: String) {
@@ -521,6 +569,7 @@ struct ProjectQuickViewSheet: View {
         _ = state.closeTerminalSession(sessionID, killTmux: true)
         pendingCloseSessionID = nil
         selectedSessionID = nextSessionID
+        state.setQuickViewSelectedSessionID(nextSessionID, for: project.id)
         sessionDisplayOrder.removeAll { $0 == sessionID }
     }
 
@@ -546,12 +595,12 @@ struct ProjectQuickViewSheet: View {
     private func sessionChipTitle(for session: TerminalSession) -> String {
         let peers = sessions.filter { $0.displayTitle == session.displayTitle }
         guard peers.count > 1 else { return session.displayTitle }
+        let ordinal = sessionChipIdentities[session.id]?.ordinal ?? 1
+        return "\(session.displayTitle) \(ordinal)"
+    }
 
-        let orderedPeers = peers.sorted(by: sessionCreationOrder)
-        guard let index = orderedPeers.firstIndex(where: { $0.id == session.id }) else {
-            return session.displayTitle
-        }
-        return "\(session.displayTitle) \(index + 1)"
+    private func requestTerminalFocus() {
+        terminalFocusToken &+= 1
     }
 
     private func rank(for session: TerminalSession) -> Int {

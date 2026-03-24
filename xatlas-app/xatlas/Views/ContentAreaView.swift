@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentAreaView: View {
     @Bindable var state: AppState
     @State private var pendingCloseSessionID: String?
+    @State private var terminalFocusToken = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,6 +49,16 @@ struct ContentAreaView: View {
         } message: {
             Text("This terminal looks active. Closing it will kill the backing tmux session everywhere.")
         }
+        .onAppear(perform: requestTerminalFocusIfNeeded)
+        .onChange(of: state.selectedProject?.id) { _, _ in
+            requestTerminalFocusIfNeeded()
+        }
+        .onChange(of: state.selectedTab?.id) { _, _ in
+            requestTerminalFocusIfNeeded()
+        }
+        .onChange(of: state.projectSurfaceMode) { _, _ in
+            requestTerminalFocusIfNeeded()
+        }
     }
 
     private var tabBar: some View {
@@ -58,7 +69,10 @@ struct ContentAreaView: View {
                         tab: tab,
                         requiresAttention: requiresAttention(for: tab),
                         isSelected: state.selectedTab?.id == tab.id,
-                        onSelect: { state.selectedTab = tab },
+                        onSelect: {
+                            state.selectedTab = tab
+                            requestTerminalFocusIfNeeded()
+                        },
                         onClose: { requestClose(for: tab) }
                     )
                 }
@@ -108,11 +122,20 @@ struct ContentAreaView: View {
         case .terminal(let sessionID):
             StyledTerminalView(
                 sessionID: sessionID,
-                appState: state
+                appState: state,
+                focusToken: terminalFocusToken
             )
         case .editor(let filePath):
             EditorView(filePath: filePath)
         }
+    }
+
+    private func requestTerminalFocusIfNeeded() {
+        guard state.selectedSection == .projects,
+              state.projectSurfaceMode == .workspace,
+              let selectedTab = state.selectedTab,
+              selectedTab.kind.isTerminal else { return }
+        terminalFocusToken &+= 1
     }
 
     private var emptyState: some View {
@@ -154,21 +177,27 @@ private struct TabButton: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: tab.kind.isTerminal ? "terminal" : "doc.text")
-                .font(.system(size: 10))
+            Button(action: onSelect) {
+                HStack(spacing: 4) {
+                    Image(systemName: tab.kind.isTerminal ? "terminal" : "doc.text")
+                        .font(.system(size: 10))
 
-            Text(tab.title)
-                .font(XatlasFont.monoSmall)
-                .lineLimit(1)
+                    Text(tab.title)
+                        .font(XatlasFont.monoSmall)
+                        .lineLimit(1)
 
-            if requiresAttention {
-                Text("1")
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Capsule().fill(.red.opacity(0.78)))
+                    if requiresAttention {
+                        Text("1")
+                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(.red.opacity(0.78)))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.plain)
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
@@ -181,7 +210,6 @@ private struct TabButton: View {
         .padding(.vertical, 4)
         .background(isSelected ? .white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
         .contentShape(Rectangle())
-        .onTapGesture(perform: onSelect)
     }
 }
 

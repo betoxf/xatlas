@@ -31,6 +31,7 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct AppSettingsView: View {
     @Bindable var state: AppState
     @State private var preferences = AppPreferences.shared
+    @State private var updateService = AppUpdateService.shared
     @State private var selectedSection: SettingsSection = .general
 
     var body: some View {
@@ -127,25 +128,45 @@ struct AppSettingsView: View {
     // MARK: - General
 
     private var generalContent: some View {
-        SettingsCard {
-            SettingsRow(title: "Launch mode", subtitle: "How xatlas starts up") {
-                Text("Normal")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 16) {
+            SettingsCard {
+                SettingsRow(title: "Launch mode", subtitle: "How xatlas starts up") {
+                    Text("Normal")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                SettingsRow(title: "Default view", subtitle: "Which view to show on launch") {
+                    Picker("", selection: Binding(
+                        get: { preferences.defaultViewIsDashboard },
+                        set: { preferences.defaultViewIsDashboard = $0 }
+                    )) {
+                        Text("Dashboard").tag(true)
+                        Text("Workspace").tag(false)
+                    }
+                    .labelsHidden()
+                    .frame(width: 130)
+                }
             }
 
-            Divider()
-
-            SettingsRow(title: "Default view", subtitle: "Which view to show on launch") {
-                Picker("", selection: Binding(
-                    get: { preferences.defaultViewIsDashboard },
-                    set: { preferences.defaultViewIsDashboard = $0 }
-                )) {
-                    Text("Dashboard").tag(true)
-                    Text("Workspace").tag(false)
+            SettingsCard {
+                SettingsRow(title: "App update", subtitle: updateService.statusSummary) {
+                    HStack(spacing: 10) {
+                        if updateService.isBusy {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Button(updateService.actionTitle) {
+                            updateService.performPrimaryAction(interactive: true)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(updateService.isBusy ? Color.secondary : Color.accentColor)
+                        .disabled(updateService.isBusy)
+                    }
                 }
-                .labelsHidden()
-                .frame(width: 130)
             }
         }
     }
@@ -298,7 +319,7 @@ struct AppSettingsView: View {
     private var aboutContent: some View {
         SettingsCard {
             SettingsRow(title: "xatlas", subtitle: "Terminal multiplexer with AI orchestration") {
-                Text("v1.0")
+                Text("v\(updateService.currentVersion)")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
             }

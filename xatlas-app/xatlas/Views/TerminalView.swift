@@ -5,6 +5,7 @@ import SwiftTerm
 struct StyledTerminalView: View {
     let sessionID: String
     @Bindable var appState: AppState
+    var focusToken: Int = 0
     @State private var session: TerminalSession?
 
     var body: some View {
@@ -12,7 +13,7 @@ struct StyledTerminalView: View {
             if let session {
                 VStack(spacing: 0) {
                     header(for: session)
-                    NativeTmuxTerminalView(sessionID: sessionID)
+                    NativeTmuxTerminalView(sessionID: sessionID, focusToken: focusToken)
                         .padding(.horizontal, 6)
                         .padding(.bottom, 6)
                 }
@@ -110,6 +111,7 @@ struct StyledTerminalView: View {
 
 private struct NativeTmuxTerminalView: NSViewRepresentable {
     let sessionID: String
+    let focusToken: Int
 
     func makeCoordinator() -> Coordinator {
         Coordinator(sessionID: sessionID)
@@ -134,6 +136,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         configure(terminal)
         context.coordinator.prepareForSessionChange(to: sessionID, in: terminal)
         context.coordinator.attachIfNeeded(terminal)
+        context.coordinator.focusIfNeeded(token: focusToken, in: terminal)
     }
 
     static func dismantleNSView(_ terminal: ManagedLocalProcessTerminalView, coordinator: Coordinator) {
@@ -175,6 +178,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         private var pendingTerminationSessionIDs: [String] = []
         private var inputBuffer = ""
         private var discardingEscapeSequence = false
+        private var lastFocusToken: Int?
 
         init(sessionID: String) {
             self.sessionID = sessionID
@@ -302,6 +306,14 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
                 attachedSessionName = nil
             }
             attachmentInFlight = false
+        }
+
+        func focusIfNeeded(token: Int, in terminal: ManagedLocalProcessTerminalView) {
+            guard lastFocusToken != token else { return }
+            lastFocusToken = token
+            DispatchQueue.main.async {
+                terminal.window?.makeFirstResponder(terminal)
+            }
         }
     }
 }
