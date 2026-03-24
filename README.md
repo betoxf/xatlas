@@ -1,5 +1,7 @@
 # xatlas CLE
 
+This repo is the renamed continuation of the old `xerebro-operator-manager` project.
+
 xatlas CLE is the public CLI/runtime layer for xatlas. It starts the local service, prints the pairing QR, reconnects to the relay, and forwards activity into the native xatlas macOS app.
 
 ## Install
