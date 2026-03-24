@@ -251,20 +251,38 @@ struct ProjectQuickViewSheet: View {
     @Bindable var state: AppState
 
     @State private var showAllSessions = false
+    @State private var sessionDisplayOrder: [String] = []
     @State private var selectedSessionID: String?
     @State private var pendingCloseSessionID: String?
     @State private var dragOffset: CGSize = .zero
     @State private var dragAccumulated: CGSize = .zero
 
-    private var sessions: [TerminalSession] {
+    private var allProjectSessions: [TerminalSession] {
+        TerminalService.shared
+            .sessionsForProject(project.id)
+            .filter { $0.activityState != .exited }
+    }
+
+    private var visibleSessions: [TerminalSession] {
         if showAllSessions {
-            return TerminalService.shared
-                .sessionsForProject(project.id)
-                .filter { $0.activityState != .exited }
-                .sorted(by: sessionPriority)
+            return allProjectSessions.sorted(by: sessionPriority)
         }
 
         return TerminalService.shared.visibleSessionsForProject(project.id, maxDetached: 6)
+    }
+
+    private var sessions: [TerminalSession] {
+        let visibleIDs = Set(visibleSessions.map(\.id))
+        let sessionsByID = Dictionary(uniqueKeysWithValues: visibleSessions.map { ($0.id, $0) })
+        let ordered = sessionDisplayOrder.compactMap { sessionID -> TerminalSession? in
+            guard visibleIDs.contains(sessionID) else { return nil }
+            return sessionsByID[sessionID]
+        }
+        let orderedIDs = Set(ordered.map(\.id))
+        let appended = visibleSessions
+            .filter { !orderedIDs.contains($0.id) }
+            .sorted(by: sessionCreationOrder)
+        return ordered + appended
     }
 
     private var activeSessionID: String? {
@@ -302,7 +320,7 @@ struct ProjectQuickViewSheet: View {
                 if showAllSessions || hiddenSessionCount > 0 {
                     Button(showAllSessions ? "Recent" : "Show All \(totalVisibleSessionCount)") {
                         showAllSessions.toggle()
-                        syncSelectedSession()
+                        reconcileSessionState()
                     }
                     .buttonStyle(.plain)
                     .font(.system(size: 11, weight: .semibold))
@@ -336,14 +354,14 @@ struct ProjectQuickViewSheet: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
+                    ForEach(sessions) { session in
                         Button {
                             selectedSessionID = session.id
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "terminal")
                                     .font(.system(size: 10, weight: .semibold))
-                                Text("\(session.displayTitle) \(index + 1)")
+                                Text(sessionChipTitle(for: session))
                                     .font(.system(size: 11, weight: .semibold))
                                 if session.requiresAttention {
                                     Text("1")
@@ -368,6 +386,7 @@ struct ProjectQuickViewSheet: View {
                         let tab = state.createTerminal(for: project)
                         if case .terminal(let sessionID) = tab.kind {
                             selectedSessionID = sessionID
+                            reconcileSessionState()
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -419,7 +438,7 @@ struct ProjectQuickViewSheet: View {
                 .background(Capsule().fill(.white.opacity(0.5)))
 
                 Button("Refresh") {
-                    syncSelectedSession()
+                    reconcileSessionState()
                 }
                 .buttonStyle(.plain)
                 .padding(.horizontal, 12)
@@ -445,10 +464,10 @@ struct ProjectQuickViewSheet: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .offset(dragOffset)
         .onAppear {
-            syncSelectedSession()
+            reconcileSessionState()
         }
         .onChange(of: state.terminalEventVersion) { _, _ in
-            syncSelectedSession()
+            reconcileSessionState()
         }
         .confirmationDialog(
             "Close running terminal?",
@@ -473,7 +492,16 @@ struct ProjectQuickViewSheet: View {
         }
     }
 
-    private func syncSelectedSession() {
+    private func reconcileSessionState() {
+        let liveSessionIDs = Set(allProjectSessions.map(\.id))
+        sessionDisplayOrder.removeAll { !liveSessionIDs.contains($0) }
+
+        let knownSessionIDs = Set(sessionDisplayOrder)
+        sessionDisplayOrder.append(contentsOf: allProjectSessions
+            .filter { !knownSessionIDs.contains($0.id) }
+            .sorted(by: sessionCreationOrder)
+            .map(\.id))
+
         if let selectedSessionID,
            sessions.contains(where: { $0.id == selectedSessionID }) {
             return
@@ -494,6 +522,7 @@ struct ProjectQuickViewSheet: View {
         _ = state.closeTerminalSession(sessionID, killTmux: true)
         pendingCloseSessionID = nil
         selectedSessionID = nextSessionID
+        sessionDisplayOrder.removeAll { $0 == sessionID }
     }
 
     private func sessionPriority(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
@@ -503,6 +532,27 @@ struct ProjectQuickViewSheet: View {
             return lhsRank < rhsRank
         }
         return lhs.updatedAt > rhs.updatedAt
+    }
+
+    private func sessionCreationOrder(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt < rhs.updatedAt
+        }
+        return lhs.id < rhs.id
+    }
+
+    private func sessionChipTitle(for session: TerminalSession) -> String {
+        let peers = sessions.filter { $0.displayTitle == session.displayTitle }
+        guard peers.count > 1 else { return session.displayTitle }
+
+        let orderedPeers = peers.sorted(by: sessionCreationOrder)
+        guard let index = orderedPeers.firstIndex(where: { $0.id == session.id }) else {
+            return session.displayTitle
+        }
+        return "\(session.displayTitle) \(index + 1)"
     }
 
     private func rank(for session: TerminalSession) -> Int {

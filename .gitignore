@@ -2,6 +2,7 @@
 .build/
 Build/
 DerivedData/
+.derived/
 
 # SPM
 .swiftpm/

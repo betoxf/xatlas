@@ -56,7 +56,11 @@ extension CodexService {
     }
 
     // Sends an RPC request and waits for the matching response by request id.
-    func sendRequest(method: String, params: JSONValue?) async throws -> RPCMessage {
+    func sendRequest(
+        method: String,
+        params: JSONValue?,
+        timeoutNanoseconds: UInt64 = 30 * 1_000_000_000
+    ) async throws -> RPCMessage {
         if let requestTransportOverride {
             return try await requestTransportOverride(method, params)
         }
@@ -77,6 +81,11 @@ extension CodexService {
 
         return try await withCheckedThrowingContinuation { continuation in
             pendingRequests[requestKey] = continuation
+            schedulePendingRequestTimeout(
+                for: requestKey,
+                method: method,
+                timeoutNanoseconds: timeoutNanoseconds
+            )
 
             Task {
                 do {
@@ -89,7 +98,7 @@ extension CodexService {
 
                     // Avoid double-resume if the request was already completed
                     // (for example by a disconnect race that fails all pending requests).
-                    if let pendingContinuation = pendingRequests.removeValue(forKey: requestKey) {
+                    if let pendingContinuation = takePendingRequestContinuation(for: requestKey) {
                         pendingContinuation.resume(throwing: error)
                     }
                 }
@@ -486,9 +495,39 @@ extension CodexService {
     func failAllPendingRequests(with error: Error) {
         let continuations = pendingRequests
         pendingRequests.removeAll()
+        let timeoutTasks = pendingRequestTimeoutTasks
+        pendingRequestTimeoutTasks.removeAll()
+
+        for timeoutTask in timeoutTasks.values {
+            timeoutTask.cancel()
+        }
 
         for continuation in continuations.values {
             continuation.resume(throwing: error)
+        }
+    }
+
+    @discardableResult
+    func takePendingRequestContinuation(for requestKey: String) -> CheckedContinuation<RPCMessage, Error>? {
+        pendingRequestTimeoutTasks.removeValue(forKey: requestKey)?.cancel()
+        return pendingRequests.removeValue(forKey: requestKey)
+    }
+
+    func schedulePendingRequestTimeout(
+        for requestKey: String,
+        method: String,
+        timeoutNanoseconds: UInt64
+    ) {
+        pendingRequestTimeoutTasks[requestKey]?.cancel()
+        pendingRequestTimeoutTasks[requestKey] = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+            guard !Task.isCancelled, let self else { return }
+            guard let continuation = self.takePendingRequestContinuation(for: requestKey) else {
+                return
+            }
+            continuation.resume(
+                throwing: CodexServiceError.invalidInput("Request timed out while waiting for \(method)")
+            )
         }
     }
 

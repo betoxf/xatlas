@@ -97,7 +97,7 @@ extension CodexService {
         }
 
         let requestKey = idKey(from: responseID)
-        guard let continuation = pendingRequests.removeValue(forKey: requestKey) else {
+        guard let continuation = takePendingRequestContinuation(for: requestKey) else {
             return
         }
 

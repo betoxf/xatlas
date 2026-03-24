@@ -2,20 +2,48 @@ import Foundation
 
 // MARK: - JSON-RPC
 
+enum JSONRPCID: Codable, Equatable {
+    case integer(Int)
+    case string(String)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(Int.self) {
+            self = .integer(value)
+            return
+        }
+        if let value = try? container.decode(String.self) {
+            self = .string(value)
+            return
+        }
+        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON-RPC id")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .integer(let value):
+            try container.encode(value)
+        case .string(let value):
+            try container.encode(value)
+        }
+    }
+}
+
 struct JSONRPCRequest: Codable {
-    let jsonrpc: String
-    let id: Int?
+    let jsonrpc: String?
+    let id: JSONRPCID?
     let method: String
     let params: [String: AnyCodable]?
 }
 
 struct JSONRPCResponse: Codable {
     let jsonrpc: String
-    let id: Int?
+    let id: JSONRPCID?
     let result: AnyCodable?
     let error: JSONRPCError?
 
-    init(id: Int?, result: AnyCodable?, error: JSONRPCError?) {
+    init(id: JSONRPCID?, result: AnyCodable?, error: JSONRPCError?) {
         self.jsonrpc = "2.0"
         self.id = id
         self.result = result

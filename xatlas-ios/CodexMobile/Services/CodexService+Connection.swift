@@ -8,6 +8,8 @@ import Foundation
 import Network
 import UIKit
 
+private let codexInitializeRequestTimeoutNanoseconds: UInt64 = 12 * 1_000_000_000
+
 extension CodexService {
     // Only close codes that prove the saved pairing/session can no longer be reused
     // should force a QR reset. Temporary delivery loss uses the dedicated `4004`
@@ -135,6 +137,7 @@ extension CodexService {
 
         isConnected = false
         isInitialized = false
+        runtimeServerName = nil
         isLoadingThreads = false
         isLoadingModels = false
         pendingApproval = nil
@@ -164,6 +167,7 @@ extension CodexService {
         }
         supportsStructuredSkillInput = true
         supportsTurnCollaborationMode = false
+        runtimeServerName = nil
         hasResolvedRateLimitsSnapshot = false
         bridgeInstalledVersion = nil
         latestBridgePackageVersion = nil
@@ -260,7 +264,12 @@ extension CodexService {
         ])
 
         do {
-            _ = try await sendRequest(method: "initialize", params: modernParams)
+            let response = try await sendRequest(
+                method: "initialize",
+                params: modernParams,
+                timeoutNanoseconds: codexInitializeRequestTimeoutNanoseconds
+            )
+            runtimeServerName = resolvedRuntimeServerName(from: response)
             supportsTurnCollaborationMode = await runtimeSupportsPlanCollaborationMode()
         } catch {
             guard shouldRetryInitializeWithoutCapabilities(error) else {
@@ -270,7 +279,12 @@ extension CodexService {
             let legacyParams: JSONValue = .object([
                 "clientInfo": clientInfo,
             ])
-            _ = try await sendRequest(method: "initialize", params: legacyParams)
+            let response = try await sendRequest(
+                method: "initialize",
+                params: legacyParams,
+                timeoutNanoseconds: codexInitializeRequestTimeoutNanoseconds
+            )
+            runtimeServerName = resolvedRuntimeServerName(from: response)
             supportsTurnCollaborationMode = false
         }
 
@@ -346,6 +360,9 @@ extension CodexService {
 
     // Runs the post-connect sync work that is useful but not required to mark the socket usable.
     func performPostConnectSyncPass(preferredThreadId: String? = nil) async {
+        guard !isXatlasRuntime else {
+            return
+        }
         try? await listModels()
         try? await listThreads()
         if await routePendingNotificationOpenIfPossible(refreshIfNeeded: false) {
@@ -404,6 +421,7 @@ extension CodexService {
         connectionRecoveryState = .idle
         supportsStructuredSkillInput = true
         supportsTurnCollaborationMode = false
+        runtimeServerName = nil
         bridgeInstalledVersion = nil
         latestBridgePackageVersion = nil
         resumedThreadIDs.removeAll()
@@ -623,6 +641,14 @@ extension CodexService {
         let port = url.port ?? defaultPort
         let path = url.path.isEmpty ? "/" : url.path
         return "\(scheme)://\(host):\(port)\(path)"
+    }
+
+    var isXatlasRuntime: Bool {
+        runtimeServerName?.trimmingCharacters(in: .whitespacesAndNewlines).localizedCaseInsensitiveCompare("xatlas") == .orderedSame
+    }
+
+    func resolvedRuntimeServerName(from response: RPCMessage) -> String? {
+        response.result?.objectValue?["serverInfo"]?.objectValue?["name"]?.stringValue
     }
 
     func validateConnectionURL(_ serverURL: String) throws -> URL {

@@ -172,6 +172,8 @@ struct ContentView: View {
             }
         } else if shouldShowQRScanner {
             qrScannerBody
+        } else if codex.isConnected && codex.isXatlasRuntime {
+            XatlasRelayHomeView()
         } else {
             mainAppBody
         }

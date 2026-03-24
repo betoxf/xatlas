@@ -61,13 +61,13 @@ final class MCPHandler {
         }
     }
 
-    private func encodeResult(id: Int?, result: [String: AnyCodable]) -> String {
+    private func encodeResult(id: JSONRPCID?, result: [String: AnyCodable]) -> String {
         let response = JSONRPCResponse(id: id, result: AnyCodable(result), error: nil)
         guard let data = try? encoder.encode(response) else { return "{}" }
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
-    private func encodeError(id: Int?, code: Int, message: String) -> String {
+    private func encodeError(id: JSONRPCID?, code: Int, message: String) -> String {
         let response = JSONRPCResponse(id: id, result: nil, error: JSONRPCError(code: code, message: message))
         guard let data = try? encoder.encode(response) else { return "{}" }
         return String(data: data, encoding: .utf8) ?? "{}"

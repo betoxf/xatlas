@@ -2,6 +2,8 @@ import Foundation
 
 final class RemoteAccessBridgeManager: @unchecked Sendable {
     static let shared = RemoteAccessBridgeManager()
+    private static let relayPortDefaultsKey = "xatlas.remoteAccessRelayPort"
+    private static let relayIdentity = "xatlas-app"
 
     private struct RuntimePaths {
         let nodeExecutable: URL
@@ -12,8 +14,9 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
     }
 
     private let queue = DispatchQueue(label: "com.xatlas.remote-access-bridge")
-    private let relayPort = 9000
+    private let preferredRelayPorts = Array(9030...9035)
     private var relayProcess: Process?
+    private var activeRelayPort: Int?
     private var isStarting = false
 
     private init() {}
@@ -49,10 +52,10 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
 
         do {
             let runtime = try resolveRuntimePaths()
+            let relayPort = try ensureRelayRunning(runtime: runtime)
             let lanIP = try resolveLANIPAddress()
             let relayURL = "ws://\(lanIP):\(relayPort)/relay"
 
-            try ensureRelayRunning(runtime: runtime)
             try startBridgeService(runtime: runtime, relayURL: relayURL)
             print("[RemoteAccessBridge] bridge ready on \(relayURL)")
         } catch {
@@ -70,6 +73,64 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
             }
         }
 
+        terminateManagedRelayIfNeeded()
+    }
+
+    private func ensureRelayRunning(runtime: RuntimePaths) throws -> Int {
+        if let relayProcess, !relayProcess.isRunning {
+            self.relayProcess = nil
+        }
+
+        let candidatePorts = candidateRelayPorts()
+
+        for port in candidatePorts where isRelayHealthy(port: port) {
+            if activeRelayPort != port {
+                terminateManagedRelayIfNeeded()
+            }
+            activeRelayPort = port
+            persistRelayPort(port)
+            return port
+        }
+
+        terminateManagedRelayIfNeeded()
+
+        for port in candidatePorts {
+            let process = Process()
+            process.executableURL = runtime.nodeExecutable
+            process.arguments = [runtime.relayServerScript.path]
+            process.currentDirectoryURL = runtime.relayDirectory
+
+            var environment = ProcessInfo.processInfo.environment
+            environment["PORT"] = String(port)
+            environment["XATLAS_RELAY_ID"] = Self.relayIdentity
+            process.environment = environment
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+
+            try process.run()
+
+            guard waitForRelayHealth(port: port, timeout: 5) else {
+                if process.isRunning {
+                    process.terminate()
+                    process.waitUntilExit()
+                }
+                continue
+            }
+
+            relayProcess = process
+            activeRelayPort = port
+            persistRelayPort(port)
+            return port
+        }
+
+        throw NSError(
+            domain: "RemoteAccessBridgeManager",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "The local relay failed to start on any xatlas relay port (\(candidatePorts.map(String.init).joined(separator: ", ")))."]
+        )
+    }
+
+    private func terminateManagedRelayIfNeeded() {
         if let relayProcess {
             if relayProcess.isRunning {
                 relayProcess.terminate()
@@ -79,43 +140,69 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
         }
     }
 
-    private func ensureRelayRunning(runtime: RuntimePaths) throws {
-        if isRelayHealthy(port: relayPort) {
-            return
-        }
+    private func candidateRelayPorts() -> [Int] {
+        var ports: [Int] = []
 
-        if let relayProcess, relayProcess.isRunning {
-            relayProcess.terminate()
-            relayProcess.waitUntilExit()
-            self.relayProcess = nil
-        }
-
-        let process = Process()
-        process.executableURL = runtime.nodeExecutable
-        process.arguments = [runtime.relayServerScript.path]
-        process.currentDirectoryURL = runtime.relayDirectory
-
-        var environment = ProcessInfo.processInfo.environment
-        environment["PORT"] = String(relayPort)
-        process.environment = environment
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-
-        try process.run()
-        relayProcess = process
-
-        guard waitForRelayHealth(port: relayPort, timeout: 5) else {
-            if process.isRunning {
-                process.terminate()
-                process.waitUntilExit()
+        func append(_ port: Int?) {
+            guard let port, isValidRelayPort(port), !ports.contains(port) else {
+                return
             }
-            relayProcess = nil
-            throw NSError(
-                domain: "RemoteAccessBridgeManager",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "The local relay failed to start on port \(relayPort)."]
-            )
+            ports.append(port)
         }
+
+        let explicitRelayPort = resolveExplicitRelayPort()
+        append(explicitRelayPort)
+        if explicitRelayPort != nil {
+            return ports
+        }
+
+        append(activeRelayPort)
+        append(persistedRelayPort())
+        preferredRelayPorts.forEach { append($0) }
+        return ports
+    }
+
+    private func resolveExplicitRelayPort() -> Int? {
+        let value = ProcessInfo.processInfo.environment["XATLAS_RELAY_PORT"]
+        return parseRelayPort(value)
+    }
+
+    private func persistedRelayPort() -> Int? {
+        let defaults = UserDefaults.standard
+        guard let value = defaults.object(forKey: Self.relayPortDefaultsKey) else {
+            return nil
+        }
+
+        if let port = value as? Int {
+            return preferredRelayPorts.contains(port) ? port : nil
+        }
+
+        if let text = value as? String {
+            let port = parseRelayPort(text)
+            guard let port, preferredRelayPorts.contains(port) else {
+                return nil
+            }
+            return port
+        }
+
+        return nil
+    }
+
+    private func persistRelayPort(_ port: Int) {
+        UserDefaults.standard.set(port, forKey: Self.relayPortDefaultsKey)
+    }
+
+    private func parseRelayPort(_ value: String?) -> Int? {
+        guard let value,
+              let port = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)),
+              isValidRelayPort(port) else {
+            return nil
+        }
+        return port
+    }
+
+    private func isValidRelayPort(_ port: Int) -> Bool {
+        (1...65_535).contains(port)
     }
 
     private func startBridgeService(runtime: RuntimePaths, relayURL: String) throws {
@@ -327,6 +414,11 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
               json["ok"] as? Bool == true else {
             return false
         }
-        return true
+
+        if let relayID = json["relayId"] as? String, relayID == Self.relayIdentity {
+            return true
+        }
+
+        return false
     }
 }
