@@ -132,8 +132,15 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
 
     func updateNSView(_ terminal: ManagedLocalProcessTerminalView, context: Context) {
         configure(terminal)
-        context.coordinator.sessionID = sessionID
+        context.coordinator.prepareForSessionChange(to: sessionID, in: terminal)
         context.coordinator.attachIfNeeded(terminal)
+    }
+
+    static func dismantleNSView(_ terminal: ManagedLocalProcessTerminalView, coordinator: Coordinator) {
+        coordinator.detachCurrentSession(from: terminal)
+        terminal.processDelegate = nil
+        terminal.inputObserver = nil
+        terminal.layoutObserver = nil
     }
 
     private func configure(_ terminal: ManagedLocalProcessTerminalView) {
@@ -162,13 +169,44 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         private static let minimumRows = 6
 
         var sessionID: String
+        private var attachedSessionID: String?
         private var attachedSessionName: String?
         private var attachmentInFlight = false
+        private var pendingTerminationSessionIDs: [String] = []
         private var inputBuffer = ""
         private var discardingEscapeSequence = false
 
         init(sessionID: String) {
             self.sessionID = sessionID
+        }
+
+        func prepareForSessionChange(to newSessionID: String, in terminal: ManagedLocalProcessTerminalView) {
+            guard sessionID != newSessionID else { return }
+            sessionID = newSessionID
+            detachCurrentSession(from: terminal)
+        }
+
+        func detachCurrentSession(from terminal: ManagedLocalProcessTerminalView) {
+            let isRunning = MainActor.assumeIsolated {
+                terminal.process?.running ?? false
+            }
+
+            if let attachedSessionID, isRunning {
+                pendingTerminationSessionIDs.append(attachedSessionID)
+                MainActor.assumeIsolated {
+                    terminal.terminate()
+                }
+            }
+
+            MainActor.assumeIsolated {
+                terminal.terminal.resetToInitialState()
+            }
+
+            attachedSessionID = nil
+            attachedSessionName = nil
+            attachmentInFlight = false
+            inputBuffer = ""
+            discardingEscapeSequence = false
         }
 
         func attachIfNeeded(_ terminal: ManagedLocalProcessTerminalView) {
@@ -186,6 +224,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
                 return
             }
 
+            attachedSessionID = sessionID
             attachedSessionName = sessionName
             inputBuffer = ""
             discardingEscapeSequence = false
@@ -253,8 +292,15 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         }
 
         func processTerminated(source: TerminalView, exitCode: Int32?) {
-            TerminalService.shared.handleProcessTerminated(sessionID: sessionID)
-            attachedSessionName = nil
+            let terminatedSessionID = pendingTerminationSessionIDs.isEmpty
+                ? (attachedSessionID ?? sessionID)
+                : pendingTerminationSessionIDs.removeFirst()
+
+            TerminalService.shared.handleProcessTerminated(sessionID: terminatedSessionID)
+            if attachedSessionID == terminatedSessionID {
+                attachedSessionID = nil
+                attachedSessionName = nil
+            }
             attachmentInFlight = false
         }
     }

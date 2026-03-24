@@ -31,8 +31,6 @@ enum SettingsSection: String, CaseIterable, Identifiable {
 struct AppSettingsView: View {
     @Bindable var state: AppState
     @State private var preferences = AppPreferences.shared
-    @State private var pairingCode = PairingService.shared.pairingCode
-    @State private var pairedDevices = PairingService.shared.pairedDevices
     @State private var selectedSection: SettingsSection = .general
 
     var body: some View {
@@ -120,9 +118,9 @@ struct AppSettingsView: View {
             state.isSettingsPresented = false
         }
         .onAppear {
-            // Refresh in case PairingService regenerated code after a successful pairing
-            pairingCode = PairingService.shared.pairingCode
-            pairedDevices = PairingService.shared.pairedDevices
+            if preferences.remoteAccessEnabled {
+                RemoteAccessBridgeManager.shared.startIfNeeded()
+            }
         }
     }
 
@@ -202,8 +200,10 @@ struct AppSettingsView: View {
                             MCPServer.shared.restart()
                             if enabled {
                                 StreamingServer.shared.start()
+                                RemoteAccessBridgeManager.shared.startIfNeeded()
                                 startBridgeStatusPolling()
                             } else {
+                                RemoteAccessBridgeManager.shared.stop()
                                 StreamingServer.shared.stop()
                                 stopBridgeStatusPolling()
                             }
@@ -229,7 +229,7 @@ struct AppSettingsView: View {
                     }
                 }
 
-                // QR code card — relay QR from bridge, or fallback to LAN QR
+                // QR code card — relay QR from the managed bridge service
                 SettingsCard {
                     VStack(spacing: 12) {
                         if let relayQR = relayPairingPayload, let qrImage = generateRelayQRCode(payload: relayQR) {
@@ -255,41 +255,15 @@ struct AppSettingsView: View {
                                     .font(.system(size: 10))
                                     .foregroundStyle(.tertiary)
                             }
-                        } else if let qrImage = generateLANQRCode() {
-                            Text("Scan with xatlas iOS (LAN)")
+                        } else {
+                            ProgressView()
+                                .controlSize(.regular)
+                            Text("Starting the local relay bridge for xatlas iOS")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundStyle(.secondary)
-
-                            Image(nsImage: qrImage)
-                                .interpolation(.none)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 160, height: 160)
-                                .background(Color.white)
-                                .cornerRadius(8)
-
-                            Text("Run `xatlas-bridge up` for relay pairing")
+                            Text("The QR will appear here as soon as the bridge publishes a pairing session.")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.orange)
-                        }
-
-                        HStack(spacing: 4) {
-                            Text("Code:")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                            Text(pairingCode)
-                                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                .textSelection(.enabled)
-                            Spacer()
-                            Button("Regenerate") {
-                                PairingService.shared.regenerateCode()
-                                pairingCode = PairingService.shared.pairingCode
-                            }
-                            .font(.system(size: 11, weight: .medium))
-                            .buttonStyle(.plain)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(.secondary.opacity(0.15)))
+                                .foregroundStyle(.tertiary)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -305,34 +279,12 @@ struct AppSettingsView: View {
                     }
                 }
 
-                if !pairedDevices.isEmpty {
-                    Text("Paired Devices")
-                        .font(.system(size: 14, weight: .semibold))
-                        .padding(.top, 4)
-
-                    SettingsCard {
-                        ForEach(Array(pairedDevices.enumerated()), id: \.element.id) { index, device in
-                            if index > 0 { Divider() }
-                            SettingsRow(
-                                title: device.deviceName,
-                                subtitle: "Paired \(device.pairedAt.formatted(.relative(presentation: .named)))"
-                            ) {
-                                Button("Revoke") {
-                                    PairingService.shared.revoke(token: device.token)
-                                    pairedDevices = PairingService.shared.pairedDevices
-                                }
-                                .font(.system(size: 11, weight: .medium))
-                                .buttonStyle(.plain)
-                                .foregroundStyle(.red)
-                            }
-                        }
-                    }
-                }
             }
         }
         .animation(.easeInOut(duration: 0.2), value: preferences.remoteAccessEnabled)
         .onAppear {
             if preferences.remoteAccessEnabled {
+                RemoteAccessBridgeManager.shared.startIfNeeded()
                 startBridgeStatusPolling()
             }
         }
@@ -366,21 +318,6 @@ struct AppSettingsView: View {
             "expiresAt": payload.expiresAt
         ]
         return generateQRImage(from: dict)
-    }
-
-    /// Generates a LAN-only QR code as a fallback when the bridge isn't running.
-    private func generateLANQRCode() -> NSImage? {
-        guard let ip = MCPServer.lanIPAddress(),
-              let port = MCPServer.shared.boundPort else { return nil }
-
-        let streamPort = StreamingServer.shared.boundPort ?? 0
-        let payload: [String: Any] = [
-            "host": ip,
-            "port": Int(port),
-            "streamPort": Int(streamPort),
-            "code": pairingCode
-        ]
-        return generateQRImage(from: payload)
     }
 
     private func generateQRImage(from dict: [String: Any]) -> NSImage? {
@@ -449,11 +386,10 @@ struct AppSettingsView: View {
         loadRelayPairingPayload()
         loadBridgeStatus()
         bridgeStatusTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-            loadRelayPairingPayload()
-            loadBridgeStatus()
-            // Keep pairing code & devices in sync if PairingService regenerated after a phone pairing
-            pairingCode = PairingService.shared.pairingCode
-            pairedDevices = PairingService.shared.pairedDevices
+            Task { @MainActor in
+                loadRelayPairingPayload()
+                loadBridgeStatus()
+            }
         }
     }
 
@@ -474,7 +410,7 @@ struct AppSettingsView: View {
 
     private var bridgeStatusSubtitle: String {
         if bridgeStatus == nil {
-            return "Run `xatlas-bridge up` in terminal to start the relay bridge"
+            return "xatlas is starting the local relay bridge for secure iPhone pairing."
         }
         if let error = bridgeStatus?.lastError {
             return error

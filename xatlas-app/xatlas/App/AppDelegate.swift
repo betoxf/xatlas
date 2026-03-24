@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MCPServer.shared.start()
         if AppPreferences.shared.remoteAccessEnabled {
             StreamingServer.shared.start()
+            RemoteAccessBridgeManager.shared.startIfNeeded()
         }
 
         if isHeadless {
@@ -83,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
         }
+        RemoteAccessBridgeManager.shared.applicationWillTerminate()
         StreamingServer.shared.stop()
         MCPServer.shared.stop()
     }

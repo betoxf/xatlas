@@ -259,10 +259,8 @@ struct QRScannerView: View {
             if let onLANScan {
                 onLANScan(lanPayload)
             } else {
-                // Fallback: use the direct service directly
-                Task {
-                    await XatlasDirectService.shared.pairAndConnect(payload: lanPayload)
-                }
+                scannerError = "This QR opens xatlas direct workspace mode, not the chat UI. Start the Mac bridge so Remote Access shows the relay QR, then scan that code instead."
+                resetScanLock()
             }
         case .scanError(let message):
             scannerError = message

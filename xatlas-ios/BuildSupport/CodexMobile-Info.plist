@@ -50,6 +50,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>CodexMobile needs local network access to connect to your Codex app-server running on your Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>xatlas needs microphone access to record voice notes for ChatGPT transcription.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_xatlas-permission._tcp</string>
@@ -71,6 +73,9 @@
 		<string>Geist-Medium.ttf</string>
 		<string>Geist-SemiBold.ttf</string>
 		<string>Geist-Bold.ttf</string>
+		<string>GeistMono-Regular.ttf</string>
+		<string>GeistMono-Medium.ttf</string>
+		<string>GeistMono-Bold.ttf</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>

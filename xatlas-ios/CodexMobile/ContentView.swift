@@ -164,16 +164,12 @@ struct ContentView: View {
             .animation(.spring(response: 0.35, dampingFraction: 0.88), value: codex.threadCompletionBanner?.id)
     }
 
-    @State private var isDirectLANMode = XatlasDirectService.shared.isConfigured
-
     @ViewBuilder
     private var rootContent: some View {
         if !hasSeenOnboarding {
             OnboardingView {
                 finishOnboardingAndShowScanner()
             }
-        } else if isDirectLANMode || XatlasDirectService.shared.connectionState == .connected {
-            XatlasDirectHomeView()
         } else if shouldShowQRScanner {
             qrScannerBody
         } else {
@@ -213,15 +209,6 @@ struct ContentView: View {
                         pairingPayload: pairingPayload,
                         codex: codex
                     )
-                }
-            },
-            onLANScan: { lanPayload in
-                Task {
-                    isShowingManualScanner = false
-                    hasDismissedAutomaticScanner = true
-                    scannerCanReturnToOnboarding = false
-                    await XatlasDirectService.shared.pairAndConnect(payload: lanPayload)
-                    isDirectLANMode = true
                 }
             }
         )

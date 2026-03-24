@@ -7,6 +7,8 @@ BUILD_DIR="$ROOT/.build/arm64-apple-macosx/release"
 APP_DIR="$ROOT/.dist/$APP_NAME"
 MACOS_DIR="$APP_DIR/Contents/MacOS"
 RESOURCES_DIR="$APP_DIR/Contents/Resources"
+BRIDGE_DIR="$ROOT/../xatlas-bridge"
+RELAY_DIR="$ROOT/../relay"
 PLIST="$APP_DIR/Contents/Info.plist"
 EXECUTABLE="$BUILD_DIR/xatlas"
 
@@ -47,5 +49,13 @@ PLIST
 
 cp "$EXECUTABLE" "$MACOS_DIR/xatlas"
 chmod +x "$MACOS_DIR/xatlas"
+
+if [ -d "$BRIDGE_DIR" ]; then
+    cp -R "$BRIDGE_DIR" "$RESOURCES_DIR/xatlas-bridge"
+fi
+
+if [ -d "$RELAY_DIR" ]; then
+    cp -R "$RELAY_DIR" "$RESOURCES_DIR/relay"
+fi
 
 echo "$APP_DIR"

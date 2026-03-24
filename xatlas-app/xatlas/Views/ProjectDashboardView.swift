@@ -284,6 +284,8 @@ struct ProjectQuickViewSheet: View {
     }
 
     var body: some View {
+        let _ = state.terminalEventVersion
+
         VStack(spacing: 0) {
             // Draggable title bar
             HStack {
@@ -443,6 +445,9 @@ struct ProjectQuickViewSheet: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .offset(dragOffset)
         .onAppear {
+            syncSelectedSession()
+        }
+        .onChange(of: state.terminalEventVersion) { _, _ in
             syncSelectedSession()
         }
         .confirmationDialog(
