@@ -110,7 +110,6 @@ struct ContentAreaView: View {
                 sessionID: sessionID,
                 appState: state
             )
-            .id(sessionID)
         case .editor(let filePath):
             EditorView(filePath: filePath)
         }

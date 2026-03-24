@@ -405,7 +405,6 @@ struct ProjectQuickViewSheet: View {
             Group {
                 if let sessionID = activeSessionID {
                     StyledTerminalView(sessionID: sessionID, appState: state)
-                        .id(sessionID)
                 } else {
                     VStack(spacing: 10) {
                         Image(systemName: "terminal")

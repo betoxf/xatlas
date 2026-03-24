@@ -89,6 +89,9 @@ final class AppState: @unchecked Sendable {
         if selectedProject == nil {
             selectedProject = projects.first
         }
+        if let selectedProject {
+            FileTreeCache.shared.preload(rootPath: selectedProject.path)
+        }
     }
 
     func addProject(name: String, path: String) {
@@ -160,6 +163,7 @@ final class AppState: @unchecked Sendable {
         if forceWorkspace {
             projectSurfaceMode = .workspace
         }
+        FileTreeCache.shared.preload(rootPath: project.path)
         if selectedProject?.id == project.id, !tabs.isEmpty {
             return
         }
@@ -173,11 +177,8 @@ final class AppState: @unchecked Sendable {
 
         if let saved = projectTabs[project.id] {
             if saved.isEmpty {
-                let tab = makeTerminalTab(for: project.id, workingDirectory: project.path)
-                tabs = [tab]
-                selectedTab = tab
-                projectTabs[project.id] = tabs
-                projectSelectedTab[project.id] = tab
+                tabs = []
+                selectedTab = nil
             } else {
                 tabs = saved
                 selectedTab = projectSelectedTab[project.id] ?? saved.first
@@ -190,12 +191,11 @@ final class AppState: @unchecked Sendable {
                 }
                 selectedTab = tabs.first
             } else {
-                let session = TerminalService.shared.createSession(projectID: project.id, workingDirectory: project.path)
-                let tab = TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
-                tabs = [tab]
-                selectedTab = tab
+                tabs = []
+                selectedTab = nil
             }
             projectTabs[project.id] = tabs
+            projectSelectedTab[project.id] = selectedTab
         }
     }
 

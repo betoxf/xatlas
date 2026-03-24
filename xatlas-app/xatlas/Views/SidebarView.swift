@@ -362,6 +362,16 @@ struct FileTreeView: View {
     @State private var entries: [FileEntry] = []
     @State private var loaded = false
 
+    init(rootPath: String, depth: Int, onFileSelect: @escaping (String) -> Void) {
+        self.rootPath = rootPath
+        self.depth = depth
+        self.onFileSelect = onFileSelect
+
+        let cached = FileTreeCache.shared.cachedEntries(at: rootPath)
+        _entries = State(initialValue: cached ?? [])
+        _loaded = State(initialValue: cached != nil)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ForEach(entries) { entry in
@@ -380,28 +390,9 @@ struct FileTreeView: View {
     }
 
     private func loadEntries() {
-        let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(atPath: rootPath) else { return }
-
-        entries = items
-            .filter { !$0.hasPrefix(".") && $0 != "node_modules" && $0 != ".build" }
-            .sorted { a, b in
-                let aIsDir = isDirectory(rootPath + "/" + a)
-                let bIsDir = isDirectory(rootPath + "/" + b)
-                if aIsDir != bIsDir { return aIsDir }
-                return a.localizedCaseInsensitiveCompare(b) == .orderedAscending
-            }
-            .prefix(50)
-            .map { name in
-                let path = rootPath + "/" + name
-                return FileEntry(name: name, path: path, isDirectory: isDirectory(path))
-            }
-    }
-
-    private func isDirectory(_ path: String) -> Bool {
-        var isDir: ObjCBool = false
-        FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
-        return isDir.boolValue
+        FileTreeCache.shared.loadEntries(at: rootPath) { loadedEntries in
+            entries = loadedEntries
+        }
     }
 }
 
