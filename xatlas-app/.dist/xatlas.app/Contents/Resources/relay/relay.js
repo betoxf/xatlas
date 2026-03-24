@@ -1,5 +1,5 @@
 // FILE: relay.js
-// Purpose: Thin self-hostable WebSocket relay for Remodex pairing, trusted-session lookup, and encrypted forwarding.
+// Purpose: Thin self-hostable WebSocket relay for xatlas CLE pairing, trusted-session lookup, and encrypted forwarding.
 // Layer: Standalone server module
 // Exports: setupRelay, getRelayStats, hasActiveMacSession, hasAuthenticatedMacSession, resolveTrustedMacSession
 

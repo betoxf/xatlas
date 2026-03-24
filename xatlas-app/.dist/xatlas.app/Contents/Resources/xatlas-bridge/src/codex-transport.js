@@ -37,6 +37,7 @@ function createCodexTransport({
 function createXatlasMCPTransport({ env }) {
   const listeners = createListenerBag();
   let mcpPort = resolveMCPPort(env);
+  let mcpSessionId = null;
   let healthTimer = null;
   let isShutdown = false;
 
@@ -47,7 +48,11 @@ function createXatlasMCPTransport({ env }) {
       .then((healthy) => {
         if (!healthy) {
           // Try to re-read the port in case xatlas restarted on a different port
-          mcpPort = resolveMCPPort(env);
+          const nextPort = resolveMCPPort(env);
+          if (nextPort !== mcpPort) {
+            mcpSessionId = null;
+          }
+          mcpPort = nextPort;
         }
       })
       .catch(() => {});
@@ -73,11 +78,16 @@ function createXatlasMCPTransport({ env }) {
           headers: {
             "Content-Type": "application/json",
             "Content-Length": Buffer.byteLength(body),
+            ...(mcpSessionId ? { "MCP-Session-Id": mcpSessionId } : {}),
           },
           timeout: 10_000,
         },
         (res) => {
           let data = "";
+          const nextSessionId = res.headers["mcp-session-id"];
+          if (typeof nextSessionId === "string" && nextSessionId.trim()) {
+            mcpSessionId = nextSessionId.trim();
+          }
           res.on("data", (chunk) => (data += chunk));
           res.on("end", () => {
             if (data.trim()) {

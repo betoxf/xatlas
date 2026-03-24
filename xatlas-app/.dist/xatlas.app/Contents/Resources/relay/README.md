@@ -1,8 +1,8 @@
-# Relay
+# xatlas Relay
 
-This folder contains the public relay and push-service code used by Remodex pairing and trusted reconnect.
+This folder contains the public relay and push-service code used by xatlas CLE pairing and trusted reconnect.
 
-The point of keeping this code in the repo is transparency: anyone forking Remodex can inspect the transport boundary, verify the encrypted-session flow, and run a compatible relay of their own. What should stay private is the actual deployed endpoint and any production credentials.
+The point of keeping this code in the repo is transparency: anyone forking xatlas can inspect the transport boundary, verify the encrypted-session flow, and run a compatible relay of their own. What should stay private is the actual deployed endpoint and any production credentials.
 
 ## What It Does
 
@@ -19,19 +19,19 @@ The point of keeping this code in the repo is transparency: anyone forking Remod
 - it does not run Codex
 - it does not execute git commands
 - it does not contain the user's repository checkout
-- it does not decrypt Remodex application payloads after the secure session is established
+- it does not decrypt xatlas application payloads after the secure session is established
 
 Codex, git, and local file operations still run on the user's Mac.
 
 ## Security Model
 
-Remodex uses the relay as a transport hop, not as a trusted application server.
+xatlas CLE uses the relay as a transport hop, not as a trusted application server.
 
 - The pairing QR gives the iPhone the bridge identity public key plus short-lived session details.
 - After the first successful QR bootstrap, the relay can help the iPhone find the Mac's current live session again through a signed trusted-session resolve request.
 - The iPhone and bridge perform a signed handshake, derive shared AES-256-GCM keys with X25519 + HKDF-SHA256, and then encrypt application payloads end to end.
 - The relay can still observe connection metadata and the plaintext secure control messages needed to establish the encrypted session.
-- The relay does not receive plaintext Remodex application payloads after the secure session is active.
+- The relay does not receive plaintext xatlas application payloads after the secure session is active.
 
 ## Relay Flow
 

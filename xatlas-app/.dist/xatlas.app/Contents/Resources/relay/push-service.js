@@ -1,5 +1,5 @@
 // FILE: push-service.js
-// Purpose: Stores session-scoped APNs registration state and sends completion pushes for relay-hosted Remodex sessions.
+// Purpose: Stores session-scoped APNs registration state and sends completion pushes for relay-hosted xatlas sessions.
 // Layer: Hosted service helper
 // Exports: createPushSessionService, createFileBackedPushStateStore, resolvePushStateFilePath
 // Depends on: crypto, fs, os, path, ./apns-client

@@ -14,6 +14,7 @@ struct StyledTerminalView: View {
                 VStack(spacing: 0) {
                     header(for: session)
                     NativeTmuxTerminalView(sessionID: sessionID, focusToken: focusToken)
+                        .id(sessionID)
                         .padding(.horizontal, 6)
                         .padding(.bottom, 6)
                 }
@@ -312,7 +313,8 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             guard lastFocusToken != token else { return }
             lastFocusToken = token
             DispatchQueue.main.async {
-                terminal.window?.makeFirstResponder(terminal)
+                _ = terminal.window?.makeFirstResponder(terminal)
+                _ = terminal.becomeFirstResponder()
             }
         }
     }

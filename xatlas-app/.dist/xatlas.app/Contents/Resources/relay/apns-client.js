@@ -1,5 +1,5 @@
 // FILE: apns-client.js
-// Purpose: Sends APNs alert pushes for relay-hosted Remodex notifications using token-based auth.
+// Purpose: Sends APNs alert pushes for relay-hosted xatlas notifications using token-based auth.
 // Layer: Hosted service helper
 // Exports: createAPNsClient
 // Depends on: crypto, http2
@@ -56,7 +56,7 @@ function createAPNsClient({
       }, JSON.stringify({
         aps: {
           alert: {
-            title: normalizeString(title) || "Remodex",
+            title: normalizeString(title) || "xatlas",
             body: normalizeString(body) || "Response ready",
           },
           sound: "default",

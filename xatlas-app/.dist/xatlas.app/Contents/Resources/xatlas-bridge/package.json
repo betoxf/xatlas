@@ -1,7 +1,7 @@
 {
   "name": "xatlas-bridge",
   "version": "0.1.0",
-  "description": "Local bridge between xatlas macOS app and the xatlas iOS app via WebSocket relay. Run `xatlas-bridge up` to start.",
+  "description": "xatlas CLE (Command Line Environment) bridge/runtime for pairing the xatlas macOS app with mobile clients over the relay. Run `xatlas-bridge up` to start.",
   "main": "src/index.js",
   "bin": {
     "xatlas-bridge": "./bin/xatlas-bridge.js"
@@ -20,7 +20,9 @@
     "xatlas",
     "bridge",
     "mcp",
-    "cli"
+    "cli",
+    "cle",
+    "command-line-environment"
   ],
   "license": "ISC",
   "type": "commonjs",

@@ -1,5 +1,5 @@
 // FILE: server.js
-// Purpose: Hosts the public Remodex relay plus optional push-notification HTTP endpoints.
+// Purpose: Hosts the public xatlas relay plus optional push-notification HTTP endpoints.
 // Layer: Standalone server entrypoint
 // Exports: createRelayServer, createFixedWindowRateLimiter
 // Depends on: http, ws, ./relay, ./push-service
@@ -17,6 +17,7 @@ const { createPushSessionService } = require("./push-service");
 function createRelayServer({
   enablePushService = false,
   exposeDetailedHealth = false,
+  relayIdentity = "",
   httpRateLimiter = createFixedWindowRateLimiter({ windowMs: 60_000, maxRequests: 120 }),
   pushRateLimiter = createFixedWindowRateLimiter({ windowMs: 60_000, maxRequests: 30 }),
   upgradeRateLimiter = createFixedWindowRateLimiter({ windowMs: 60_000, maxRequests: 60 }),
@@ -45,6 +46,7 @@ function createRelayServer({
       pushEnabled,
       pushRateLimiter,
       pushSessionService: resolvedPushSessionService,
+      relayIdentity,
       trustProxy,
     });
   });
@@ -93,21 +95,24 @@ async function handleHTTPRequest(req, res, {
   pushEnabled,
   pushRateLimiter,
   pushSessionService,
+  relayIdentity,
   trustProxy,
 }) {
   const pathname = safePathname(req.url);
   if (req.method === "GET" && pathname === "/health") {
-    return writeJSON(
-      res,
-      200,
-      exposeDetailedHealth
-        ? {
-            ok: true,
-            relay: getRelayStats(),
-            push: pushSessionService.getStats(),
-          }
-        : { ok: true }
-    );
+    const health = exposeDetailedHealth
+      ? {
+          ok: true,
+          relay: getRelayStats(),
+          push: pushSessionService.getStats(),
+        }
+      : { ok: true };
+
+    if (relayIdentity) {
+      health.relayId = relayIdentity;
+    }
+
+    return writeJSON(res, 200, health);
   }
 
   const requestKey = clientAddressKey(req, { trustProxy });
@@ -354,10 +359,22 @@ if (require.main === module) {
   const enablePushService = readOptionalBooleanEnv(
     ["REMODEX_ENABLE_PUSH_SERVICE", "PHODEX_ENABLE_PUSH_SERVICE"]
   ) ?? false;
-  const { server } = createRelayServer({ enablePushService, trustProxy });
+  const relayIdentity = readEnvString(["XATLAS_RELAY_ID", "REMODEX_RELAY_ID", "PHODEX_RELAY_ID"]);
+  const { server } = createRelayServer({ enablePushService, relayIdentity, trustProxy });
   server.listen(port, () => {
     console.log(`[relay] listening on :${port}`);
   });
+}
+
+function readEnvString(keys, env = process.env) {
+  for (const key of keys) {
+    const value = env?.[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
 }
 
 module.exports = {

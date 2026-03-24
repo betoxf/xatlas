@@ -363,33 +363,45 @@ struct ProjectQuickViewSheet: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(sessions) { session in
-                        Button {
-                            selectedSessionID = session.id
-                            state.setQuickViewSelectedSessionID(session.id, for: project.id)
-                            requestTerminalFocus()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "terminal")
-                                    .font(.system(size: 10, weight: .semibold))
-                                Text(sessionChipTitle(for: session))
-                                    .font(.system(size: 11, weight: .semibold))
-                                if session.requiresAttention {
-                                    Text("1")
-                                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 2)
-                                        .background(Capsule().fill(.red.opacity(0.78)))
+                        HStack(spacing: 6) {
+                            Button {
+                                selectedSessionID = session.id
+                                state.setQuickViewSelectedSessionID(session.id, for: project.id)
+                                requestTerminalFocus()
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "terminal")
+                                        .font(.system(size: 10, weight: .semibold))
+                                    Text(sessionChipTitle(for: session))
+                                        .font(.system(size: 11, weight: .semibold))
+                                    if session.requiresAttention {
+                                        Text("1")
+                                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 5)
+                                            .padding(.vertical, 2)
+                                            .background(Capsule().fill(.red.opacity(0.78)))
+                                    }
                                 }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .foregroundStyle(activeSessionID == session.id ? Color.white : Color.primary.opacity(0.75))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 7)
-                            .background(
-                                Capsule().fill(activeSessionID == session.id ? Color.accentColor : Color.white.opacity(0.35))
-                            )
+                            .buttonStyle(.plain)
+
+                            Button {
+                                requestClose(session.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 8, weight: .bold))
+                            }
+                            .buttonStyle(.plain)
+                            .opacity(activeSessionID == session.id ? 0.6 : 0)
                         }
-                        .buttonStyle(.plain)
+                        .foregroundStyle(activeSessionID == session.id ? Color.white : Color.primary.opacity(0.75))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule().fill(activeSessionID == session.id ? Color.accentColor : Color.white.opacity(0.35))
+                        )
                     }
 
                     Button {
