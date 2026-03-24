@@ -1,0 +1,35 @@
+{
+  "name": "xatlas-bridge",
+  "version": "0.2.0",
+  "description": "xatlas CLE (Command Line Environment) runtime for pairing the xatlas macOS app with local and relay-backed sessions. Run `xatlas up` to start.",
+  "main": "src/index.js",
+  "bin": {
+    "xatlas": "./bin/xatlas-bridge.js",
+    "xatlas-cle": "./bin/xatlas-bridge.js",
+    "xatlas-bridge": "./bin/xatlas-bridge.js"
+  },
+  "files": [
+    "bin/",
+    "src/"
+  ],
+  "scripts": {
+    "start": "node ./bin/xatlas-bridge.js up",
+    "test": "node --test ./test/*.test.js",
+    "prepack": "node ./scripts/prepare-private-defaults.js",
+    "postpack": "node ./scripts/cleanup-private-defaults.js"
+  },
+  "keywords": [
+    "xatlas",
+    "bridge",
+    "mcp",
+    "cli",
+    "cle",
+    "command-line-environment"
+  ],
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "qrcode-terminal": "^0.12.0",
+    "ws": "^8.19.0"
+  }
+}
