@@ -6,7 +6,7 @@
 
 import Foundation
 
-private let minimumBridgePackageUpdateCommand = "npm install -g remodex@latest"
+private let minimumBridgePackageUpdateCommand = "npm install -g xatlas-bridge@latest"
 
 enum CodexGPTAccountStatus: String, Codable, Sendable {
     case unknown
@@ -666,14 +666,14 @@ extension CodexService {
         if let currentVersion = currentVersion?.trimmingCharacters(in: .whitespacesAndNewlines),
            !currentVersion.isEmpty {
             message =
-                "This Mac bridge is running Remodex \(currentVersion), but this iPhone app requires Remodex \(CodexService.minimumSupportedBridgePackageVersion) or newer. Update the npm package on your Mac, then reconnect."
+                "This Mac bridge is running xatlas CLE \(currentVersion), but this iPhone app requires xatlas CLE \(CodexService.minimumSupportedBridgePackageVersion) or newer. Update the npm package on your Mac, then reconnect."
         } else {
             message =
-                "This Mac bridge is too old for this version of Remodex iPhone. Update the Remodex npm package on your Mac to \(CodexService.minimumSupportedBridgePackageVersion) or newer, then reconnect."
+                "This Mac bridge is too old for this version of xatlas iPhone. Update the xatlas CLE npm package on your Mac to \(CodexService.minimumSupportedBridgePackageVersion) or newer, then reconnect."
         }
 
         return CodexBridgeUpdatePrompt(
-            title: "Update Remodex on your Mac to reconnect",
+            title: "Update xatlas CLE on your Mac to reconnect",
             message: message,
             command: minimumBridgePackageUpdateCommand
         )

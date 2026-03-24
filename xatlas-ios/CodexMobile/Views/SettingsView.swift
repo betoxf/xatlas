@@ -751,7 +751,7 @@ private struct SettingsBridgeVersionCard: View {
         }
 
         if installedVersion.compare(latestVersion, options: .numeric) == .orderedAscending {
-            return "A newer Remodex package is available on npm."
+            return "A newer xatlas CLE package is available on npm."
         }
 
         return "This Mac is running a different build than the current npm latest."
@@ -872,7 +872,7 @@ private struct SettingsAboutCard: View {
                 isShowingAbout = true
             } label: {
                 settingsAccessoryRow(
-                    title: "How Remodex Works",
+                    title: "How xatlas Works",
                     leading: {
                         Image(systemName: "info.circle")
                             .font(AppFont.subheadline(weight: .medium))

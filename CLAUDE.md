@@ -4,12 +4,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Overview
 
-xatlas is a monorepo containing two products that share the MCP protocol for AI-agent orchestration:
+xatlas is a monorepo centered on the native xatlas workspace and **xatlas CLE** (Command Line Environment), the terminal/runtime layer that powers pairing, relay access, and agent orchestration.
 
 - **`xatlas-app/`** — Native macOS app (Swift 6.2, macOS 26). Terminal multiplexer with built-in MCP server for AI agent control.
-- **`vscode-extension/`** — VS Code extension ("Operator", published as `xerebro-vscode`). MCP server enabling AI assistants to control VS Code terminals and editor.
+- **`xatlas-bridge/`** — xatlas CLE bridge/runtime package for pairing, relay access, and desktop service flows.
+- **`xatlas-ios/`** — iPhone companion app for remote access and mobile control.
+- **`vscode-extension/`** — Legacy VS Code surface still carrying older package IDs while the visible branding migrates to xatlas.
 
-Both expose HTTP-based MCP servers (JSON-RPC) and use tmux for terminal session management. The `ghostty/` and `tmux/` directories are vendored upstream sources for reference only — they are not built as part of xatlas.
+The main xatlas surfaces expose HTTP-based MCP servers (JSON-RPC) and use tmux for terminal session management. The `ghostty/` and `tmux/` directories are vendored upstream sources for reference only — they are not built as part of xatlas.
 
 ## Build Commands
 

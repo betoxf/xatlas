@@ -1,5 +1,5 @@
 // FILE: server.js
-// Purpose: Hosts the public Remodex relay plus optional push-notification HTTP endpoints.
+// Purpose: Hosts the public xatlas relay plus optional push-notification HTTP endpoints.
 // Layer: Standalone server entrypoint
 // Exports: createRelayServer, createFixedWindowRateLimiter
 // Depends on: http, ws, ./relay, ./push-service

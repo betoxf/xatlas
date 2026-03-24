@@ -67,7 +67,7 @@ private struct TurnViewAlertModifier: ViewModifier {
                     onConfirmMacHandoff()
                 }
             } message: {
-                Text("Remodex will force close and reopen Codex.app on your Mac. Any desktop runs in progress will be stopped, and unsaved draft text there may be lost before this chat is opened.")
+                Text("xatlas will force close and reopen Codex.app on your Mac. Any desktop runs in progress will be stopped, and unsaved draft text there may be lost before this chat is opened.")
             }
             .alert(
                 "Couldn't hand off to Mac app",

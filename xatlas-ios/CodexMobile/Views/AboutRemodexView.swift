@@ -1,5 +1,5 @@
 // FILE: AboutRemodexView.swift
-// Purpose: Full-screen guide explaining how Remodex works, styled as a blog page.
+// Purpose: Full-screen guide explaining how xatlas works, styled as a blog page.
 // Layer: View
 // Exports: AboutRemodexView
 
@@ -36,7 +36,7 @@ struct AboutRemodexView: View {
                 .padding(.bottom, 40)
             }
             .font(AppFont.body())
-            .navigationTitle("About Remodex")
+            .navigationTitle("About xatlas")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -50,7 +50,7 @@ struct AboutRemodexView: View {
 
     @ViewBuilder private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Remodex")
+            Text("xatlas")
                 .font(AppFont.headline(weight: .bold))
                 .foregroundStyle(.primary)
 
@@ -97,7 +97,7 @@ struct AboutRemodexView: View {
             sectionTitle("Architecture")
 
             VStack(spacing: 0) {
-                diagramStep(from: "Remodex iOS", to: "Bridge (Mac)", via: "WebSocket")
+                diagramStep(from: "xatlas iPhone", to: "xatlas CLE (Mac)", via: "WebSocket")
                 diagramStep(from: "Bridge (Mac)", to: "codex app-server", via: "JSON-RPC")
                 diagramStep(from: "codex app-server", to: "~/.codex/sessions", via: "JSONL rollout", isLast: true)
             }

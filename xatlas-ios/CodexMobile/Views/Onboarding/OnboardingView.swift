@@ -28,7 +28,7 @@ struct OnboardingView: View {
                         stepNumber: 1,
                         icon: "terminal",
                         title: "Install Codex CLI",
-                        description: "The AI coding agent that lives in your terminal. Remodex connects to it from your iPhone.",
+                        description: "The AI coding agent that lives in your terminal. xatlas connects to it from your iPhone.",
                         command: "npm install -g @openai/codex@latest"
                     )
                     .tag(2)
@@ -36,9 +36,9 @@ struct OnboardingView: View {
                     OnboardingStepPage(
                         stepNumber: 2,
                         icon: "link",
-                        title: "Install the Bridge",
-                        description: "A lightweight relay that securely connects your Mac to your iPhone.",
-                        command: "npm install -g remodex@latest"
+                        title: "Install xatlas CLE",
+                        description: "The Mac-side command environment that securely connects your workspace to your iPhone.",
+                        command: "npm install -g xatlas-bridge@latest"
                     )
                     .tag(3)
 
@@ -46,8 +46,8 @@ struct OnboardingView: View {
                         stepNumber: 3,
                         icon: "qrcode.viewfinder",
                         title: "Start Pairing",
-                        description: "Run this on your Mac. A QR code will appear in your terminal — scan it next.",
-                        command: "remodex up"
+                        description: "Run this on your Mac. xatlas CLE will show a QR code in your terminal for the next step.",
+                        command: "xatlas-bridge up"
                     )
                     .tag(4)
                 }

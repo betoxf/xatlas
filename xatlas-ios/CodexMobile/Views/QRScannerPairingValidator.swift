@@ -11,7 +11,7 @@ enum QRScannerPairingValidationResult {
     case bridgeUpdateRequired(CodexBridgeUpdatePrompt)
 }
 
-private let qrScannerBridgeUpdateCommand = "npm install -g remodex@latest"
+private let qrScannerBridgeUpdateCommand = "npm install -g xatlas-bridge@latest"
 
 func validatePairingQRCode(_ code: String, now: Date = Date()) -> QRScannerPairingValidationResult {
     guard let data = code.data(using: .utf8) else {

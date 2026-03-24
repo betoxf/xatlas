@@ -391,7 +391,7 @@ extension GPTVoiceTranscriptionManager {
             return try await transcribeOverride(wavData, token)
         }
 
-        let boundary = "Remodex-\(UUID().uuidString)"
+        let boundary = "xatlas-\(UUID().uuidString)"
 
         var body = Data()
         body.appendUTF8("--\(boundary)\r\n")
