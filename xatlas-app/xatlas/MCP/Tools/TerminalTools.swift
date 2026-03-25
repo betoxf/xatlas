@@ -381,7 +381,7 @@ struct TerminalTools: MCPToolSet {
                       let project = Self.onMain({ AppState.shared.projects.first(where: { $0.id == projectID }) }) else {
                     return "{\"ok\":false,\"error\":\"valid projectId is required\"}"
                 }
-                Self.onMain {
+                _ = Self.onMain {
                     AppState.shared.removeProject(project)
                 }
                 return "{\"ok\":true}"
@@ -640,14 +640,15 @@ struct TerminalTools: MCPToolSet {
                 let projectSurface = Self.onMain { AppState.shared.projectSurfaceMode.rawValue }
                 let quickViewProjectID = Self.onMain { AppState.shared.dashboardQuickViewProjectID?.uuidString ?? "" }
                 let operatorEvents = OperatorEventStore.shared.recentEvents(limit: 10)
+                let iso = ISO8601DateFormatter()
                 let projects = Self.onMain { AppState.shared.projects }.map {
                     "{\"id\":\"\(Self.escape($0.id.uuidString))\",\"name\":\"\(Self.escape($0.name))\",\"path\":\"\(Self.escape($0.path))\"}"
                 }
                 let sessions = TerminalService.shared.sessions.map {
-                    "{\"id\":\"\(Self.escape($0.id))\",\"title\":\"\(Self.escape($0.displayTitle))\",\"tmuxSession\":\"\(Self.escape($0.tmuxSessionName))\",\"projectId\":\"\(Self.escape($0.projectID?.uuidString ?? ""))\",\"cwd\":\"\(Self.escape($0.currentDirectory ?? $0.workingDirectory ?? ""))\",\"state\":\"\(Self.escape($0.activityState.rawValue))\",\"attention\":\($0.requiresAttention ? "true" : "false")}"
+                    "{\"id\":\"\(Self.escape($0.id))\",\"title\":\"\(Self.escape($0.displayTitle))\",\"tmuxSession\":\"\(Self.escape($0.tmuxSessionName))\",\"projectId\":\"\(Self.escape($0.projectID?.uuidString ?? ""))\",\"cwd\":\"\(Self.escape($0.currentDirectory ?? $0.workingDirectory ?? ""))\",\"state\":\"\(Self.escape($0.activityState.rawValue))\",\"attention\":\($0.requiresAttention ? "true" : "false"),\"lastCommand\":\"\(Self.escape($0.lastCommand ?? ""))\"}"
                 }
                 let eventSummary = operatorEvents.map {
-                    "{\"id\":\"\(Self.escape($0.id.uuidString))\",\"kind\":\"\(Self.escape($0.kind.rawValue))\",\"sessionId\":\"\(Self.escape($0.sessionID))\",\"projectId\":\"\(Self.escape($0.projectID?.uuidString ?? ""))\",\"command\":\"\(Self.escape($0.command))\"}"
+                    "{\"id\":\"\(Self.escape($0.id.uuidString))\",\"timestamp\":\"\(Self.escape(iso.string(from: $0.timestamp)))\",\"kind\":\"\(Self.escape($0.kind.rawValue))\",\"sessionId\":\"\(Self.escape($0.sessionID))\",\"sessionTitle\":\"\(Self.escape($0.sessionTitle))\",\"projectId\":\"\(Self.escape($0.projectID?.uuidString ?? ""))\",\"command\":\"\(Self.escape($0.command))\",\"details\":\"\(Self.escape($0.details ?? ""))\"}"
                 }
                 return "{\"selectedProjectId\":\"\(Self.escape(selectedProjectID))\",\"selectedTabId\":\"\(Self.escape(selectedTabID))\",\"selectedSessionId\":\"\(Self.escape(selectedSessionID ?? ""))\",\"projectSurface\":\"\(Self.escape(projectSurface))\",\"quickViewProjectId\":\"\(Self.escape(quickViewProjectID))\",\"projects\":[\(projects.joined(separator: ","))],\"sessions\":[\(sessions.joined(separator: ","))],\"operatorEvents\":[\(eventSummary.joined(separator: ","))]}"
             }

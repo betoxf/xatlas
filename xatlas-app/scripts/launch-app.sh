@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="$("$ROOT/scripts/package-app.sh" | tail -n 1)"
+APP_DIR="$("$ROOT/scripts/install-app.sh" | tail -n 1)"
 
 mode="${1:-normal}"
 

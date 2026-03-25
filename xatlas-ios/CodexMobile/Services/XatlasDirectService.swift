@@ -8,13 +8,13 @@ import UIKit
 
 // MARK: - Models
 
-struct XatlasProject: Identifiable, Codable, Hashable {
+struct XatlasProject: Identifiable, Decodable, Hashable {
     let id: String
     let name: String
     let path: String
 }
 
-struct XatlasSession: Identifiable, Codable, Hashable {
+struct XatlasSession: Identifiable, Decodable, Hashable {
     let id: String
     let title: String
     let tmuxSession: String
@@ -25,7 +25,32 @@ struct XatlasSession: Identifiable, Codable, Hashable {
     let lastCommand: String
 }
 
-struct XatlasWorkspaceState: Codable {
+extension XatlasSession {
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case tmuxSession
+        case projectId
+        case cwd
+        case state
+        case attention
+        case lastCommand
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title) ?? "Terminal"
+        tmuxSession = try container.decodeIfPresent(String.self, forKey: .tmuxSession) ?? id
+        projectId = try container.decodeIfPresent(String.self, forKey: .projectId) ?? ""
+        cwd = try container.decodeIfPresent(String.self, forKey: .cwd) ?? ""
+        state = try container.decodeIfPresent(String.self, forKey: .state) ?? "idle"
+        attention = try container.decodeIfPresent(Bool.self, forKey: .attention) ?? false
+        lastCommand = try container.decodeIfPresent(String.self, forKey: .lastCommand) ?? ""
+    }
+}
+
+struct XatlasWorkspaceState: Decodable {
     let selectedProjectId: String
     let selectedTabId: String
     let selectedSessionId: String

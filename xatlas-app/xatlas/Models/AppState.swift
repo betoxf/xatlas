@@ -26,6 +26,11 @@ enum ProjectSurfaceMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum ProjectAdditionBehavior {
+    case selectInWorkspace
+    case stayOnDashboard
+}
+
 enum AppToastStyle: Equatable {
     case neutral
     case success
@@ -103,11 +108,21 @@ final class AppState: @unchecked Sendable {
         }
     }
 
-    func addProject(name: String, path: String) {
+    func addProject(
+        name: String,
+        path: String,
+        behavior: ProjectAdditionBehavior = .selectInWorkspace
+    ) {
         let project = Project(name: name, path: path)
         projects.append(project)
         TerminalService.shared.rehydrateSessions(projects: projects)
-        switchToProject(project)
+        switch behavior {
+        case .selectInWorkspace:
+            switchToProject(project)
+        case .stayOnDashboard:
+            switchToProject(project, forceWorkspace: false)
+            projectSurfaceMode = .dashboard
+        }
         ProjectManager.shared.saveProjects(projects)
         showToast(
             title: "Project added",
@@ -120,6 +135,10 @@ final class AppState: @unchecked Sendable {
     func presentProjectPicker() {
         guard !isProjectPickerPresented else { return }
         isProjectPickerPresented = true
+        let additionBehavior: ProjectAdditionBehavior =
+            selectedSection == .projects && projectSurfaceMode == .dashboard
+            ? .stayOnDashboard
+            : .selectInWorkspace
 
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -132,7 +151,11 @@ final class AppState: @unchecked Sendable {
             guard let self else { return }
             defer { self.isProjectPickerPresented = false }
             guard response == .OK, let url = panel?.url else { return }
-            self.addProject(name: url.lastPathComponent, path: url.path)
+            self.addProject(
+                name: url.lastPathComponent,
+                path: url.path,
+                behavior: additionBehavior
+            )
         }
 
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
@@ -145,7 +168,18 @@ final class AppState: @unchecked Sendable {
         complete(response)
     }
 
-    func removeProject(_ project: Project) {
+    @discardableResult
+    func removeProject(_ project: Project) -> Int {
+        let activeSessionCount = TerminalService.shared
+            .sessionsForProject(project.id)
+            .filter { $0.activityState != .exited }
+            .count
+        let sessionIDs = TerminalService.shared.sessionsForProject(project.id).map(\.id)
+        sessionIDs.forEach { _ = discardTerminalSession($0, killTmux: true) }
+
+        if dashboardQuickViewProjectID == project.id {
+            dashboardQuickViewProjectID = nil
+        }
         projectTabs.removeValue(forKey: project.id)
         projectSelectedTab.removeValue(forKey: project.id)
         projectQuickViewSelectedSessionID.removeValue(forKey: project.id)
@@ -153,7 +187,7 @@ final class AppState: @unchecked Sendable {
         TerminalService.shared.rehydrateSessions(projects: projects)
         if selectedProject?.id == project.id {
             if let first = projects.first {
-                switchToProject(first)
+                switchToProject(first, forceWorkspace: projectSurfaceMode == .workspace)
             } else {
                 selectedProject = nil
                 tabs = []
@@ -162,10 +196,13 @@ final class AppState: @unchecked Sendable {
         }
         ProjectManager.shared.saveProjects(projects)
         showToast(
-            title: "Project removed",
-            message: project.name,
-            style: .neutral
+            title: "Project closed",
+            message: activeSessionCount > 0
+                ? "\(project.name) • \(activeSessionCount) terminal\(activeSessionCount == 1 ? "" : "s") closed"
+                : project.name,
+            style: .warning
         )
+        return activeSessionCount
     }
 
     func switchToProject(_ project: Project, forceWorkspace: Bool = true) {
@@ -229,35 +266,7 @@ final class AppState: @unchecked Sendable {
 
     @discardableResult
     func closeTerminalSession(_ sessionID: String, killTmux: Bool = true) -> Bool {
-        guard let session = TerminalService.shared.session(id: sessionID) else { return false }
-
-        let replacementSelection = selectedTab?.id == sessionID
-            ? replacementTab(afterRemoving: sessionID, from: tabs)
-            : selectedTab
-        tabs.removeAll { $0.id == sessionID }
-        if selectedTab?.id == sessionID {
-            selectedTab = replacementSelection
-        }
-
-        for projectID in projectTabs.keys {
-            guard var storedTabs = projectTabs[projectID] else { continue }
-            let replacementSelection = projectSelectedTab[projectID]?.id == sessionID
-                ? replacementTab(afterRemoving: sessionID, from: storedTabs)
-                : restoredTab(from: projectSelectedTab[projectID], within: storedTabs)
-            let replacementQuickViewSessionID = projectQuickViewSelectedSessionID[projectID] == sessionID
-                ? replacementTerminalSessionID(afterRemoving: sessionID, from: storedTabs)
-                : projectQuickViewSelectedSessionID[projectID]
-            storedTabs.removeAll { $0.id == sessionID }
-            projectTabs[projectID] = storedTabs
-            if projectSelectedTab[projectID]?.id == sessionID {
-                projectSelectedTab[projectID] = replacementSelection
-            }
-            if projectQuickViewSelectedSessionID[projectID] == sessionID {
-                projectQuickViewSelectedSessionID[projectID] = replacementQuickViewSessionID
-            }
-        }
-
-        TerminalService.shared.removeSession(sessionID, killTmux: killTmux)
+        guard let session = discardTerminalSession(sessionID, killTmux: killTmux) else { return false }
         showToast(
             title: "Terminal closed",
             message: session.displayTitle,
@@ -485,6 +494,40 @@ final class AppState: @unchecked Sendable {
             guard case .terminal(let sessionID) = collection[index].kind, sessionID == session.id else { continue }
             collection[index].title = session.displayTitle
         }
+    }
+
+    @discardableResult
+    private func discardTerminalSession(_ sessionID: String, killTmux: Bool) -> TerminalSession? {
+        guard let session = TerminalService.shared.session(id: sessionID) else { return nil }
+
+        let replacementSelection = selectedTab?.id == sessionID
+            ? replacementTab(afterRemoving: sessionID, from: tabs)
+            : selectedTab
+        tabs.removeAll { $0.id == sessionID }
+        if selectedTab?.id == sessionID {
+            selectedTab = replacementSelection
+        }
+
+        for projectID in projectTabs.keys {
+            guard var storedTabs = projectTabs[projectID] else { continue }
+            let replacementSelection = projectSelectedTab[projectID]?.id == sessionID
+                ? replacementTab(afterRemoving: sessionID, from: storedTabs)
+                : restoredTab(from: projectSelectedTab[projectID], within: storedTabs)
+            let replacementQuickViewSessionID = projectQuickViewSelectedSessionID[projectID] == sessionID
+                ? replacementTerminalSessionID(afterRemoving: sessionID, from: storedTabs)
+                : projectQuickViewSelectedSessionID[projectID]
+            storedTabs.removeAll { $0.id == sessionID }
+            projectTabs[projectID] = storedTabs
+            if projectSelectedTab[projectID]?.id == sessionID {
+                projectSelectedTab[projectID] = replacementSelection
+            }
+            if projectQuickViewSelectedSessionID[projectID] == sessionID {
+                projectQuickViewSelectedSessionID[projectID] = replacementQuickViewSessionID
+            }
+        }
+
+        TerminalService.shared.removeSession(sessionID, killTmux: killTmux)
+        return session
     }
 
     private func makeTerminalTab(for projectID: UUID?, workingDirectory: String?) -> TabItem {

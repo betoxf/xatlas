@@ -5,6 +5,7 @@ import Foundation
 @Observable
 final class AppUpdateService {
     static let shared = AppUpdateService()
+    private static let installedBuildLabel = "Installed build"
 
     enum State: Equatable {
         case idle
@@ -115,10 +116,13 @@ final class AppUpdateService {
         case .upToDate(let branch, let commit):
             state = .upToDate(branch: branch, commit: commit)
             if interactive {
-                _ = presentAlert(
-                    title: "xatlas is up to date",
-                    message: "Current branch: \(branch)\nCommit: \(commit)"
-                )
+                let message: String
+                if branch == Self.installedBuildLabel {
+                    message = "Current installation: \(branch)\nVersion: \(commit)"
+                } else {
+                    message = "Current branch: \(branch)\nCommit: \(commit)"
+                }
+                _ = presentAlert(title: "xatlas is up to date", message: message)
             }
         case .updateAvailable(let branch, let currentCommit, let remoteCommit):
             state = .updateAvailable(
@@ -206,6 +210,10 @@ final class AppUpdateService {
         let localCommit: String
     }
 
+    private struct HomebrewFormulaState {
+        let stableVersion: String
+    }
+
     private enum InspectionResult {
         case upToDate(branch: String, commit: String)
         case updateAvailable(branch: String, currentCommit: String, remoteCommit: String)
@@ -245,6 +253,9 @@ final class AppUpdateService {
             case .blocked(let message):
                 return .blocked(message)
             case .unavailable(let message):
+                if let installedResult = inspectInstalledBuildState() {
+                    return installedResult
+                }
                 return .unavailable(message)
             case .failed(let message):
                 return .failed(message)
@@ -293,6 +304,30 @@ final class AppUpdateService {
         case failed(String)
     }
 
+    nonisolated private static func inspectInstalledBuildState() -> InspectionResult? {
+        let installedBuildLabel = "Installed build"
+        guard let formulaState = try? resolveHomebrewFormulaState() else {
+            return nil
+        }
+
+        let currentVersion = currentBundleVersion()
+        guard !currentVersion.isEmpty else {
+            return nil
+        }
+
+        if currentVersion == formulaState.stableVersion {
+            return .upToDate(branch: installedBuildLabel, commit: currentVersion)
+        }
+
+        return .blocked(
+            """
+            A newer xatlas CLI/runtime is available via Homebrew (\(currentVersion) -> \(formulaState.stableVersion)), \
+            but this app was launched from an installed bundle rather than a local checkout. Update the CLI with \
+            `brew upgrade xatlas`, then reinstall `/Applications/xatlas.app` from the latest source build.
+            """
+        )
+    }
+
     nonisolated private static func resolveRepoContext() throws -> RepoContext {
         let fileManager = FileManager.default
         var currentURL = Bundle.main.bundleURL.resolvingSymlinksInPath().deletingLastPathComponent()
@@ -331,6 +366,41 @@ final class AppUpdateService {
         throw UpdateError.unavailable(
             "This build is not running from a local xatlas checkout, so there is no source tree to pull and rebuild."
         )
+    }
+
+    nonisolated private static func resolveHomebrewFormulaState() throws -> HomebrewFormulaState {
+        let brewExecutable = try resolveHomebrewExecutable()
+        let output = try run([brewExecutable.path, "info", "--json=v2", "xatlas"])
+        guard let data = output.data(using: .utf8),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let formulae = json["formulae"] as? [[String: Any]],
+              let formula = formulae.first,
+              let versions = formula["versions"] as? [String: Any],
+              let stableVersion = versions["stable"] as? String,
+              !stableVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw UpdateError.unavailable("Could not resolve the installed Homebrew xatlas formula.")
+        }
+
+        return HomebrewFormulaState(stableVersion: stableVersion)
+    }
+
+    nonisolated private static func resolveHomebrewExecutable() throws -> URL {
+        let fileManager = FileManager.default
+        let candidates = [
+            "/opt/homebrew/bin/brew",
+            "/usr/local/bin/brew",
+        ]
+
+        for candidate in candidates where fileManager.isExecutableFile(atPath: candidate) {
+            return URL(fileURLWithPath: candidate)
+        }
+
+        let output = try run(["/bin/zsh", "-lc", "command -v brew"])
+        let brewPath = try trimOutput(output)
+        guard fileManager.isExecutableFile(atPath: brewPath) else {
+            throw UpdateError.unavailable("Could not find a Homebrew executable for the installed xatlas runtime.")
+        }
+        return URL(fileURLWithPath: brewPath)
     }
 
     nonisolated private static func parseBlockingPaths(from statusOutput: String) -> [String] {
@@ -381,5 +451,10 @@ final class AppUpdateService {
             throw UpdateError.failed("Command returned no output.")
         }
         return trimmed
+    }
+
+    nonisolated private static func currentBundleVersion() -> String {
+        let rawValue = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        return rawValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 }

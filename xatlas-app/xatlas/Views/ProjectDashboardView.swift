@@ -259,6 +259,7 @@ struct ProjectQuickViewSheet: View {
     @State private var sessionDisplayOrder: [String] = []
     @State private var selectedSessionID: String?
     @State private var pendingCloseSessionID: String?
+    @State private var isProjectCloseConfirmationPresented = false
     @State private var sessionChipIdentities: [String: SessionChipIdentity] = [:]
     @State private var nextOrdinalByTitle: [String: Int] = [:]
     @State private var terminalFocusToken = 0
@@ -307,6 +308,11 @@ struct ProjectQuickViewSheet: View {
 
     private var totalVisibleSessionCount: Int {
         TerminalService.shared.sessionsForProject(project.id).filter { $0.activityState != .exited }.count
+    }
+
+    private var projectCloseWarningText: String {
+        let count = totalVisibleSessionCount
+        return "This will remove \(project.name) from xatlas and kill all \(count) terminal\(count == 1 ? "" : "s") plus their backing tmux session\(count == 1 ? "" : "s") everywhere."
     }
 
     var body: some View {
@@ -475,15 +481,13 @@ struct ProjectQuickViewSheet: View {
                 .padding(.vertical, 8)
                 .background(Capsule().fill(.white.opacity(0.5)))
 
-                if let sessionID = activeSessionID {
-                    Button("Close Terminal") {
-                        requestClose(sessionID)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Capsule().fill(.white.opacity(0.5)))
+                Button("Close Project") {
+                    isProjectCloseConfirmationPresented = true
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Capsule().fill(Color.red.opacity(0.14)))
 
                 Spacer()
             }
@@ -521,6 +525,17 @@ struct ProjectQuickViewSheet: View {
             }
         } message: {
             Text("This terminal looks active. Closing it will kill the backing tmux session everywhere.")
+        }
+        .confirmationDialog(
+            "Close project?",
+            isPresented: $isProjectCloseConfirmationPresented
+        ) {
+            Button("Close Project and Kill Terminals", role: .destructive) {
+                completeProjectClose()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(projectCloseWarningText)
         }
         .onExitCommand {
             state.closeProjectQuickView()
@@ -583,6 +598,12 @@ struct ProjectQuickViewSheet: View {
         selectedSessionID = nextSessionID
         state.setQuickViewSelectedSessionID(nextSessionID, for: project.id)
         sessionDisplayOrder.removeAll { $0 == sessionID }
+    }
+
+    private func completeProjectClose() {
+        isProjectCloseConfirmationPresented = false
+        state.closeProjectQuickView()
+        _ = state.removeProject(project)
     }
 
     private func sessionPriority(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {

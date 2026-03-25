@@ -99,6 +99,15 @@ private struct ProjectItemView: View {
     @State private var isHovered = false
     @State private var gitStatus: GitStatus?
     @State private var isSyncing = false
+    @State private var isRemoveConfirmationPresented = false
+
+    private var activeSessionCount: Int {
+        TerminalService.shared.sessionsForProject(project.id).filter { $0.activityState != .exited }.count
+    }
+
+    private var removeWarningText: String {
+        "This will remove \(project.name) from xatlas and kill all \(activeSessionCount) terminal\(activeSessionCount == 1 ? "" : "s") plus their backing tmux session\(activeSessionCount == 1 ? "" : "s") everywhere."
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -167,7 +176,18 @@ private struct ProjectItemView: View {
             }
             .onHover { isHovered = $0 }
             .contextMenu {
-                Button("Remove") { onRemove() }
+                Button("Close Project") { isRemoveConfirmationPresented = true }
+            }
+            .confirmationDialog(
+                "Close project?",
+                isPresented: $isRemoveConfirmationPresented
+            ) {
+                Button("Close Project and Kill Terminals", role: .destructive) {
+                    onRemove()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(removeWarningText)
             }
 
             // Inline file tree

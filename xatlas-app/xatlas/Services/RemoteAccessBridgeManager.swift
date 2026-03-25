@@ -5,12 +5,16 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
     private static let relayPortDefaultsKey = "xatlas.remoteAccessRelayPort"
     private static let relayIdentity = "xatlas-app"
 
+    private enum BridgeCommand {
+        case executable(URL)
+        case nodeScript(directory: URL, script: URL)
+    }
+
     private struct RuntimePaths {
         let nodeExecutable: URL
         let relayDirectory: URL
         let relayServerScript: URL
-        let bridgeDirectory: URL
-        let bridgeCLIScript: URL
+        let bridgeCommand: BridgeCommand
     }
 
     private let queue = DispatchQueue(label: "com.xatlas.remote-access-bridge")
@@ -218,9 +222,16 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
 
     private func runBridgeCLI(runtime: RuntimePaths, command: String, relayURL: String?) throws {
         let process = Process()
-        process.executableURL = runtime.nodeExecutable
-        process.arguments = [runtime.bridgeCLIScript.path, command]
-        process.currentDirectoryURL = runtime.bridgeDirectory
+        switch runtime.bridgeCommand {
+        case .executable(let executableURL):
+            process.executableURL = executableURL
+            process.arguments = [command]
+            process.currentDirectoryURL = executableURL.deletingLastPathComponent()
+        case .nodeScript(let directory, let script):
+            process.executableURL = runtime.nodeExecutable
+            process.arguments = [script.path, command]
+            process.currentDirectoryURL = directory
+        }
 
         var environment = ProcessInfo.processInfo.environment
         if let relayURL {
@@ -253,26 +264,30 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
         let fileManager = FileManager.default
         let bridgeRelativePath = "xatlas-bridge/bin/xatlas-bridge.js"
         let relayRelativePath = "relay/server.js"
+        let nodeExecutable = try resolveNodeExecutable()
+        let installedCLI = resolveInstalledCLIExecutable()
 
         for root in candidateSearchRoots() {
             let directBridge = root.appendingPathComponent(bridgeRelativePath)
             let directRelay = root.appendingPathComponent(relayRelativePath)
-            if fileManager.fileExists(atPath: directBridge.path),
-               fileManager.fileExists(atPath: directRelay.path) {
+            if fileManager.fileExists(atPath: directRelay.path) {
                 return try makeRuntimePaths(
-                    bridgeScript: directBridge,
-                    relayScript: directRelay
+                    bridgeScript: fileManager.fileExists(atPath: directBridge.path) ? directBridge : nil,
+                    relayScript: directRelay,
+                    nodeExecutable: nodeExecutable,
+                    installedCLI: installedCLI
                 )
             }
 
             let siblingRoot = root.deletingLastPathComponent()
             let siblingBridge = siblingRoot.appendingPathComponent(bridgeRelativePath)
             let siblingRelay = siblingRoot.appendingPathComponent(relayRelativePath)
-            if fileManager.fileExists(atPath: siblingBridge.path),
-               fileManager.fileExists(atPath: siblingRelay.path) {
+            if fileManager.fileExists(atPath: siblingRelay.path) {
                 return try makeRuntimePaths(
-                    bridgeScript: siblingBridge,
-                    relayScript: siblingRelay
+                    bridgeScript: fileManager.fileExists(atPath: siblingBridge.path) ? siblingBridge : nil,
+                    relayScript: siblingRelay,
+                    nodeExecutable: nodeExecutable,
+                    installedCLI: installedCLI
                 )
             }
         }
@@ -280,16 +295,29 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
         throw NSError(
             domain: "RemoteAccessBridgeManager",
             code: 2,
-            userInfo: [NSLocalizedDescriptionKey: "Could not find bundled xatlas bridge resources."]
+            userInfo: [NSLocalizedDescriptionKey: "Could not find the xatlas relay resources bundled with the app or source checkout."]
         )
     }
 
-    private func makeRuntimePaths(bridgeScript: URL, relayScript: URL) throws -> RuntimePaths {
-        guard let nodeExecutable = resolveNodeExecutable() else {
+    private func makeRuntimePaths(
+        bridgeScript: URL?,
+        relayScript: URL,
+        nodeExecutable: URL,
+        installedCLI: URL?
+    ) throws -> RuntimePaths {
+        let bridgeCommand: BridgeCommand
+        if let installedCLI {
+            bridgeCommand = .executable(installedCLI)
+        } else if let bridgeScript {
+            bridgeCommand = .nodeScript(
+                directory: bridgeScript.deletingLastPathComponent().deletingLastPathComponent(),
+                script: bridgeScript
+            )
+        } else {
             throw NSError(
                 domain: "RemoteAccessBridgeManager",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Could not find a Node.js executable for the bundled relay bridge."]
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Could not find an installed xatlas CLI or a bundled bridge runtime."]
             )
         }
 
@@ -297,8 +325,7 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
             nodeExecutable: nodeExecutable,
             relayDirectory: relayScript.deletingLastPathComponent(),
             relayServerScript: relayScript,
-            bridgeDirectory: bridgeScript.deletingLastPathComponent().deletingLastPathComponent(),
-            bridgeCLIScript: bridgeScript
+            bridgeCommand: bridgeCommand
         )
     }
 
@@ -329,7 +356,46 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
         return urls
     }
 
-    private func resolveNodeExecutable() -> URL? {
+    private func resolveInstalledCLIExecutable() -> URL? {
+        let fileManager = FileManager.default
+        let environment = ProcessInfo.processInfo.environment
+        let explicitPath = environment["XATLAS_CLI_PATH"]
+        let candidates = [
+            explicitPath,
+            "/opt/homebrew/bin/xatlas",
+            "/usr/local/bin/xatlas",
+            "/usr/bin/xatlas",
+        ].compactMap { $0 }
+
+        for candidate in candidates where fileManager.isExecutableFile(atPath: candidate) {
+            return URL(fileURLWithPath: candidate)
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-lc", "command -v xatlas"]
+        let outputPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+
+        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: outputData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !output.isEmpty,
+              fileManager.isExecutableFile(atPath: output) else {
+            return nil
+        }
+
+        return URL(fileURLWithPath: output)
+    }
+
+    private func resolveNodeExecutable() throws -> URL {
         let fileManager = FileManager.default
         let environment = ProcessInfo.processInfo.environment
         let explicitPath = environment["XATLAS_NODE_PATH"]
@@ -354,14 +420,23 @@ final class RemoteAccessBridgeManager: @unchecked Sendable {
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
-            return nil
+            throw NSError(
+                domain: "RemoteAccessBridgeManager",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Could not find a Node.js executable for the xatlas relay runtime."]
+            )
         }
 
         let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: outputData, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
+              !output.isEmpty,
               fileManager.isExecutableFile(atPath: output) else {
-            return nil
+            throw NSError(
+                domain: "RemoteAccessBridgeManager",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Could not find a Node.js executable for the xatlas relay runtime."]
+            )
         }
 
         return URL(fileURLWithPath: output)
