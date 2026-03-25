@@ -1,17 +1,21 @@
 #!/usr/bin/env node
 
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
+const path = require('node:path');
 const { URL } = require('node:url');
 
 const fallbackUrl = process.env.XATLAS_MCP_URL || 'http://127.0.0.1:9012/mcp';
 const stateFile = process.env.XATLAS_MCP_STATE_FILE || `${process.env.HOME || ''}/Library/Application Support/xatlas/mcp-server.json`;
 const logPath = process.env.XATLAS_MCP_BRIDGE_LOG || '';
+const bridgeRoot = path.resolve(__dirname, '..');
 let sessionId = process.env.XATLAS_MCP_SESSION_ID || '';
 let protocolVersion = process.env.XATLAS_MCP_PROTOCOL_VERSION || '';
 let inputBuffer = Buffer.alloc(0);
 let queue = Promise.resolve();
+let launchAttempted = false;
 
 process.stdin.on('data', (chunk) => {
   inputBuffer = Buffer.concat([inputBuffer, chunk]);
@@ -90,14 +94,18 @@ async function forwardMessage(body) {
 
 async function postMessageWithRetry(body) {
   let lastError;
-  for (let attempt = 0; attempt < 20; attempt++) {
+  for (let attempt = 0; attempt < 40; attempt++) {
     const targetUrl = resolveTargetUrl();
     try {
       return await postMessage(body, targetUrl);
     } catch (error) {
       lastError = error;
+      if (!launchAttempted && shouldAttemptAppLaunch(error)) {
+        launchAttempted = true;
+        await launchAppIfAvailable();
+      }
       logEvent(`retry ${attempt + 1} ${error.message}`);
-      await sleep(attempt < 5 ? 150 : 300);
+      await sleep(attempt < 10 ? 250 : 500);
     }
   }
   throw lastError || new Error('xatlas bridge failed without an explicit error');
@@ -169,6 +177,97 @@ function resolveTargetUrl() {
   }
 
   return new URL(fallbackUrl);
+}
+
+function shouldAttemptAppLaunch(error) {
+  if (!error) return false;
+  const code = typeof error.code === 'string' ? error.code : '';
+  return code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'EPIPE' || /timeout/i.test(error.message || '');
+}
+
+async function launchAppIfAvailable() {
+  const appPath = resolveAppPath();
+  if (!appPath) {
+    logEvent('launch skipped: no xatlas.app found');
+    return;
+  }
+
+  logEvent(`launching app ${appPath}`);
+  try {
+    const child = childProcess.spawn('open', ['-g', '-a', appPath], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+  } catch (error) {
+    logEvent(`launch failed: ${error.message}`);
+    return;
+  }
+
+  await waitForHealth();
+}
+
+function resolveAppPath() {
+  const candidates = [
+    process.env.XATLAS_APP_PATH || '',
+    '/Applications/xatlas.app',
+    path.join(bridgeRoot, '.dist', 'xatlas.app')
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return '';
+}
+
+async function waitForHealth() {
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const targetUrl = resolveTargetUrl();
+    if (await isServerHealthy(targetUrl)) {
+      return;
+    }
+    await sleep(250);
+  }
+}
+
+function isServerHealthy(targetUrl) {
+  const transport = targetUrl.protocol === 'https:' ? https : http;
+  const healthPath = `${targetUrl.pathname.replace(/\/mcp$/, '') || ''}/health${targetUrl.search}`;
+  return new Promise((resolve) => {
+    const request = transport.request(
+      {
+        protocol: targetUrl.protocol,
+        hostname: targetUrl.hostname,
+        port: targetUrl.port,
+        path: healthPath,
+        method: 'GET',
+        headers: { accept: 'application/json' },
+        agent: false
+      },
+      (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+          try {
+            const body = Buffer.concat(chunks).toString('utf8');
+            const parsed = JSON.parse(body);
+            resolve(response.statusCode === 200 && parsed?.status === 'ok');
+          } catch {
+            resolve(false);
+          }
+        });
+      }
+    );
+
+    request.setTimeout(1000, () => {
+      request.destroy(new Error('health timeout'));
+    });
+    request.on('error', () => resolve(false));
+    request.end();
+  });
 }
 
 function sleep(ms) {

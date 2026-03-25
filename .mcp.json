@@ -9,7 +9,10 @@
       "command" : "npx"
     },
     "xatlas" : {
-      "url" : "http:\/\/127.0.0.1:9012\/mcp"
+      "args" : [
+        "\/Users\/iPrado\/xatlas\/xatlas-app\/scripts\/mcp-stdio-bridge.js"
+      ],
+      "command" : "node"
     }
   }
 }
