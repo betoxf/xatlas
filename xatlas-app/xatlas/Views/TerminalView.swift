@@ -324,6 +324,9 @@ private final class ManagedLocalProcessTerminalView: LocalProcessTerminalView {
     var inputObserver: ((String) -> Void)?
     var layoutObserver: (() -> Void)?
 
+    // Prevent the host window's background-drag behavior from stealing text selection.
+    override var mouseDownCanMoveWindow: Bool { false }
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         commonInit()

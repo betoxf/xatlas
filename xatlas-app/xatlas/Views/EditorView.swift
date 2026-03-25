@@ -44,8 +44,8 @@ struct CodeEditorRepresentable: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
-        let textView = NSTextView()
+        let scrollView = FixedWindowDragScrollView()
+        let textView = FixedWindowDragTextView()
 
         textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.backgroundColor = .clear
@@ -86,4 +86,12 @@ struct CodeEditorRepresentable: NSViewRepresentable {
             parent.hasChanges = true
         }
     }
+}
+
+private final class FixedWindowDragScrollView: NSScrollView {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
+private final class FixedWindowDragTextView: NSTextView {
+    override var mouseDownCanMoveWindow: Bool { false }
 }
