@@ -105,7 +105,7 @@ function createXatlasMCPTransport({ env }) {
 
       req.on("error", (error) => {
         // Transient connection errors are expected if xatlas hasn't started yet
-        console.error(`[xatlas-bridge] MCP request error: ${error.message}`);
+        console.error(`[xatlas] MCP request error: ${error.message}`);
       });
 
       req.write(body);

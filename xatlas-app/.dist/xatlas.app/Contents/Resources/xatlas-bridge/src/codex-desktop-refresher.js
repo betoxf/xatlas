@@ -27,7 +27,7 @@ class CodexDesktopRefresher {
     refreshCommand = "",
     bundleId = DEFAULT_BUNDLE_ID,
     appPath = DEFAULT_APP_PATH,
-    logPrefix = "[xatlas-bridge]",
+    logPrefix = "[xatlas]",
     fallbackNewThreadMs = DEFAULT_FALLBACK_NEW_THREAD_MS,
     midRunRefreshThrottleMs = DEFAULT_MID_RUN_REFRESH_THROTTLE_MS,
     rolloutLookupTimeoutMs = DEFAULT_ROLLOUT_LOOKUP_TIMEOUT_MS,

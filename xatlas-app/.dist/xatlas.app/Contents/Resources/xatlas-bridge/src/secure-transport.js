@@ -534,7 +534,7 @@ function createBridgeSecureTransport({
 }
 
 function debugSecureLog(message) {
-  console.log(`[xatlas-bridge][secure] ${message}`);
+  console.log(`[xatlas][secure] ${message}`);
 }
 
 function shortId(value) {

@@ -1,4 +1,4 @@
-// FILE: remodex-cli.test.js
+// FILE: xatlas-cli.test.js
 // Purpose: Verifies the public CLI exposes a simple version command for support/debugging.
 // Layer: Integration-lite test
 // Exports: node:test suite
@@ -10,7 +10,7 @@ const { execFileSync } = require("child_process");
 const path = require("path");
 const { version } = require("../package.json");
 
-test("remodex --version prints the package version", () => {
+test("xatlas --version prints the package version", () => {
   const cliPath = path.join(__dirname, "..", "bin", "xatlas-bridge.js");
   const output = execFileSync(process.execPath, [cliPath, "--version"], {
     encoding: "utf8",

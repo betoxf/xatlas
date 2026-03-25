@@ -9,7 +9,7 @@ const assert = require("node:assert/strict");
 
 const { handleDesktopRequest } = require("../src/desktop-handler");
 
-test("desktop/continueOnMac relaunches Codex for the requested thread", async () => {
+test("desktop/continueOnMac relaunches xatlas for the requested thread", async () => {
   const executorCalls = [];
   const responses = [];
   let running = true;
@@ -46,7 +46,7 @@ test("desktop/continueOnMac relaunches Codex for the requested thread", async ()
   assert.equal(executorCalls[0][0], "pkill");
   assert.deepEqual(executorCalls[0][1], [
     "-x",
-    "Codex",
+    "xatlas",
   ]);
   assert.equal(executorCalls[1][0], "open");
   assert.deepEqual(executorCalls[1][1], [
@@ -71,7 +71,7 @@ test("desktop/continueOnMac relaunches Codex for the requested thread", async ()
   }]);
 });
 
-test("desktop/continueOnMac boots Codex before deep-linking unknown threads", async () => {
+test("desktop/continueOnMac boots xatlas before deep-linking unknown threads", async () => {
   const executorCalls = [];
   const responses = [];
 
@@ -113,7 +113,7 @@ test("desktop/continueOnMac boots Codex before deep-linking unknown threads", as
   assert.equal(responses[0].result?.relaunched, false);
 });
 
-test("desktop/continueOnMac relaunches when a desktop-known thread is requested and Codex is already open", async () => {
+test("desktop/continueOnMac relaunches when a desktop-known thread is requested and xatlas is already open", async () => {
   const executorCalls = [];
   const responses = [];
   let running = true;
@@ -169,7 +169,7 @@ test("desktop/continueOnMac relaunches when a desktop-known thread is requested 
   assert.equal(executorCalls[0][0], "pkill");
   assert.deepEqual(executorCalls[0][1], [
     "-x",
-    "Codex",
+    "xatlas",
   ]);
   assert.equal(executorCalls[1][0], "open");
   assert.deepEqual(executorCalls[1][1], [
@@ -186,7 +186,7 @@ test("desktop/continueOnMac relaunches when a desktop-known thread is requested 
   assert.equal(responses[0].result?.desktopKnown, true);
 });
 
-test("desktop/continueOnMac deep-links directly when the thread already exists locally but Codex is closed", async () => {
+test("desktop/continueOnMac deep-links directly when the thread already exists locally but xatlas is closed", async () => {
   const executorCalls = [];
   const responses = [];
   let running = false;

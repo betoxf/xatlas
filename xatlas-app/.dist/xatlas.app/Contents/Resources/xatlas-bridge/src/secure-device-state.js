@@ -29,7 +29,7 @@ function loadOrCreateBridgeDeviceState() {
   if (fileRecord.error) {
     if (keychainRecord.state) {
       warnOnce(
-        "[xatlas-bridge] Recovering the canonical device-state.json from the legacy Keychain pairing mirror."
+        "[xatlas] Recovering the canonical device-state.json from the legacy Keychain pairing mirror."
       );
       writeBridgeDeviceState(keychainRecord.state);
       return keychainRecord.state;
@@ -51,7 +51,7 @@ function loadOrCreateBridgeDeviceState() {
   return nextState;
 }
 
-// Removes the saved bridge identity/trust state so the next `xatlas-bridge up` requires a fresh QR pairing.
+// Removes the saved bridge identity/trust state so the next `xatlas up` requires a fresh QR pairing.
 function resetBridgeDeviceState() {
   const removedCanonicalFile = deleteCanonicalFileState();
   const removedKeychainMirror = deleteKeychainStateString();
@@ -301,7 +301,7 @@ function deleteCanonicalFileState() {
 // Prefers the canonical file, but repairs or warns about stale legacy Keychain mirrors.
 function reconcileLegacyKeychainMirror(canonicalState, keychainRecord) {
   if (keychainRecord.error) {
-    warnOnce("[xatlas-bridge] Ignoring unreadable legacy Keychain pairing mirror; using canonical device-state.json.");
+    warnOnce("[xatlas] Ignoring unreadable legacy Keychain pairing mirror; using canonical device-state.json.");
     return;
   }
 
@@ -314,7 +314,7 @@ function reconcileLegacyKeychainMirror(canonicalState, keychainRecord) {
     return;
   }
 
-  warnOnce("[xatlas-bridge] Canonical bridge pairing state differs from the legacy Keychain mirror; using device-state.json.");
+  warnOnce("[xatlas] Canonical bridge pairing state differs from the legacy Keychain mirror; using device-state.json.");
   writeKeychainStateString(JSON.stringify(canonicalState, null, 2));
 }
 
@@ -363,7 +363,7 @@ function corruptedStateError(source, error) {
   const detail = normalizeNonEmptyString(error?.message);
   return new Error(
     `The saved Xatlas pairing state in ${source} is unreadable. `
-      + "Run `xatlas-bridge reset-pairing` to start fresh."
+      + "Run `xatlas reset-pairing` to start fresh."
       + (detail ? ` (${detail})` : "")
   );
 }

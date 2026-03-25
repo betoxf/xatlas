@@ -129,6 +129,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             guard let coordinator, let terminal else { return }
             coordinator.attachIfNeeded(terminal)
         }
+        context.coordinator.installScrollMonitorIfNeeded(for: terminal)
         context.coordinator.attachIfNeeded(terminal)
         return terminal
     }
@@ -142,6 +143,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
 
     static func dismantleNSView(_ terminal: ManagedLocalProcessTerminalView, coordinator: Coordinator) {
         coordinator.detachCurrentSession(from: terminal)
+        coordinator.removeScrollMonitor()
         terminal.processDelegate = nil
         terminal.inputObserver = nil
         terminal.layoutObserver = nil
@@ -171,6 +173,9 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
         private static let minimumCols = 20
         private static let minimumRows = 6
+        private static let minimumPreloadLines = 720
+        private static let maximumPreloadLines = 1_600
+        private static let preloadViewportMultiplier = 18
 
         var sessionID: String
         private var attachedSessionID: String?
@@ -180,6 +185,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         private var inputBuffer = ""
         private var discardingEscapeSequence = false
         private var lastFocusToken: Int?
+        private var scrollMonitor: Any?
 
         init(sessionID: String) {
             self.sessionID = sessionID
@@ -234,6 +240,8 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             inputBuffer = ""
             discardingEscapeSequence = false
 
+            preloadRecentHistory(into: terminal, sessionName: sessionName)
+
             let command = TmuxService.shared.attachCommand(for: sessionName)
             MainActor.assumeIsolated {
                 terminal.startProcess(
@@ -252,6 +260,97 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             MainActor.assumeIsolated {
                 terminal.terminal.cols >= Self.minimumCols && terminal.terminal.rows >= Self.minimumRows
             }
+        }
+
+        func installScrollMonitorIfNeeded(for terminal: ManagedLocalProcessTerminalView) {
+            guard scrollMonitor == nil else { return }
+            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self, weak terminal] event in
+                guard let self, let terminal else { return event }
+                let eventWindowNumber = event.windowNumber
+                let eventLocation = event.locationInWindow
+                let shouldHandle = MainActor.assumeIsolated {
+                    guard let window = terminal.window, window.windowNumber == eventWindowNumber else { return false }
+                    let point = terminal.convert(eventLocation, from: nil)
+                    return terminal.bounds.contains(point)
+                }
+                guard shouldHandle else { return event }
+
+                return self.handleScroll(event, in: terminal) ? nil : event
+            }
+        }
+
+        func removeScrollMonitor() {
+            if let scrollMonitor {
+                NSEvent.removeMonitor(scrollMonitor)
+                self.scrollMonitor = nil
+            }
+        }
+
+        func handleScroll(_ event: NSEvent, in terminal: ManagedLocalProcessTerminalView) -> Bool {
+            guard let sessionName = attachedSessionName else { return false }
+            let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY
+            guard delta != 0 else { return false }
+
+            let canUseLocalScroll = MainActor.assumeIsolated {
+                terminal.canScroll
+            }
+            if canUseLocalScroll {
+                return false
+            }
+
+            let lines = scrollLineCount(for: delta, terminal: terminal)
+            let direction: TmuxScrollDirection = delta > 0 ? .up : .down
+
+            if TmuxService.shared.scrollCopyMode(session: sessionName, direction: direction, lines: lines) {
+                TerminalService.shared.handleAttached(sessionID: sessionID)
+                return true
+            }
+
+            return false
+        }
+
+        private func scrollLineCount(for delta: CGFloat, terminal: ManagedLocalProcessTerminalView) -> Int {
+            let magnitude = Int(abs(delta))
+            let viewportRows = MainActor.assumeIsolated { terminal.terminal.rows }
+            if magnitude > 9 {
+                return max(viewportRows, 20)
+            }
+            if magnitude > 5 {
+                return 10
+            }
+            if magnitude > 1 {
+                return 3
+            }
+            return 1
+        }
+
+        private func preloadRecentHistory(into terminal: ManagedLocalProcessTerminalView, sessionName: String) {
+            let visibleRows = MainActor.assumeIsolated { terminal.terminal.rows }
+            let requestedLines = min(
+                Self.maximumPreloadLines,
+                max(Self.minimumPreloadLines, visibleRows * Self.preloadViewportMultiplier)
+            )
+
+            guard let snapshot = TmuxService.shared.capturePane(session: sessionName, lines: requestedLines),
+                  let data = normalizedPreloadData(from: snapshot) else {
+                return
+            }
+
+            MainActor.assumeIsolated {
+                terminal.feed(byteArray: ArraySlice(data))
+            }
+        }
+
+        private func normalizedPreloadData(from snapshot: String) -> [UInt8]? {
+            let trimmed = snapshot.trimmingCharacters(in: .newlines)
+            guard !trimmed.isEmpty else { return nil }
+
+            let normalized = trimmed
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+                .replacingOccurrences(of: "\n", with: "\r\n")
+
+            return Array(normalized.utf8)
         }
 
         func captureInput(_ text: String) {

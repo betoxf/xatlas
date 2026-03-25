@@ -15,6 +15,11 @@ struct TmuxLaunchCommand {
     let execName: String
 }
 
+enum TmuxScrollDirection {
+    case up
+    case down
+}
+
 /// Manages named tmux sessions used by the native terminal tabs and MCP tools.
 final class TmuxService {
     nonisolated(unsafe) static let shared = TmuxService()
@@ -97,6 +102,19 @@ final class TmuxService {
         _ = runTmux(["resize-window", "-t", session, "-x", "\(cols)", "-y", "\(rows)"])
     }
 
+    @discardableResult
+    func scrollCopyMode(session: String, direction: TmuxScrollDirection, lines: Int) -> Bool {
+        let count = max(1, lines)
+        switch direction {
+        case .up:
+            guard runTmux(["copy-mode", "-e", "-t", session]).status == 0 else { return false }
+            return runTmux(["send-keys", "-X", "-t", session, "-N", "\(count)", "scroll-up"]).status == 0
+        case .down:
+            guard isPaneInMode(session: session) else { return false }
+            return runTmux(["send-keys", "-X", "-t", session, "-N", "\(count)", "scroll-down"]).status == 0
+        }
+    }
+
     func listSessions() -> [String] {
         let result = runTmux(["list-sessions", "-F", "#{session_name}"])
         guard result.status == 0, let output = result.output else { return [] }
@@ -156,6 +174,12 @@ final class TmuxService {
         let rename = runTmux(["rename-window", "-t", name, cleaned]).status == 0
         let persist = runTmux(["set-option", "-t", name, titleOptionName, cleaned]).status == 0
         return rename || persist
+    }
+
+    private func isPaneInMode(session: String) -> Bool {
+        let result = runTmux(["display-message", "-p", "-t", session, "#{pane_in_mode}"])
+        guard result.status == 0 else { return false }
+        return result.output?.trimmingCharacters(in: .whitespacesAndNewlines) == "1"
     }
 
     private func configureSession(name: String) {

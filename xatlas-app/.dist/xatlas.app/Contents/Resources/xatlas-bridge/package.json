@@ -1,9 +1,11 @@
 {
   "name": "xatlas-bridge",
-  "version": "0.1.0",
-  "description": "xatlas CLE (Command Line Environment) bridge/runtime for pairing the xatlas macOS app with mobile clients over the relay. Run `xatlas-bridge up` to start.",
+  "version": "0.2.0",
+  "description": "xatlas CLE (Command Line Environment): a fusion of IDE and CLI for managing projects, terminals, skills, MCPs, and automations from one place. Run `xatlas up` to start.",
   "main": "src/index.js",
   "bin": {
+    "xatlas": "./bin/xatlas-bridge.js",
+    "xatlas-cle": "./bin/xatlas-bridge.js",
     "xatlas-bridge": "./bin/xatlas-bridge.js"
   },
   "files": [
@@ -21,6 +23,7 @@
     "bridge",
     "mcp",
     "cli",
+    "ide",
     "cle",
     "command-line-environment"
   ],
