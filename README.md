@@ -1,12 +1,30 @@
-# xatlas CLE
+# xatlas
 
-This repo is the renamed continuation of the old `xerebro-operator-manager` project.
+> A command line environment for macOS: projects, terminals, Git, MCPs, skills, and automations in one native workspace.
 
-xatlas CLE (Command Line Environment) is a fusion between an IDE and a CLI.
+xatlas is the renamed continuation of the old `xerebro-operator-manager` project. It started around the VS Code extension, but the project now centers on the native xatlas app and its runtime.
 
-It grew out of the earlier extension and became the next natural step: a native interface for the way I actually build. You can keep as many projects and folders open as you need from one place, move between them quickly, create another workspace or terminal when needed, and share skills, MCPs, and automations across the whole environment without needing a five-monitor setup.
+Keep multiple repos open at once, jump between live terminals, inspect Git state, manage MCP servers and skills, and run AI-heavy workflows from one place without living inside a single editor window.
 
-The `xatlas` CLI is the install and runtime entrypoint for that environment. It starts the local service, prints the pairing QR when needed, reconnects to the relay, and keeps the native xatlas macOS app in sync with your sessions.
+<p align="center">
+  <img src="branding/readme/codex-demo.gif" alt="xatlas running Codex in the native app" width="960">
+</p>
+
+## What xatlas includes
+
+- `xatlas-app/`: the native macOS workspace for projects, terminals, source control, MCPs, skills, and automations
+- `xatlas-bridge/`: the CLI/runtime package that users install as `xatlas`
+- `relay/`: the optional pairing and reconnect service if you want to self-host that path
+
+The VS Code extension in this repo is no longer the main product surface.
+
+## Interface
+
+| Overview | Project Dashboard |
+| --- | --- |
+| ![xatlas overview](branding/readme/dashboard-overview.png) | ![xatlas project dashboard](branding/readme/project-dashboard.png) |
+
+![xatlas Codex session](branding/readme/codex-session.png)
 
 ## Install
 
@@ -38,18 +56,11 @@ The package keeps `xatlas-cle` and `xatlas-bridge` as compatibility aliases, but
 - `xatlas resume`: reopen the last active thread
 - `xatlas watch [threadId]`: tail the persisted rollout for a thread
 
-## Repo Notes
-
-- `xatlas-app/` is the native macOS CLE shell for managing projects, terminals, MCPs, skills, and automations
-- `xatlas-bridge/` is the CLI/runtime package users install as `xatlas`
-- `relay/` is optional and only matters if you want to self-host pairing/reconnect
-- `xatlas-ios/` is the mobile companion app for the same runtime
-- `tmux/` and `ghostty/` are vendored sources, not something you need to install separately for the Homebrew flow
-
-## Source Checkout
+## Source checkout
 
 ```bash
 ./xatlas-app/scripts/install-app.sh
+npm install -g ./xatlas-bridge
 open -na /Applications/xatlas.app
 xatlas up
 ```
