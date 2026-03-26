@@ -43,6 +43,58 @@ struct TerminalSession: Identifiable, Codable, Equatable {
         let path = currentDirectory ?? workingDirectory ?? NSHomeDirectory()
         return path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
     }
+
+    var isLive: Bool {
+        activityState != .exited
+    }
+
+    var activityDate: Date {
+        lastActivityAt ?? updatedAt
+    }
+
+    var priorityRank: Int {
+        if requiresAttention { return 0 }
+        switch activityState {
+        case .running: return 1
+        case .idle: return 2
+        case .detached: return 3
+        case .error: return 4
+        case .exited: return 5
+        }
+    }
+
+    static func priorityOrder(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
+        if lhs.priorityRank != rhs.priorityRank {
+            return lhs.priorityRank < rhs.priorityRank
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt > rhs.createdAt
+        }
+        return lhs.id > rhs.id
+    }
+
+    static func creationOrder(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt < rhs.createdAt
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt < rhs.updatedAt
+        }
+        return lhs.id < rhs.id
+    }
+
+    static func recencyOrder(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
+        if lhs.activityDate != rhs.activityDate {
+            return lhs.activityDate < rhs.activityDate
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt < rhs.updatedAt
+        }
+        return lhs.createdAt < rhs.createdAt
+    }
 }
 
 extension Notification.Name {

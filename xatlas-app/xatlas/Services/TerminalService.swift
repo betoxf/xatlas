@@ -62,10 +62,12 @@ final class TerminalService {
         return sessions.filter { $0.projectID == projectID }
     }
 
+    func liveSessionsForProject(_ projectID: UUID?) -> [TerminalSession] {
+        sessionsForProject(projectID).filter(\.isLive)
+    }
+
     func visibleSessionsForProject(_ projectID: UUID?, maxDetached: Int = 4) -> [TerminalSession] {
-        let ordered = sessionsForProject(projectID)
-            .filter { $0.activityState != .exited }
-            .sorted(by: Self.sessionPriority)
+        let ordered = liveSessionsForProject(projectID).sorted(by: TerminalSession.priorityOrder)
 
         let active = ordered.filter { $0.activityState != .detached }
         let detached = ordered.filter { $0.activityState == .detached }
@@ -74,7 +76,7 @@ final class TerminalService {
 
     func hiddenSessionCountForProject(_ projectID: UUID?, maxDetached: Int = 4) -> Int {
         let visibleCount = visibleSessionsForProject(projectID, maxDetached: maxDetached).count
-        let totalCount = sessionsForProject(projectID).filter { $0.activityState != .exited }.count
+        let totalCount = liveSessionsForProject(projectID).count
         return max(0, totalCount - visibleCount)
     }
 
@@ -345,10 +347,8 @@ final class TerminalService {
         var indexesToRemove: [Int] = []
         for (_, entries) in grouped {
             let sorted = entries.sorted { lhs, rhs in
-                let lhsDate = lhs.element.lastActivityAt ?? lhs.element.updatedAt
-                let rhsDate = rhs.element.lastActivityAt ?? rhs.element.updatedAt
-                if lhsDate != rhsDate {
-                    return lhsDate > rhsDate
+                if lhs.element.activityDate != rhs.element.activityDate {
+                    return lhs.element.activityDate > rhs.element.activityDate
                 }
                 return lhs.element.createdAt > rhs.element.createdAt
             }
@@ -535,26 +535,6 @@ final class TerminalService {
             directory == project.path || directory.hasPrefix(project.path + "/")
         })?.id
     }
-
-    private static func sessionPriority(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
-        let lhsRank = rank(for: lhs)
-        let rhsRank = rank(for: rhs)
-        if lhsRank != rhsRank {
-            return lhsRank < rhsRank
-        }
-        return lhs.updatedAt > rhs.updatedAt
-    }
-
-    private static func rank(for session: TerminalSession) -> Int {
-        if session.requiresAttention { return 0 }
-        switch session.activityState {
-        case .running: return 1
-        case .idle: return 2
-        case .detached: return 3
-        case .error: return 4
-        case .exited: return 5
-        }
-    }
 }
 
 private enum TerminalTitleHeuristics {
@@ -634,12 +614,5 @@ private enum TerminalTitleHeuristics {
             return URL(fileURLWithPath: lowered).lastPathComponent
         }
         return nil
-    }
-}
-
-private extension String {
-    var nonEmpty: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 }

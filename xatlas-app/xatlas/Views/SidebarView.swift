@@ -39,6 +39,7 @@ struct SidebarView: View {
                             project: project,
                             attentionCount: state.projectAttentionCount(project.id),
                             isSelected: state.selectedSection == .projects && state.selectedProject?.id == project.id,
+                            removeWarningText: state.projectCloseWarningText(for: project),
                             onSelect: {
                                 state.selectedSection = .projects
                                 if state.projectSurfaceMode == .dashboard {
@@ -89,6 +90,7 @@ private struct ProjectItemView: View {
     let project: Project
     let attentionCount: Int
     let isSelected: Bool
+    let removeWarningText: String
     let onSelect: () -> Void
     let onFileSelect: (String) -> Void
     let onRemove: () -> Void
@@ -97,14 +99,6 @@ private struct ProjectItemView: View {
     @State private var gitStatus: GitStatus?
     @State private var isSyncing = false
     @State private var isRemoveConfirmationPresented = false
-
-    private var activeSessionCount: Int {
-        TerminalService.shared.sessionsForProject(project.id).filter { $0.activityState != .exited }.count
-    }
-
-    private var removeWarningText: String {
-        "This will remove \(project.name) from xatlas and kill all \(activeSessionCount) terminal\(activeSessionCount == 1 ? "" : "s") plus their backing tmux session\(activeSessionCount == 1 ? "" : "s") everywhere."
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -164,11 +158,7 @@ private struct ProjectItemView: View {
                     .fill(isSelected ? Color.accentColor : XatlasSurface.hoverFill.opacity(isHovered ? 1 : 0))
             )
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                onSelect()
-                withAnimation(.easeOut(duration: 0.15)) { isExpanded = true }
-            }
-            .onTapGesture(count: 1) {
+            .onTapGesture {
                 onSelect()
                 withAnimation(.easeOut(duration: 0.15)) { isExpanded = true }
             }
@@ -233,6 +223,12 @@ private struct ProjectItemView: View {
 // MARK: - Git inline button
 
 private struct GitInlineButton: View {
+    private enum GitCommand: Sendable {
+        case pull
+        case push
+        case fetch
+    }
+
     let status: GitStatus
     let isSelected: Bool
     let isSyncing: Bool
@@ -284,26 +280,17 @@ private struct GitInlineButton: View {
                 Label("AI Sync", systemImage: "sparkles")
             }
             Button {
-                Task.detached {
-                    GitService.shared.pull(at: projectPath)
-                    await MainActor.run { onRefresh() }
-                }
+                runGitAction(.pull)
             } label: {
                 Label("Pull", systemImage: "arrow.down")
             }
             Button {
-                Task.detached {
-                    GitService.shared.push(at: projectPath)
-                    await MainActor.run { onRefresh() }
-                }
+                runGitAction(.push)
             } label: {
                 Label("Push", systemImage: "arrow.up")
             }
             Button {
-                Task.detached {
-                    GitService.shared.fetch(at: projectPath)
-                    await MainActor.run { onRefresh() }
-                }
+                runGitAction(.fetch)
             } label: {
                 Label("Fetch", systemImage: "arrow.clockwise")
             }
@@ -339,6 +326,22 @@ private struct GitInlineButton: View {
             let url = GitService.shared.remoteURL(at: projectPath)
             await MainActor.run {
                 remoteURL = url
+            }
+        }
+    }
+
+    private func runGitAction(_ command: GitCommand) {
+        Task.detached { [projectPath] in
+            switch command {
+            case .pull:
+                GitService.shared.pull(at: projectPath)
+            case .push:
+                GitService.shared.push(at: projectPath)
+            case .fetch:
+                GitService.shared.fetch(at: projectPath)
+            }
+            await MainActor.run {
+                onRefresh()
             }
         }
     }

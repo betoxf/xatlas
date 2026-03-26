@@ -44,7 +44,7 @@ struct ProjectDashboardView: View {
             )
 
             DashboardOperatorOverlay(
-                messages: operatorService.consoleMessages.suffix(6).map { $0 },
+                messages: Array(operatorService.consoleMessages.suffix(6)),
                 isReady: operatorService.isGlobalOperatorReady,
                 input: $operatorInput,
                 isCollapsed: $isOperatorCollapsed,
@@ -81,21 +81,14 @@ private struct ProjectDashboardCard: View {
     @Bindable var state: AppState
     let onQuickView: () -> Void
 
-    @State private var gitStatus = GitStatus(branch: "", changes: [], isRepo: false)
     @State private var previewText = "No terminal output yet."
     @State private var isHovered = false
     @State private var previewHistoryBySessionID: [String: String] = [:]
     @State private var previewSessionID: String?
     private let previewTimer = Timer.publish(every: 1.1, on: .main, in: .common).autoconnect()
 
-    private var sessions: [TerminalSession] {
-        TerminalService.shared.visibleSessionsForProject(project.id, maxDetached: 3)
-    }
-
     private var allSessions: [TerminalSession] {
-        TerminalService.shared
-            .sessionsForProject(project.id)
-            .filter { $0.activityState != .exited }
+        TerminalService.shared.liveSessionsForProject(project.id)
     }
 
     private var primarySession: TerminalSession? {
@@ -188,7 +181,6 @@ private struct ProjectDashboardCard: View {
         }
         .onHover { isHovered = $0 }
         .onAppear {
-            refresh()
             syncPreviewSessionSelection()
             refreshPreview()
         }
@@ -231,15 +223,6 @@ private struct ProjectDashboardCard: View {
         }
     }
 
-    private func refresh() {
-        Task.detached { [path = project.path] in
-            let status = GitService.shared.status(at: path)
-            await MainActor.run {
-                gitStatus = status
-            }
-        }
-    }
-
     private func refreshPreview() {
         guard let session = primarySession else {
             previewText = "Starting terminal…"
@@ -247,86 +230,72 @@ private struct ProjectDashboardCard: View {
         }
 
         guard let snapshot = TerminalService.shared.snapshot(for: session.id, lines: 18) else {
-            previewText = fallbackPreview(for: session)
+            previewText = DashboardPreviewFormatter.fallback(for: session)
             return
         }
 
-        let lines = previewLines(from: snapshot)
-        if lines.isEmpty {
+        guard let nextPreview = DashboardPreviewFormatter.preview(from: snapshot) else {
             if let rememberedPreview = previewHistoryBySessionID[session.id], !rememberedPreview.isEmpty {
                 previewText = rememberedPreview
                 return
             }
-            previewText = fallbackPreview(for: session)
+            previewText = DashboardPreviewFormatter.fallback(for: session)
             return
         }
 
-        let nextPreview = lines.suffix(6).joined(separator: "\n")
         previewHistoryBySessionID[session.id] = nextPreview
         previewText = nextPreview
     }
 
     private func syncPreviewSessionSelection() {
         if let quickViewSessionID = state.quickViewSelectedSessionID(for: project.id),
-           allSessions.contains(where: { $0.id == quickViewSessionID }) {
+           containsSession(id: quickViewSessionID) {
             previewSessionID = quickViewSessionID
             return
         }
 
         if state.selectedProject?.id == project.id,
            case .terminal(let sessionID) = state.selectedTab?.kind,
-           allSessions.contains(where: { $0.id == sessionID }) {
+           containsSession(id: sessionID) {
             previewSessionID = sessionID
             return
         }
 
-        if let previewSessionID,
-           allSessions.contains(where: { $0.id == previewSessionID }) {
+        if let previewSessionID, containsSession(id: previewSessionID) {
             return
         }
 
         previewSessionID = preferredPreviewSession()?.id
     }
 
-    private func previewLines(from snapshot: String) -> [String] {
-        snapshot
+    private func containsSession(id: String) -> Bool {
+        allSessions.contains(where: { $0.id == id })
+    }
+
+    private func preferredPreviewSession() -> TerminalSession? {
+        allSessions.max(by: TerminalSession.recencyOrder)
+    }
+
+}
+
+private enum DashboardPreviewFormatter {
+    static func preview(from snapshot: String) -> String? {
+        let lines = snapshot
             .components(separatedBy: .newlines)
             .map { $0.replacingOccurrences(of: "\t", with: "    ") }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .filter { !$0.allSatisfy { $0 == "─" || $0 == "_" || $0 == "-" || $0 == "·" } }
             .filter { !isPromptLike($0) }
-            .map { compactPreviewLine($0) }
+            .map(compact)
+
+        guard !lines.isEmpty else { return nil }
+        return lines.suffix(6).joined(separator: "\n")
     }
 
-    private func compactPreviewLine(_ line: String) -> String {
-        let collapsed = line.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-        if collapsed.count > 42 {
-            return String(collapsed.prefix(42)) + "…"
-        }
-        return collapsed
-    }
-
-    private func isPromptLike(_ line: String) -> Bool {
-        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            return true
-        }
-        if trimmed == ">" || trimmed.hasPrefix("> ") || trimmed.hasPrefix("› ") {
-            return true
-        }
-        if trimmed.hasSuffix("$") || trimmed.hasSuffix("%") || trimmed.hasSuffix("#") {
-            return true
-        }
-        if trimmed.contains("❯") {
-            return true
-        }
-        return false
-    }
-
-    private func fallbackPreview(for session: TerminalSession) -> String {
+    static func fallback(for session: TerminalSession) -> String {
         let directory = session.displayDirectory
-        let lastCommand = session.lastCommand.map(compactPreviewLine)
+        let lastCommand = session.lastCommand.map(compact)
 
         switch session.activityState {
         case .running:
@@ -346,22 +315,27 @@ private struct ProjectDashboardCard: View {
         }
     }
 
-    private func preferredPreviewSession() -> TerminalSession? {
-        allSessions.max(by: previewSessionOrder)
+    private static func compact(_ line: String) -> String {
+        let collapsed = line.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        if collapsed.count > 42 {
+            return String(collapsed.prefix(42)) + "…"
+        }
+        return collapsed
     }
 
-    private func previewSessionOrder(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
-        let lhsDate = lhs.lastActivityAt ?? lhs.updatedAt
-        let rhsDate = rhs.lastActivityAt ?? rhs.updatedAt
-        if lhsDate != rhsDate {
-            return lhsDate < rhsDate
+    private static func isPromptLike(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return true
         }
-        if lhs.updatedAt != rhs.updatedAt {
-            return lhs.updatedAt < rhs.updatedAt
+        if trimmed == ">" || trimmed.hasPrefix("> ") || trimmed.hasPrefix("› ") {
+            return true
         }
-        return lhs.createdAt < rhs.createdAt
+        if trimmed.hasSuffix("$") || trimmed.hasSuffix("%") || trimmed.hasSuffix("#") {
+            return true
+        }
+        return trimmed.contains("❯")
     }
-
 }
 
 private struct DashboardOperatorOverlay: View {
@@ -612,14 +586,12 @@ struct ProjectQuickViewSheet: View {
     @State private var dragAccumulated: CGSize = .zero
 
     private var allProjectSessions: [TerminalSession] {
-        TerminalService.shared
-            .sessionsForProject(project.id)
-            .filter { $0.activityState != .exited }
+        TerminalService.shared.liveSessionsForProject(project.id)
     }
 
     private var visibleSessions: [TerminalSession] {
         if showAllSessions {
-            return allProjectSessions.sorted(by: sessionPriority)
+            return allProjectSessions.sorted(by: TerminalSession.priorityOrder)
         }
 
         return TerminalService.shared.visibleSessionsForProject(project.id, maxDetached: 6)
@@ -635,7 +607,7 @@ struct ProjectQuickViewSheet: View {
         let orderedIDs = Set(ordered.map(\.id))
         let appended = visibleSessions
             .filter { !orderedIDs.contains($0.id) }
-            .sorted(by: sessionCreationOrder)
+            .sorted(by: TerminalSession.creationOrder)
         return ordered + appended
     }
 
@@ -652,12 +624,11 @@ struct ProjectQuickViewSheet: View {
     }
 
     private var totalVisibleSessionCount: Int {
-        TerminalService.shared.sessionsForProject(project.id).filter { $0.activityState != .exited }.count
+        state.projectLiveSessionCount(project.id)
     }
 
     private var projectCloseWarningText: String {
-        let count = totalVisibleSessionCount
-        return "This will remove \(project.name) from xatlas and kill all \(count) terminal\(count == 1 ? "" : "s") plus their backing tmux session\(count == 1 ? "" : "s") everywhere."
+        state.projectCloseWarningText(for: project)
     }
 
     var body: some View {
@@ -891,7 +862,7 @@ struct ProjectQuickViewSheet: View {
         let knownSessionIDs = Set(sessionDisplayOrder)
         sessionDisplayOrder.append(contentsOf: allProjectSessions
             .filter { !knownSessionIDs.contains($0.id) }
-            .sorted(by: sessionCreationOrder)
+            .sorted(by: TerminalSession.creationOrder)
             .map(\.id))
         reconcileSessionChipIdentities()
 
@@ -910,7 +881,7 @@ struct ProjectQuickViewSheet: View {
     }
 
     private func reconcileSessionChipIdentities() {
-        for session in allProjectSessions.sorted(by: sessionCreationOrder) {
+        for session in allProjectSessions.sorted(by: TerminalSession.creationOrder) {
             let title = session.displayTitle
             if let existing = sessionChipIdentities[session.id],
                existing.baseTitle == title {
@@ -946,25 +917,6 @@ struct ProjectQuickViewSheet: View {
         _ = state.removeProject(project)
     }
 
-    private func sessionPriority(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
-        let lhsRank = rank(for: lhs)
-        let rhsRank = rank(for: rhs)
-        if lhsRank != rhsRank {
-            return lhsRank < rhsRank
-        }
-        return lhs.updatedAt > rhs.updatedAt
-    }
-
-    private func sessionCreationOrder(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
-        if lhs.createdAt != rhs.createdAt {
-            return lhs.createdAt < rhs.createdAt
-        }
-        if lhs.updatedAt != rhs.updatedAt {
-            return lhs.updatedAt < rhs.updatedAt
-        }
-        return lhs.id < rhs.id
-    }
-
     private func sessionChipTitle(for session: TerminalSession) -> String {
         let peers = sessions.filter { $0.displayTitle == session.displayTitle }
         guard peers.count > 1 else { return session.displayTitle }
@@ -989,17 +941,6 @@ struct ProjectQuickViewSheet: View {
             } else {
                 requestTerminalFocus()
             }
-        }
-    }
-
-    private func rank(for session: TerminalSession) -> Int {
-        if session.requiresAttention { return 0 }
-        switch session.activityState {
-        case .running: return 1
-        case .idle: return 2
-        case .detached: return 3
-        case .error: return 4
-        case .exited: return 5
         }
     }
 }

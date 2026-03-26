@@ -1399,9 +1399,3 @@ final class AgentCatalogService {
         root[first] = child
     }
 }
-
-private extension String {
-    var nonEmpty: String? {
-        trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}

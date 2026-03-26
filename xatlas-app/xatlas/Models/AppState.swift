@@ -176,10 +176,7 @@ final class AppState: @unchecked Sendable {
 
     @discardableResult
     func removeProject(_ project: Project) -> Int {
-        let activeSessionCount = TerminalService.shared
-            .sessionsForProject(project.id)
-            .filter { $0.activityState != .exited }
-            .count
+        let activeSessionCount = projectLiveSessionCount(project.id)
         let sessionIDs = TerminalService.shared.sessionsForProject(project.id).map(\.id)
         sessionIDs.forEach { _ = discardTerminalSession($0, killTmux: true) }
 
@@ -417,6 +414,15 @@ final class AppState: @unchecked Sendable {
 
     func projectAttentionCount(_ projectID: UUID?) -> Int {
         TerminalService.shared.sessionsForProject(projectID).filter(\.requiresAttention).count
+    }
+
+    func projectLiveSessionCount(_ projectID: UUID?) -> Int {
+        TerminalService.shared.liveSessionsForProject(projectID).count
+    }
+
+    func projectCloseWarningText(for project: Project) -> String {
+        let count = projectLiveSessionCount(project.id)
+        return "This will remove \(project.name) from xatlas and kill all \(count) terminal\(count == 1 ? "" : "s") plus their backing tmux session\(count == 1 ? "" : "s") everywhere."
     }
 
     @discardableResult
