@@ -100,6 +100,7 @@ final class AppState: @unchecked Sendable {
     func loadProjects() {
         projects = ProjectManager.shared.loadProjects()
         TerminalService.shared.rehydrateSessions(projects: projects)
+        ProjectOperatorService.shared.bootstrap(projects: projects)
         if selectedProject == nil {
             selectedProject = projects.first
         }
@@ -124,6 +125,8 @@ final class AppState: @unchecked Sendable {
             projectSurfaceMode = .dashboard
         }
         ProjectManager.shared.saveProjects(projects)
+        ProjectOperatorService.shared.syncProjects(projects)
+        ProjectOperatorService.shared.refreshProject(project)
         showToast(
             title: "Project added",
             message: project.name,
@@ -195,6 +198,7 @@ final class AppState: @unchecked Sendable {
             }
         }
         ProjectManager.shared.saveProjects(projects)
+        ProjectOperatorService.shared.syncProjects(projects)
         showToast(
             title: "Project closed",
             message: activeSessionCount > 0

@@ -5,11 +5,9 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Spacer for traffic lights alignment
-            Spacer().frame(height: 38)
+            Spacer().frame(height: XatlasLayout.trafficLightClearance)
 
-            // Top actions
-            VStack(spacing: 1) {
+            VStack(spacing: 4) {
                 SidebarItem(icon: "server.rack", label: "MCP", isSelected: state.selectedSection == .mcp) {
                     state.selectedSection = .mcp
                 }
@@ -20,10 +18,9 @@ struct SidebarView: View {
                     state.selectedSection = .skills
                 }
             }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 14)
+            .padding(.horizontal, XatlasLayout.sidebarInset)
+            .padding(.bottom, 18)
 
-            // Section header
             SectionHeader(title: "Projects") {
                 HeaderModeToggleButton(mode: state.projectSurfaceMode) {
                     if state.projectSurfaceMode == .workspace {
@@ -35,9 +32,8 @@ struct SidebarView: View {
                 .accessibilityLabel(state.projectSurfaceMode == .workspace ? "Project dashboard" : "Project workspace")
             }
 
-            // Project list
             ScrollView {
-                VStack(spacing: 1) {
+                VStack(spacing: 6) {
                     ForEach(state.projects) { project in
                         ProjectItemView(
                             project: project,
@@ -63,12 +59,12 @@ struct SidebarView: View {
                         )
                     }
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, XatlasLayout.sidebarInset)
+                .padding(.bottom, 6)
             }
 
             Spacer(minLength: 8)
 
-            // Bottom glass buttons
             HStack(spacing: 10) {
                 SidebarCircleButton(icon: "gearshape.fill") { openSettings() }
                     .accessibilityLabel("Open settings")
@@ -76,8 +72,8 @@ struct SidebarView: View {
                 SidebarCircleButton(icon: "plus") { state.presentProjectPicker() }
                     .accessibilityLabel("Add project")
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 14)
+            .padding(.horizontal, XatlasLayout.sidebarInset)
+            .padding(.bottom, XatlasLayout.sidebarInset)
         }
     }
 
@@ -161,10 +157,10 @@ private struct ProjectItemView: View {
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.accentColor : Color.primary.opacity(isHovered ? 0.05 : 0))
+                RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : XatlasSurface.hoverFill.opacity(isHovered ? 1 : 0))
             )
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
@@ -348,8 +344,8 @@ private struct SectionHeader<Accessory: View>: View {
             Spacer()
             accessory()
         }
-        .padding(.horizontal, 18)
-        .padding(.bottom, 6)
+        .padding(.horizontal, XatlasLayout.sidebarInset + 4)
+        .padding(.bottom, 8)
     }
 }
 
@@ -362,10 +358,10 @@ private struct HeaderModeToggleButton: View {
             Image(systemName: mode == .workspace ? "sidebar.left" : "square.grid.2x2")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(Color.primary.opacity(0.92))
-                .frame(width: 22, height: 22)
+                .frame(width: XatlasLayout.compactControlSize, height: XatlasLayout.compactControlSize)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(.white.opacity(0.44))
+                    RoundedRectangle(cornerRadius: XatlasLayout.compactCornerRadius, style: .continuous)
+                        .fill(.white.opacity(0.5))
                 )
         }
         .buttonStyle(.plain)
@@ -578,10 +574,10 @@ private struct SidebarItem: View {
                 Spacer()
             }
             .padding(.horizontal, 8)
-            .padding(.vertical, 6)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.accentColor : Color.primary.opacity(isHovered ? 0.05 : 0))
+                RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : XatlasSurface.hoverFill.opacity(isHovered ? 1 : 0))
             )
         }
         .buttonStyle(.plain)
@@ -601,11 +597,16 @@ private struct SidebarCircleButton: View {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.primary.opacity(0.5))
-                .frame(width: 28, height: 28)
+                .frame(width: XatlasLayout.controlSize, height: XatlasLayout.controlSize)
         }
         .buttonStyle(.plain)
         .background(
-            Circle().fill(.white.opacity(isHovered ? 0.5 : 0.32))
+            RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                .fill(isHovered ? XatlasSurface.controlFillHovered : XatlasSurface.controlFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                        .stroke(.white.opacity(0.34), lineWidth: 1)
+                )
         )
         .onHover { isHovered = $0 }
         .scaleEffect(isHovered ? 1.08 : 1.0)

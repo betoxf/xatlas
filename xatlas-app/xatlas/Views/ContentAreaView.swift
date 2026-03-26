@@ -63,7 +63,7 @@ struct ContentAreaView: View {
 
     private var tabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
+            HStack(spacing: 6) {
                 ForEach(state.tabs) { tab in
                     TabButton(
                         tab: tab,
@@ -83,18 +83,24 @@ struct ContentAreaView: View {
                     Image(systemName: "plus")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.primary.opacity(0.65))
-                        .frame(width: 22, height: 22)
+                        .frame(width: XatlasLayout.compactControlSize, height: XatlasLayout.compactControlSize)
                         .background(
-                            Circle().fill(.white.opacity(0.38))
+                            RoundedRectangle(cornerRadius: XatlasLayout.compactCornerRadius, style: .continuous)
+                                .fill(.white.opacity(0.5))
                         )
                 }
                 .buttonStyle(.plain)
-                .padding(.leading, 4)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, XatlasLayout.contentInset)
+            .padding(.vertical, 10)
         }
-        .frame(height: 30)
-        .background(.ultraThinMaterial)
+        .frame(height: 42)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(XatlasSurface.divider)
+                .frame(height: 1)
+                .padding(.horizontal, XatlasLayout.contentInset)
+        }
     }
 
     private func requiresAttention(for tab: TabItem) -> Bool {
@@ -206,9 +212,12 @@ private struct TabButton: View {
             .buttonStyle(.plain)
             .opacity(isSelected ? 0.6 : 0)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(isSelected ? .white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(
+            isSelected ? .white.opacity(0.55) : .clear,
+            in: RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+        )
         .contentShape(Rectangle())
     }
 }

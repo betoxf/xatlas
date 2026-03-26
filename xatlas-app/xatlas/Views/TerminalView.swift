@@ -15,10 +15,15 @@ struct StyledTerminalView: View {
                     header(for: session)
                     NativeTmuxTerminalView(sessionID: sessionID, focusToken: focusToken)
                         .id(sessionID)
-                        .padding(.horizontal, 6)
-                        .padding(.bottom, 6)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
                 }
-                .padding(10)
+                .xatlasSectionSurface(
+                    radius: XatlasLayout.sectionCornerRadius,
+                    fill: .white.opacity(0.4),
+                    stroke: .white.opacity(0.34)
+                )
+                .padding(XatlasLayout.contentInset)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "terminal")
@@ -74,17 +79,12 @@ struct StyledTerminalView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.white.opacity(0.32))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(.white.opacity(0.22), lineWidth: 1)
-                )
-        )
-        .padding(.horizontal, 4)
-        .padding(.top, 6)
-        .padding(.bottom, 8)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(XatlasSurface.divider)
+                .frame(height: 1)
+                .padding(.horizontal, 12)
+        }
     }
 
     private func activityColor(for state: TerminalActivityState) -> SwiftUI.Color {

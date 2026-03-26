@@ -3,8 +3,6 @@ import SwiftUI
 struct MainView: View {
     @State private var state = AppState.shared
 
-    private let windowBg = Color(nsColor: NSColor(white: 0.93, alpha: 1.0))
-
     private var quickViewProject: Project? {
         guard let projectID = state.dashboardQuickViewProjectID else { return nil }
         return state.projects.first(where: { $0.id == projectID })
@@ -16,25 +14,20 @@ struct MainView: View {
                 AppSettingsView(state: state)
             } else {
                 ZStack {
-                    HStack(spacing: 10) {
+                    HStack(spacing: XatlasLayout.panelGap) {
                         SidebarView(state: state)
-                            .frame(width: 220)
-                            .background(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .fill(.white.opacity(0.75))
-                                    .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
-                                    .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-                            )
-                            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                            .padding(.leading, 10)
-                            .padding(.vertical, 10)
+                            .frame(width: XatlasLayout.sidebarWidth)
+                            .xatlasPanelSurface()
+                            .padding(.leading, XatlasLayout.windowPadding)
+                            .padding(.vertical, XatlasLayout.windowPadding)
 
                         VStack(spacing: 0) {
                             ToolbarView(state: state)
                             ContentAreaView(state: state)
                         }
-                        .padding(.trailing, 10)
-                        .padding(.bottom, 10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.trailing, XatlasLayout.windowPadding)
+                        .padding(.bottom, XatlasLayout.windowPadding)
                     }
                     .allowsHitTesting(quickViewProject == nil)
 
@@ -55,7 +48,7 @@ struct MainView: View {
                 .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
             }
         }
-        .background(windowBg)
+        .background(XatlasSurface.windowBackground)
         .overlay(alignment: .bottomTrailing) {
             if let toast = state.activeToast {
                 AppToastView(toast: toast)
@@ -68,7 +61,7 @@ struct MainView: View {
             if let project = state.selectedProject {
                 state.switchToProject(project, forceWorkspace: false)
             } else if state.tabs.isEmpty {
-                if let recovered = TerminalService.shared.sessions.first {
+                if let recovered = TerminalService.shared.sessions.first(where: { $0.displayTitle != "Operator" }) {
                     let tab = TabItem(
                         id: recovered.id,
                         title: recovered.displayTitle,
@@ -180,7 +173,8 @@ struct ToolbarView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
-                    Capsule().fill(.white.opacity(0.5))
+                    RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                        .fill(.white.opacity(0.5))
                 )
                 .frame(maxWidth: 200)
                 .onChange(of: state.isDashboardSearchActive) { _, active in
@@ -210,14 +204,24 @@ struct ToolbarView: View {
                             .font(.system(size: 11, weight: .semibold))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
-                            .background(Capsule().fill(.white.opacity(0.48)))
+                            .background(
+                                RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                                    .fill(.white.opacity(0.48))
+                            )
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(XatlasSurface.divider)
+                .frame(height: 1)
+                .padding(.horizontal, 14)
+        }
     }
 
     private var toolbarTitle: String {
@@ -243,14 +247,15 @@ private struct ToolbarCircleButton: View {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.primary.opacity(0.55))
-                .frame(width: 30, height: 30)
+                .frame(width: XatlasLayout.controlSize, height: XatlasLayout.controlSize)
         }
         .buttonStyle(.plain)
         .background(
-            Circle()
-                .fill(.white.opacity(isHovered ? 0.42 : 0.26))
+            RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                .fill(isHovered ? XatlasSurface.controlFillHovered : XatlasSurface.controlFill)
                 .overlay(
-                    Circle().stroke(.white.opacity(0.28), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                        .stroke(.white.opacity(0.34), lineWidth: 1)
                 )
         )
         .onHover { isHovered = $0 }

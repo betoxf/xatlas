@@ -8,7 +8,7 @@ struct WorkspaceSectionView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 22) {
                 header
 
                 switch state.selectedSection {
@@ -47,7 +47,7 @@ struct WorkspaceSectionView: View {
                     }
                 }
             }
-            .padding(18)
+            .padding(20)
         }
         .onAppear(perform: refresh)
         .onChange(of: state.selectedSection) { _, _ in refresh() }
@@ -85,7 +85,10 @@ struct WorkspaceSectionView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Capsule().fill(.white.opacity(0.55)))
+                    .background(
+                        RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                            .fill(.white.opacity(0.55))
+                    )
                 }
 
                 ForEach(quickActions) { action in
@@ -96,7 +99,10 @@ struct WorkspaceSectionView: View {
                     .font(.system(size: 12, weight: .medium))
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
-                    .background(Capsule().fill(.white.opacity(0.45)))
+                    .background(
+                        RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                            .fill(.white.opacity(0.45))
+                    )
                 }
 
                 Button(action: refresh) {
@@ -107,7 +113,7 @@ struct WorkspaceSectionView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .background(
-                    Capsule()
+                    RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
                         .fill(.white.opacity(0.45))
                 )
             }
@@ -141,6 +147,8 @@ struct WorkspaceSectionView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .xatlasSectionSurface(fill: .white.opacity(0.28), stroke: .white.opacity(0.26))
     }
 
     private func refresh() {
@@ -355,10 +363,7 @@ private struct OperatorEventRow: View {
             }
         }
         .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.white.opacity(0.5))
-        )
+        .xatlasSectionSurface()
     }
 
     private var title: String {
@@ -617,10 +622,7 @@ private struct CatalogCard<Content: View>: View {
             }
         }
         .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.white.opacity(0.38))
-        )
+        .xatlasSectionSurface()
     }
 }
 
@@ -645,7 +647,10 @@ private struct ScopeBadge: View {
             .foregroundStyle(.primary.opacity(0.65))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(Capsule().fill(.white.opacity(0.5)))
+            .background(
+                RoundedRectangle(cornerRadius: XatlasLayout.compactCornerRadius, style: .continuous)
+                    .fill(.white.opacity(0.5))
+            )
     }
 }
 

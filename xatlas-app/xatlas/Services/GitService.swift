@@ -102,6 +102,21 @@ final class GitService {
         """
     }
 
+    func recentCommitSummaries(at path: String, limit: Int = 5) -> [String] {
+        guard FileManager.default.fileExists(atPath: path + "/.git"),
+              let output = run(["git", "-C", path, "log", "--pretty=format:%h %s", "-n", "\(limit)"]) else {
+            return []
+        }
+        return output
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    func latestCommitSummary(at path: String) -> String? {
+        recentCommitSummaries(at: path, limit: 1).first
+    }
+
     func remoteURL(at path: String) -> String? {
         run(["git", "-C", path, "remote", "get-url", "origin"])?
             .trimmingCharacters(in: .whitespacesAndNewlines)

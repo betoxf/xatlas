@@ -290,6 +290,25 @@ final class TerminalService {
         }
     }
 
+    func setPinnedTitle(_ title: String?, for sessionID: String) {
+        var sessionName: String?
+        var resolvedTitle: String?
+
+        updateSession(sessionID) { session in
+            session.pinnedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+            if let pinned = session.pinnedTitle {
+                session.title = pinned
+            }
+            session.updatedAt = .now
+            sessionName = session.tmuxSessionName
+            resolvedTitle = session.displayTitle
+        }
+
+        if let sessionName, let resolvedTitle {
+            _ = tmux.setSessionTitle(name: sessionName, title: resolvedTitle)
+        }
+    }
+
     private func updateSession(_ sessionID: String, mutate: (inout TerminalSession) -> Void) {
         guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
         let previous = sessions[index]
@@ -300,7 +319,7 @@ final class TerminalService {
 
     private func cleanupDetachedSessions(maxPerProject: Int = 3) {
         let grouped = Dictionary(grouping: sessions.enumerated().filter { _, session in
-            session.activityState == .detached && !session.requiresAttention
+            session.activityState == .detached && !session.requiresAttention && session.pinnedTitle != "Operator"
         }) { _, session in
             session.projectID?.uuidString ?? session.currentDirectory ?? session.workingDirectory ?? "__global__"
         }

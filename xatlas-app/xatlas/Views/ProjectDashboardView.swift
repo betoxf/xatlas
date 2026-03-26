@@ -3,9 +3,13 @@ import SwiftUI
 
 struct ProjectDashboardView: View {
     @Bindable var state: AppState
+    @State private var operatorService = ProjectOperatorService.shared
+    @State private var operatorInput = ""
+    @State private var isOperatorCollapsed = false
+    @FocusState private var isOperatorFocused: Bool
 
     private let columns = [
-        GridItem(.adaptive(minimum: 220, maximum: 280), spacing: 16, alignment: .top)
+        GridItem(.adaptive(minimum: 240, maximum: 300), spacing: 18, alignment: .top)
     ]
 
     private var filteredProjects: [Project] {
@@ -15,22 +19,44 @@ struct ProjectDashboardView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVGrid(columns: columns, spacing: 18) {
-                ForEach(filteredProjects) { project in
-                    ProjectDashboardCard(
-                        project: project,
-                        state: state,
-                        onQuickView: {
-                            _ = state.openProjectQuickView(id: project.id)
-                        }
-                    )
-                }
+        ZStack(alignment: .bottom) {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 20) {
+                    ForEach(filteredProjects) { project in
+                        ProjectDashboardCard(
+                            project: project,
+                            state: state,
+                            onQuickView: {
+                                _ = state.openProjectQuickView(id: project.id)
+                            }
+                        )
+                    }
 
-                AddProjectTile(action: state.presentProjectPicker)
+                    AddProjectTile(action: state.presentProjectPicker)
+                }
+                .padding(20)
+                .padding(.bottom, isOperatorCollapsed ? 104 : 216)
             }
-            .padding(18)
+
+            DashboardOperatorOverlay(
+                messages: operatorService.consoleMessages.suffix(6).map { $0 },
+                isReady: operatorService.isGlobalOperatorReady,
+                input: $operatorInput,
+                isCollapsed: $isOperatorCollapsed,
+                isFocused: $isOperatorFocused,
+                addProject: state.presentProjectPicker,
+                send: sendOperatorMessage
+            )
+            .padding(.horizontal, 26)
+            .padding(.bottom, 18)
         }
+    }
+
+    private func sendOperatorMessage() {
+        let trimmed = operatorInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        _ = operatorService.sendConsoleMessage(trimmed, preferredProject: nil)
+        operatorInput = ""
     }
 
 }
@@ -102,7 +128,7 @@ private struct ProjectDashboardCard: View {
     var body: some View {
         let _ = state.terminalEventVersion
 
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
@@ -164,20 +190,20 @@ private struct ProjectDashboardCard: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .clipped()
             }
-            .padding(10)
+            .padding(12)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.black.opacity(0.045))
+                    .fill(Color.black.opacity(0.04))
             )
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 200, alignment: .topLeading)
+        .padding(18)
+        .frame(maxWidth: .infinity, minHeight: 214, maxHeight: 214, alignment: .topLeading)
         .background(cardBackground)
         .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
+            RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous)
                 .strokeBorder(strokeColor, lineWidth: isSelected ? 1.4 : 1)
         )
-        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous))
         .onTapGesture {
             onQuickView()
         }
@@ -192,7 +218,7 @@ private struct ProjectDashboardCard: View {
     }
 
     private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
+        RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous)
             .fill(.white.opacity(isHovered || isSelected ? 0.62 : 0.48))
             .shadow(color: .black.opacity(isSelected ? 0.12 : 0.08), radius: 16, y: 8)
     }
@@ -244,6 +270,191 @@ private struct ProjectDashboardCard: View {
             .minimumScaleFactor(0.8)
     }
 
+}
+
+private struct DashboardOperatorOverlay: View {
+    let messages: [OperatorConsoleMessage]
+    let isReady: Bool
+    @Binding var input: String
+    @Binding var isCollapsed: Bool
+    var isFocused: FocusState<Bool>.Binding
+    let addProject: () -> Void
+    let send: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !isCollapsed && !messages.isEmpty {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(messages) { message in
+                            OperatorBubble(message: message)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 2)
+                }
+                .frame(maxHeight: 132)
+                .padding(.bottom, 2)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                operatorHandle
+
+                HStack(alignment: .bottom, spacing: 10) {
+                    Button(action: addProject) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.primary.opacity(0.52))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+
+                    TextField(placeholder, text: $input, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1...4)
+                        .focused(isFocused)
+                        .onTapGesture {
+                            if isCollapsed {
+                                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                    isCollapsed = false
+                                }
+                            }
+                        }
+                        .onSubmit(send)
+
+                    Button(action: send) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(
+                                input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? Color.secondary.opacity(0.35)
+                                    : Color.primary
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+            .background(sheetBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(.white.opacity(isInteractive ? 0.74 : 0.56), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(isInteractive ? 0.08 : 0.05), radius: isInteractive ? 16 : 12, y: 4)
+        }
+        .frame(maxWidth: 680)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .onHover { isHovered = $0 }
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isCollapsed)
+    }
+
+    private var isInteractive: Bool {
+        isHovered || isFocused.wrappedValue
+    }
+
+    private var placeholder: String {
+        isReady
+            ? "Message the operator. Codex --yolo is running in the background…"
+            : "Starting the Codex operator…"
+    }
+
+    private var sheetBackground: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(Color.white.opacity(isInteractive ? 0.95 : 0.89))
+    }
+
+    private var operatorHandle: some View {
+        Capsule()
+            .fill(Color.black.opacity(0.14))
+            .frame(width: 48, height: 5)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    isCollapsed.toggle()
+                }
+            }
+            .gesture(
+                DragGesture(minimumDistance: 8)
+                    .onEnded { value in
+                        if value.translation.height > 18 {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                isCollapsed = true
+                            }
+                        } else if value.translation.height < -18 {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                isCollapsed = false
+                            }
+                        }
+                    }
+            )
+    }
+}
+
+private struct OperatorBubble: View {
+    let message: OperatorConsoleMessage
+
+    var body: some View {
+        HStack {
+            if message.role == .user {
+                Spacer(minLength: 80)
+            }
+
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 5) {
+                Text(message.text)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .foregroundStyle(message.role == .user ? .white : .primary.opacity(0.84))
+                    .lineSpacing(1.5)
+                    .textSelection(.enabled)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(bubbleBackground)
+            .frame(maxWidth: 420, alignment: message.role == .user ? .trailing : .leading)
+
+            if message.role == .assistant {
+                Spacer(minLength: 80)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var bubbleBackground: some View {
+        if message.role == .user {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 18,
+                bottomLeadingRadius: 18,
+                bottomTrailingRadius: 6,
+                topTrailingRadius: 18
+            )
+            .fill(Color.accentColor.opacity(0.9))
+            .shadow(color: Color.accentColor.opacity(0.14), radius: 10, x: 0, y: 5)
+        } else {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 18,
+                bottomLeadingRadius: 6,
+                bottomTrailingRadius: 18,
+                topTrailingRadius: 18
+            )
+            .fill(.white.opacity(0.74))
+            .overlay(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 18,
+                    bottomLeadingRadius: 6,
+                    bottomTrailingRadius: 18,
+                    topTrailingRadius: 18
+                )
+                .stroke(.white.opacity(0.58), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.05), radius: 8, x: 0, y: 4)
+        }
+    }
 }
 
 struct ProjectQuickViewSheet: View {

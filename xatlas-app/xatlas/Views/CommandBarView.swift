@@ -19,16 +19,16 @@ struct CommandBarView: View {
                 .accessibilityIdentifier("xatlas.commandBar")
                 .onSubmit { handleSubmit() }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            Capsule()
-                .fill(.white.opacity(0.75))
-                .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
-                .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .xatlasSectionSurface(
+            radius: XatlasLayout.sectionCornerRadius,
+            fill: .white.opacity(0.72),
+            stroke: .white.opacity(0.48)
         )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 10)
+        .padding(.horizontal, XatlasLayout.contentInset)
+        .padding(.top, 12)
+        .padding(.bottom, XatlasLayout.contentInset)
         .onChange(of: state.isCommandBarFocused) { _, focused in
             isFocused = focused
         }
