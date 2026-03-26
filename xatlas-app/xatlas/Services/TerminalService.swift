@@ -91,6 +91,24 @@ final class TerminalService {
         guard tmux.isAvailable() else { return }
         tmux.normalizeManagedSessions()
 
+        let staleTestSessionNames = Set(
+            tmux.listManagedSessions()
+                .filter { descriptor in
+                    descriptor.name.localizedCaseInsensitiveContains("scrolltest")
+                        || (descriptor.title?.localizedCaseInsensitiveContains("scrolltest") ?? false)
+                }
+                .map(\.name)
+        )
+
+        staleTestSessionNames.forEach { sessionName in
+            _ = tmux.killSession(name: sessionName)
+        }
+
+        sessions.removeAll { session in
+            staleTestSessionNames.contains(session.tmuxSessionName)
+                || session.displayTitle.localizedCaseInsensitiveContains("scrolltest")
+        }
+
         let liveSessions = tmux.listManagedSessions()
         let liveNames = Set(liveSessions.map(\.name))
 

@@ -9,7 +9,10 @@ enum XatlasLayout {
     static let sectionCornerRadius: CGFloat = 18
     static let controlCornerRadius: CGFloat = 12
     static let compactCornerRadius: CGFloat = 10
-    static let trafficLightClearance: CGFloat = 40
+    static let trafficLightTopInset: CGFloat = 15
+    static let trafficLightLeadingInset: CGFloat = 18
+    static let trafficLightSpacing: CGFloat = 6
+    static let trafficLightClearance: CGFloat = 56
     static let sidebarInset: CGFloat = 14
     static let contentInset: CGFloat = 14
     static let controlSize: CGFloat = 32

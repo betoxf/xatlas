@@ -173,9 +173,9 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
         private static let minimumCols = 20
         private static let minimumRows = 6
-        private static let minimumPreloadLines = 720
-        private static let maximumPreloadLines = 1_600
-        private static let preloadViewportMultiplier = 18
+        private static let minimumPreloadLines = 240
+        private static let maximumPreloadLines = 720
+        private static let preloadViewportMultiplier = 10
 
         var sessionID: String
         private var attachedSessionID: String?

@@ -42,6 +42,7 @@ struct SidebarView: View {
                             onSelect: {
                                 state.selectedSection = .projects
                                 if state.projectSurfaceMode == .dashboard {
+                                    state.switchToProject(project, forceWorkspace: false)
                                     state.openProjectQuickView(id: project.id)
                                 } else {
                                     state.switchToProject(project)
@@ -133,7 +134,7 @@ private struct ProjectItemView: View {
                 }
 
                 // Git status button
-                if let status = gitStatus, status.isRepo {
+                if let status = gitStatus, status.isRepo, !status.changes.isEmpty {
                     GitInlineButton(
                         status: status,
                         isSelected: isSelected,
@@ -165,10 +166,11 @@ private struct ProjectItemView: View {
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
                 onSelect()
-                withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+                withAnimation(.easeOut(duration: 0.15)) { isExpanded = true }
             }
             .onTapGesture(count: 1) {
                 onSelect()
+                withAnimation(.easeOut(duration: 0.15)) { isExpanded = true }
             }
             .onHover { isHovered = $0 }
             .contextMenu {
@@ -193,7 +195,12 @@ private struct ProjectItemView: View {
             }
         }
         .onAppear { refreshGit() }
-        .onChange(of: isSelected) { _, sel in if sel { refreshGit() } }
+        .onChange(of: isSelected) { _, sel in
+            if sel {
+                refreshGit()
+                withAnimation(.easeOut(duration: 0.15)) { isExpanded = true }
+            }
+        }
     }
 
     private func refreshGit() {
@@ -246,14 +253,12 @@ private struct GitInlineButton: View {
                         .controlSize(.mini)
                         .scaleEffect(0.6)
                 } else {
-                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                    Image(systemName: "arrow.triangle.branch")
                         .font(.system(size: 10, weight: .medium))
                 }
 
-                if hasChanges {
-                    Text("\(changeCount)")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
-                }
+                Text("\(changeCount)")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
             }
             .foregroundStyle(badgeColor)
             .padding(.horizontal, 5)
@@ -268,39 +273,50 @@ private struct GitInlineButton: View {
         .onHover { isGitHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isGitHovered)
         .onAppear { refreshRemoteURL() }
-        .help(hasChanges ? "Commit & push \(changeCount) change\(changeCount == 1 ? "" : "s")" : "Up to date — \(status.branch)")
+        .help("Commit & push \(changeCount) change\(changeCount == 1 ? "" : "s")")
         .contextMenu {
-            Text(status.branch).font(.headline)
+            Label(status.branch, systemImage: "arrow.triangle.branch")
+                .font(.headline)
             Divider()
-            Button("AI Sync") { onSync() }
-            Button("Pull") {
+            Button {
+                onSync()
+            } label: {
+                Label("AI Sync", systemImage: "sparkles")
+            }
+            Button {
                 Task.detached {
                     GitService.shared.pull(at: projectPath)
                     await MainActor.run { onRefresh() }
                 }
+            } label: {
+                Label("Pull", systemImage: "arrow.down")
             }
-            Button("Push") {
+            Button {
                 Task.detached {
                     GitService.shared.push(at: projectPath)
                     await MainActor.run { onRefresh() }
                 }
+            } label: {
+                Label("Push", systemImage: "arrow.up")
             }
-            Button("Fetch") {
+            Button {
                 Task.detached {
                     GitService.shared.fetch(at: projectPath)
                     await MainActor.run { onRefresh() }
                 }
+            } label: {
+                Label("Fetch", systemImage: "arrow.clockwise")
             }
             if remoteURL != nil {
-                Button("Open GitHub Remote") {
+                Button {
                     GitService.shared.openRemote(at: projectPath)
+                } label: {
+                    Label("Open GitHub Remote", systemImage: "arrow.up.right.square")
                 }
             }
             Divider()
-            if hasChanges {
-                Text("\(changeCount) changed file\(changeCount == 1 ? "" : "s")")
-                    .font(.caption)
-            }
+            Text("\(changeCount) changed file\(changeCount == 1 ? "" : "s")")
+                .font(.caption)
         }
     }
 
@@ -308,14 +324,14 @@ private struct GitInlineButton: View {
         if isSelected {
             return .white.opacity(0.9)
         }
-        return hasChanges ? .orange.opacity(0.85) : .green.opacity(0.65)
+        return .orange.opacity(0.85)
     }
 
     private var badgeBgColor: Color {
         if isSelected {
             return .white.opacity(0.15)
         }
-        return hasChanges ? .orange.opacity(0.1) : .green.opacity(0.06)
+        return .orange.opacity(0.1)
     }
 
     private func refreshRemoteURL() {

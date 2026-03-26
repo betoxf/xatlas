@@ -100,11 +100,13 @@ final class AppState: @unchecked Sendable {
     func loadProjects() {
         projects = ProjectManager.shared.loadProjects()
         TerminalService.shared.rehydrateSessions(projects: projects)
+        ensureDefaultTerminals(for: projects)
         ProjectOperatorService.shared.bootstrap(projects: projects)
         if selectedProject == nil {
             selectedProject = projects.first
         }
         if let selectedProject {
+            switchToProject(selectedProject, forceWorkspace: false)
             FileTreeCache.shared.preload(rootPath: selectedProject.path)
         }
     }
@@ -117,6 +119,7 @@ final class AppState: @unchecked Sendable {
         let project = Project(name: name, path: path)
         projects.append(project)
         TerminalService.shared.rehydrateSessions(projects: projects)
+        ensureDefaultTerminal(for: project)
         switch behavior {
         case .selectInWorkspace:
             switchToProject(project)
@@ -537,6 +540,20 @@ final class AppState: @unchecked Sendable {
     private func makeTerminalTab(for projectID: UUID?, workingDirectory: String?) -> TabItem {
         let session = TerminalService.shared.createSession(projectID: projectID, workingDirectory: workingDirectory)
         return TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
+    }
+
+    private func ensureDefaultTerminals(for projects: [Project]) {
+        for project in projects {
+            ensureDefaultTerminal(for: project)
+        }
+    }
+
+    private func ensureDefaultTerminal(for project: Project) {
+        let hasLiveSession = TerminalService.shared
+            .sessionsForProject(project.id)
+            .contains { $0.activityState != .exited }
+        guard !hasLiveSession else { return }
+        _ = makeTerminalTab(for: project.id, workingDirectory: project.path)
     }
 
     private func persistActiveProjectTabState() {

@@ -28,6 +28,13 @@ The VS Code extension in this repo is no longer the main product surface.
 
 ## Install
 
+Prerequisite:
+
+```bash
+brew install tmux
+tmux -V
+```
+
 Primary CLI install:
 
 ```bash
@@ -59,6 +66,7 @@ The package keeps `xatlas-cle` and `xatlas-bridge` as compatibility aliases, but
 ## Source checkout
 
 ```bash
+brew install tmux
 ./xatlas-app/scripts/install-app.sh
 npm install -g ./xatlas-bridge
 open -na /Applications/xatlas.app

@@ -9,7 +9,7 @@ struct ProjectDashboardView: View {
     @FocusState private var isOperatorFocused: Bool
 
     private let columns = [
-        GridItem(.adaptive(minimum: 240, maximum: 300), spacing: 18, alignment: .top)
+        GridItem(.adaptive(minimum: 214, maximum: 258), spacing: 16, alignment: .top)
     ]
 
     private var filteredProjects: [Project] {
@@ -21,7 +21,7 @@ struct ProjectDashboardView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 20) {
+                LazyVGrid(columns: columns, spacing: 16) {
                     ForEach(filteredProjects) { project in
                         ProjectDashboardCard(
                             project: project,
@@ -34,9 +34,14 @@ struct ProjectDashboardView: View {
 
                     AddProjectTile(action: state.presentProjectPicker)
                 }
-                .padding(20)
-                .padding(.bottom, isOperatorCollapsed ? 104 : 216)
+                .padding(18)
+                .padding(.bottom, isOperatorCollapsed ? 84 : 198)
             }
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    activateOperatorInput()
+                }
+            )
 
             DashboardOperatorOverlay(
                 messages: operatorService.consoleMessages.suffix(6).map { $0 },
@@ -45,10 +50,14 @@ struct ProjectDashboardView: View {
                 isCollapsed: $isOperatorCollapsed,
                 isFocused: $isOperatorFocused,
                 addProject: state.presentProjectPicker,
-                send: sendOperatorMessage
+                send: sendOperatorMessage,
+                activateInput: activateOperatorInput
             )
-            .padding(.horizontal, 26)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 14)
+        }
+        .onAppear {
+            activateOperatorInput()
         }
     }
 
@@ -57,6 +66,12 @@ struct ProjectDashboardView: View {
         guard !trimmed.isEmpty else { return }
         _ = operatorService.sendConsoleMessage(trimmed, preferredProject: nil)
         operatorInput = ""
+        activateOperatorInput()
+    }
+
+    private func activateOperatorInput() {
+        guard !isOperatorCollapsed else { return }
+        isOperatorFocused = true
     }
 
 }
@@ -69,56 +84,30 @@ private struct ProjectDashboardCard: View {
     @State private var gitStatus = GitStatus(branch: "", changes: [], isRepo: false)
     @State private var previewText = "No terminal output yet."
     @State private var isHovered = false
+    @State private var previewHistoryBySessionID: [String: String] = [:]
+    @State private var previewSessionID: String?
+    private let previewTimer = Timer.publish(every: 1.1, on: .main, in: .common).autoconnect()
 
     private var sessions: [TerminalSession] {
         TerminalService.shared.visibleSessionsForProject(project.id, maxDetached: 3)
     }
 
-    private var primarySession: TerminalSession? {
-        sessions.first
+    private var allSessions: [TerminalSession] {
+        TerminalService.shared
+            .sessionsForProject(project.id)
+            .filter { $0.activityState != .exited }
     }
 
-    private var hiddenSessionCount: Int {
-        TerminalService.shared.hiddenSessionCountForProject(project.id, maxDetached: 3)
+    private var primarySession: TerminalSession? {
+        if let previewSessionID,
+           let matchingSession = allSessions.first(where: { $0.id == previewSessionID }) {
+            return matchingSession
+        }
+        return preferredPreviewSession()
     }
 
     private var attentionCount: Int {
         state.projectAttentionCount(project.id)
-    }
-
-    private var badgeCount: Int {
-        var count = 2
-        if gitStatus.isRepo {
-            count += 1
-        }
-        if hiddenSessionCount > 0 {
-            count += 1
-        }
-        return count
-    }
-
-    private var compactBadges: Bool {
-        badgeCount >= 4
-    }
-
-    private var branchBadgeText: String {
-        gitStatus.isRepo ? gitStatus.branch : "folder"
-    }
-
-    private var visibleBadgeText: String {
-        compactBadges ? "\(sessions.count) live" : "\(sessions.count) visible"
-    }
-
-    private var changesBadgeText: String {
-        let count = gitStatus.changes.count
-        if compactBadges {
-            return "\(count) chg"
-        }
-        return "\(count) change\(count == 1 ? "" : "s")"
-    }
-
-    private var olderBadgeText: String {
-        compactBadges ? "+\(hiddenSessionCount)" : "+\(hiddenSessionCount) older"
     }
 
     private var isSelected: Bool {
@@ -128,12 +117,12 @@ private struct ProjectDashboardCard: View {
     var body: some View {
         let _ = state.terminalEventVersion
 
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text(project.name)
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
 
@@ -148,7 +137,7 @@ private struct ProjectDashboardCard: View {
                     }
 
                     Text(project.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -160,44 +149,34 @@ private struct ProjectDashboardCard: View {
                     .foregroundStyle(.secondary.opacity(0.55))
             }
 
-            HStack(spacing: compactBadges ? 5 : 8) {
-                dashboardBadge(text: branchBadgeText, tint: .blue, compact: compactBadges)
-                dashboardBadge(text: visibleBadgeText, tint: .green, compact: compactBadges)
-                if gitStatus.isRepo {
-                    dashboardBadge(
-                        text: changesBadgeText,
-                        tint: gitStatus.changes.isEmpty ? .gray : .orange,
-                        compact: compactBadges
-                    )
-                }
-                if hiddenSessionCount > 0 {
-                    dashboardBadge(text: olderBadgeText, tint: .secondary, compact: compactBadges)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
             VStack(alignment: .leading, spacing: 8) {
-                Text("Live Preview")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(previewIndicatorColor)
+                        .frame(width: 6, height: 6)
+
+                    Text("Live Preview")
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
 
                 Text(previewText)
-                    .font(.system(size: 7.25, weight: .medium, design: .monospaced))
+                    .font(.system(size: 6.9, weight: .medium, design: .monospaced))
                     .foregroundStyle(.primary.opacity(0.72))
                     .lineSpacing(0)
-                    .frame(maxWidth: .infinity, minHeight: 52, maxHeight: 52, alignment: .topLeading)
-                    .lineLimit(5)
+                    .frame(maxWidth: .infinity, minHeight: 42, maxHeight: 42, alignment: .topLeading)
+                    .lineLimit(4)
                     .fixedSize(horizontal: false, vertical: true)
                     .clipped()
             }
-            .padding(12)
+            .padding(10)
             .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color.black.opacity(0.04))
             )
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, minHeight: 214, maxHeight: 214, alignment: .topLeading)
+        .padding(15)
+        .frame(maxWidth: .infinity, minHeight: 174, maxHeight: 174, alignment: .topLeading)
         .background(cardBackground)
         .overlay(
             RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous)
@@ -210,9 +189,15 @@ private struct ProjectDashboardCard: View {
         .onHover { isHovered = $0 }
         .onAppear {
             refresh()
+            syncPreviewSessionSelection()
             refreshPreview()
         }
         .onChange(of: state.terminalEventVersion) { _, _ in
+            syncPreviewSessionSelection()
+            refreshPreview()
+        }
+        .onReceive(previewTimer) { _ in
+            guard primarySession != nil else { return }
             refreshPreview()
         }
     }
@@ -230,6 +215,22 @@ private struct ProjectDashboardCard: View {
         return .white.opacity(0.32)
     }
 
+    private var previewIndicatorColor: Color {
+        guard let primarySession else { return .secondary.opacity(0.45) }
+        switch primarySession.activityState {
+        case .running:
+            return .green.opacity(0.82)
+        case .idle:
+            return .blue.opacity(0.72)
+        case .detached:
+            return .orange.opacity(0.76)
+        case .error:
+            return .red.opacity(0.78)
+        case .exited:
+            return .secondary.opacity(0.45)
+        }
+    }
+
     private func refresh() {
         Task.detached { [path = project.path] in
             let status = GitService.shared.status(at: path)
@@ -240,34 +241,125 @@ private struct ProjectDashboardCard: View {
     }
 
     private func refreshPreview() {
-        guard let session = primarySession,
-              let snapshot = TerminalService.shared.snapshot(for: session.id, lines: 12) else {
-            previewText = "No terminal output yet."
+        guard let session = primarySession else {
+            previewText = "Starting terminal…"
             return
         }
 
-        let lines = snapshot
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .map { line in
-                if line.count > 28 {
-                    return String(line.prefix(28)) + "…"
-                }
-                return line
+        guard let snapshot = TerminalService.shared.snapshot(for: session.id, lines: 18) else {
+            previewText = fallbackPreview(for: session)
+            return
+        }
+
+        let lines = previewLines(from: snapshot)
+        if lines.isEmpty {
+            if let rememberedPreview = previewHistoryBySessionID[session.id], !rememberedPreview.isEmpty {
+                previewText = rememberedPreview
+                return
             }
-        previewText = lines.suffix(6).joined(separator: "\n")
+            previewText = fallbackPreview(for: session)
+            return
+        }
+
+        let nextPreview = lines.suffix(6).joined(separator: "\n")
+        previewHistoryBySessionID[session.id] = nextPreview
+        previewText = nextPreview
     }
 
-    private func dashboardBadge(text: String, tint: Color, compact: Bool) -> some View {
-        Text(text)
-            .font(.system(size: compact ? 8 : 9.25, weight: .semibold, design: .rounded))
-            .foregroundStyle(tint.opacity(0.8))
-            .padding(.horizontal, compact ? 5 : 8)
-            .padding(.vertical, compact ? 2.5 : 4)
-            .background(Capsule().fill(tint.opacity(0.08)))
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
+    private func syncPreviewSessionSelection() {
+        if let quickViewSessionID = state.quickViewSelectedSessionID(for: project.id),
+           allSessions.contains(where: { $0.id == quickViewSessionID }) {
+            previewSessionID = quickViewSessionID
+            return
+        }
+
+        if state.selectedProject?.id == project.id,
+           case .terminal(let sessionID) = state.selectedTab?.kind,
+           allSessions.contains(where: { $0.id == sessionID }) {
+            previewSessionID = sessionID
+            return
+        }
+
+        if let previewSessionID,
+           allSessions.contains(where: { $0.id == previewSessionID }) {
+            return
+        }
+
+        previewSessionID = preferredPreviewSession()?.id
+    }
+
+    private func previewLines(from snapshot: String) -> [String] {
+        snapshot
+            .components(separatedBy: .newlines)
+            .map { $0.replacingOccurrences(of: "\t", with: "    ") }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .filter { !$0.allSatisfy { $0 == "─" || $0 == "_" || $0 == "-" || $0 == "·" } }
+            .filter { !isPromptLike($0) }
+            .map { compactPreviewLine($0) }
+    }
+
+    private func compactPreviewLine(_ line: String) -> String {
+        let collapsed = line.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        if collapsed.count > 42 {
+            return String(collapsed.prefix(42)) + "…"
+        }
+        return collapsed
+    }
+
+    private func isPromptLike(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return true
+        }
+        if trimmed == ">" || trimmed.hasPrefix("> ") || trimmed.hasPrefix("› ") {
+            return true
+        }
+        if trimmed.hasSuffix("$") || trimmed.hasSuffix("%") || trimmed.hasSuffix("#") {
+            return true
+        }
+        if trimmed.contains("❯") {
+            return true
+        }
+        return false
+    }
+
+    private func fallbackPreview(for session: TerminalSession) -> String {
+        let directory = session.displayDirectory
+        let lastCommand = session.lastCommand.map(compactPreviewLine)
+
+        switch session.activityState {
+        case .running:
+            if let lastCommand {
+                return "Running in \(directory)\n\(lastCommand)"
+            }
+            return "Running in \(directory)\nStreaming terminal output…"
+        case .idle, .detached:
+            if let lastCommand {
+                return "Shell ready in \(directory)\nLast command: \(lastCommand)"
+            }
+            return "Shell ready in \(directory)\nWaiting for command…"
+        case .error:
+            return "Terminal unavailable\nCouldn't attach a tmux session."
+        case .exited:
+            return "Terminal closed\nOpen a new terminal to resume."
+        }
+    }
+
+    private func preferredPreviewSession() -> TerminalSession? {
+        allSessions.max(by: previewSessionOrder)
+    }
+
+    private func previewSessionOrder(_ lhs: TerminalSession, _ rhs: TerminalSession) -> Bool {
+        let lhsDate = lhs.lastActivityAt ?? lhs.updatedAt
+        let rhsDate = rhs.lastActivityAt ?? rhs.updatedAt
+        if lhsDate != rhsDate {
+            return lhsDate < rhsDate
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt < rhs.updatedAt
+        }
+        return lhs.createdAt < rhs.createdAt
     }
 
 }
@@ -280,78 +372,91 @@ private struct DashboardOperatorOverlay: View {
     var isFocused: FocusState<Bool>.Binding
     let addProject: () -> Void
     let send: () -> Void
+    let activateInput: () -> Void
     @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !isCollapsed && !messages.isEmpty {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(messages) { message in
-                            OperatorBubble(message: message)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 2)
-                }
-                .frame(maxHeight: 132)
-                .padding(.bottom, 2)
-            }
-
-            VStack(alignment: .leading, spacing: 10) {
-                operatorHandle
-
-                HStack(alignment: .bottom, spacing: 10) {
-                    Button(action: addProject) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary.opacity(0.52))
-                            .frame(width: 28, height: 28)
-                    }
-                    .buttonStyle(.plain)
-
-                    TextField(placeholder, text: $input, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1...4)
-                        .focused(isFocused)
-                        .onTapGesture {
-                            if isCollapsed {
-                                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                                    isCollapsed = false
-                                }
+        VStack(alignment: .leading, spacing: 6) {
+            if isCollapsed {
+                collapsedDock
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                if !messages.isEmpty {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            ForEach(messages) { message in
+                                OperatorBubble(message: message)
                             }
                         }
-                        .onSubmit(send)
-
-                    Button(action: send) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(
-                                input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                    ? Color.secondary.opacity(0.35)
-                                    : Color.primary
-                            )
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .frame(maxHeight: 132)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 2)
                 }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    operatorHandle
+
+                    HStack(alignment: .bottom, spacing: 10) {
+                        Button(action: addProject) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.primary.opacity(0.58))
+                                .frame(width: 28, height: 28)
+                        }
+                        .buttonStyle(.plain)
+
+                        TextField(placeholder, text: $input, axis: .vertical)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 13, weight: .medium))
+                            .lineLimit(1...4)
+                            .focused(isFocused)
+                            .onTapGesture {
+                                if isCollapsed {
+                                    expandTray()
+                                } else {
+                                    activateInput()
+                                }
+                            }
+                            .onSubmit(send)
+
+                        Button(action: send) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 24, weight: .semibold))
+                                .foregroundStyle(
+                                    input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                        ? Color.secondary.opacity(0.35)
+                                        : Color.primary
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+                .background(sheetBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(.white.opacity(isInteractive ? 0.8 : 0.62), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(isInteractive ? 0.10 : 0.06), radius: isInteractive ? 18 : 12, y: 5)
+                .shadow(color: .white.opacity(isInteractive ? 0.28 : 0.18), radius: 8, y: -2)
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .onTapGesture {
+                    activateInput()
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
-            .background(sheetBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(.white.opacity(isInteractive ? 0.74 : 0.56), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(isInteractive ? 0.08 : 0.05), radius: isInteractive ? 16 : 12, y: 4)
         }
-        .frame(maxWidth: 680)
+        .frame(maxWidth: 640)
         .frame(maxWidth: .infinity, alignment: .center)
         .onHover { isHovered = $0 }
-        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isCollapsed)
+        .animation(.spring(response: 0.3, dampingFraction: 0.86), value: isCollapsed)
     }
 
     private var isInteractive: Bool {
@@ -366,7 +471,7 @@ private struct DashboardOperatorOverlay: View {
 
     private var sheetBackground: some View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(Color.white.opacity(isInteractive ? 0.95 : 0.89))
+            .fill(Color.white.opacity(isInteractive ? 0.97 : 0.91))
     }
 
     private var operatorHandle: some View {
@@ -376,24 +481,53 @@ private struct DashboardOperatorOverlay: View {
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
             .onTapGesture {
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                    isCollapsed.toggle()
-                }
+                collapseTray()
             }
             .gesture(
                 DragGesture(minimumDistance: 8)
                     .onEnded { value in
                         if value.translation.height > 18 {
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                                isCollapsed = true
-                            }
+                            collapseTray()
                         } else if value.translation.height < -18 {
-                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
-                                isCollapsed = false
-                            }
+                            expandTray()
                         }
                     }
             )
+    }
+
+    private var collapsedDock: some View {
+        Button(action: expandTray) {
+            Capsule()
+                .fill(Color.black.opacity(0.16))
+                .frame(width: 42, height: 5)
+                .frame(width: 78, height: 24)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.white.opacity(0.78))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.white.opacity(0.56), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 10, y: 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func collapseTray() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+            isCollapsed = true
+        }
+        isFocused.wrappedValue = false
+    }
+
+    private func expandTray() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+            isCollapsed = false
+        }
+        DispatchQueue.main.async {
+            activateInput()
+        }
     }
 }
 
@@ -582,9 +716,7 @@ struct ProjectQuickViewSheet: View {
                     ForEach(sessions) { session in
                         HStack(spacing: 6) {
                             Button {
-                                selectedSessionID = session.id
-                                state.setQuickViewSelectedSessionID(session.id, for: project.id)
-                                requestTerminalFocus()
+                                selectSession(session.id)
                             } label: {
                                 HStack(spacing: 6) {
                                     Image(systemName: "terminal")
@@ -624,10 +756,8 @@ struct ProjectQuickViewSheet: View {
                     Button {
                         let tab = state.createTerminal(for: project)
                         if case .terminal(let sessionID) = tab.kind {
-                            selectedSessionID = sessionID
-                            state.setQuickViewSelectedSessionID(sessionID, for: project.id)
+                            selectSession(sessionID)
                             reconcileSessionState()
-                            requestTerminalFocus()
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -772,12 +902,11 @@ struct ProjectQuickViewSheet: View {
 
         if let rememberedSessionID = state.quickViewSelectedSessionID(for: project.id),
            sessions.contains(where: { $0.id == rememberedSessionID }) {
-            self.selectedSessionID = rememberedSessionID
+            selectSession(rememberedSessionID)
             return
         }
 
-        self.selectedSessionID = sessions.first?.id
-        state.setQuickViewSelectedSessionID(self.selectedSessionID, for: project.id)
+        selectSession(sessions.first?.id)
     }
 
     private func reconcileSessionChipIdentities() {
@@ -847,6 +976,22 @@ struct ProjectQuickViewSheet: View {
         terminalFocusToken &+= 1
     }
 
+    private func selectSession(_ sessionID: String?) {
+        let didChange = selectedSessionID != sessionID
+        selectedSessionID = sessionID
+        state.setQuickViewSelectedSessionID(sessionID, for: project.id)
+
+        if sessionID != nil {
+            if didChange {
+                DispatchQueue.main.async {
+                    requestTerminalFocus()
+                }
+            } else {
+                requestTerminalFocus()
+            }
+        }
+    }
+
     private func rank(for session: TerminalSession) -> Int {
         if session.requiresAttention { return 0 }
         switch session.activityState {
@@ -867,15 +1012,15 @@ private struct AddProjectTile: View {
         Button(action: action) {
             VStack(spacing: 12) {
                 Image(systemName: "plus")
-                    .font(.system(size: 28, weight: .medium))
+                    .font(.system(size: 24, weight: .medium))
                     .foregroundStyle(.secondary.opacity(0.8))
                 Text("Add Project")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, minHeight: 200, maxHeight: 200)
+            .frame(maxWidth: .infinity, minHeight: 174, maxHeight: 174)
             .background(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [7, 7]))
                     .foregroundStyle(.secondary.opacity(isHovered ? 0.45 : 0.25))
             )

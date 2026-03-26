@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private enum LaunchMode {
         case normal
         case backgroundWindow
@@ -59,6 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.toolbarStyle = .unifiedCompact
+        window.titlebarSeparatorStyle = .none
         window.title = "xatlas"
         window.isMovableByWindowBackground = true
         window.backgroundColor = .clear
@@ -66,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.hasShadow = true
         window.minSize = NSSize(width: 800, height: 500)
         window.center()
+        window.delegate = self
 
         // Host the SwiftUI content
         let hostingView = NSHostingView(rootView: MainView().frame(minWidth: 800, minHeight: 500))
@@ -78,6 +81,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         installKeyMonitor()
         presentMainWindow(window)
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.alignWindowControls(in: window)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -144,6 +151,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.miniaturize(nil)
         case .headless:
             break
+        }
+    }
+
+    @MainActor
+    func windowDidResize(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window == xatlasWindow else { return }
+        alignWindowControls(in: window)
+    }
+
+    @MainActor
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window == xatlasWindow else { return }
+        alignWindowControls(in: window)
+    }
+
+    @MainActor
+    private func alignWindowControls(in window: NSWindow) {
+        guard let close = window.standardWindowButton(.closeButton),
+              let mini = window.standardWindowButton(.miniaturizeButton),
+              let zoom = window.standardWindowButton(.zoomButton),
+              let container = close.superview else { return }
+
+        let buttons = [close, mini, zoom]
+        let topInset = XatlasLayout.trafficLightTopInset
+        let leadingInset = XatlasLayout.trafficLightLeadingInset
+        let spacing = XatlasLayout.trafficLightSpacing
+        let y = container.bounds.height - close.frame.height - topInset
+
+        var x = leadingInset
+        for button in buttons {
+            button.setFrameOrigin(NSPoint(x: x, y: y))
+            x += button.frame.width + spacing
         }
     }
 }
