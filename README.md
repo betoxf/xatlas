@@ -1,4 +1,4 @@
-# Xerebro VS Code MCP Server
+# xatlas VS Code MCP Server
 
 A VS Code extension that enables AI assistants to **control multiple projects simultaneously** through embedded card terminals.
 
@@ -211,7 +211,7 @@ These AI coding agents run in VS Code terminals with webview-rendered UI:
 ### From VSIX
 
 ```bash
-code --install-extension xerebro-0.1.6.vsix
+code --install-extension xerebro-0.1.6.vsix  # legacy package id until republishing
 ```
 
 ### From Source
@@ -233,8 +233,8 @@ npm run build
 
 ### Open the Dashboard
 
-- Command Palette: `Xerebro: Open Dashboard`
-- Or click the Xerebro icon in the Activity Bar
+- Command Palette: `xatlas: Open Dashboard`
+- Or click the xatlas icon in the Activity Bar
 
 ## All Available Tools (50+)
 
@@ -371,8 +371,8 @@ npm run build
 - `MCP Server: Start` - Start the server
 - `MCP Server: Stop` - Stop the server
 - `MCP Server: Toggle` - Toggle on/off
-- `Xerebro: Open Dashboard` - Open the dashboard
-- `Xerebro: Run Diagnostics` - Run diagnostic checks
+- `xatlas: Open Dashboard` - Open the dashboard
+- `xatlas: Run Diagnostics` - Run diagnostic checks
 
 ## Security
 

@@ -1,12 +1,12 @@
 {
   "name": "xerebro-vscode",
-  "displayName": "Operator",
-  "description": "MCP server that enables AI assistants to control VS Code",
+  "displayName": "xatlas VS Code",
+  "description": "xatlas workspace control surface for VS Code",
   "version": "0.1.10",
   "publisher": "xerebro",
   "repository": {
     "type": "git",
-    "url": "https://github.com/iprado/cerebroapp-monorepo"
+    "url": "https://github.com/betoxf/xatlas"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -35,7 +35,7 @@
       },
       {
         "command": "vscode-mcp-server.openDashboard",
-        "title": "Open Operator",
+        "title": "Open xatlas",
         "icon": "$(layout)"
       }
     ],
@@ -43,7 +43,7 @@
       "activitybar": [
         {
           "id": "ai-agent-manager",
-          "title": "Operator",
+          "title": "xatlas",
           "icon": "resources/ai-agent-icon.svg"
         }
       ]
@@ -53,9 +53,9 @@
         {
           "type": "webview",
           "id": "aiAgentDashboard",
-          "name": "Operator",
+          "name": "xatlas",
           "icon": "$(layout)",
-          "contextualTitle": "Operator"
+          "contextualTitle": "xatlas"
         }
       ]
     },

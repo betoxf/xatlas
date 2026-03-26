@@ -1,4 +1,4 @@
-export const BRAND_NAME = 'Xerebro';
+export const BRAND_NAME = 'xatlas';
 export const CONFIG_NAMESPACE = 'xerebro';
 export const SERVER_NAME = 'xerebro';
 

@@ -342,12 +342,12 @@ function getScopeName(scope: vscode.TaskScope | vscode.WorkspaceFolder | undefin
 }
 
 /**
- * vscode_open_xerebro_dashboard - Open the Xerebro AI dashboard
+ * vscode_open_xerebro_dashboard - Open the xatlas dashboard
  */
 function registerOpenXerebroDashboard(): void {
   const definition: MCPTool = {
     name: 'vscode_open_xerebro_dashboard',
-    description: 'Open the Xerebro AI dashboard in VS Code',
+    description: 'Open the xatlas dashboard in VS Code',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -362,7 +362,7 @@ function registerOpenXerebroDashboard(): void {
         content: [
           {
             type: 'text',
-            text: 'Opened Xerebro dashboard',
+            text: 'Opened xatlas dashboard',
           },
         ],
       };

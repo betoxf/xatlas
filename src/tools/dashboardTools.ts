@@ -1193,7 +1193,7 @@ function registerDashboardCreateTerminal(): void {
                   {
                     created: false,
                     error: 'Dashboard panel could not be opened',
-                    hint: 'Open dashboard manually with vscode_open_xerebro_dashboard and retry',
+                    hint: 'Open the xatlas dashboard manually with vscode_open_xerebro_dashboard and retry',
                   },
                   null,
                   2
@@ -1512,7 +1512,7 @@ function registerGetWebviews(): void {
           webviews.push({
             type: 'dashboard-panel',
             id: 'aiAgentDashboard',
-            title: 'Xerebro Dashboard',
+            title: 'xatlas Dashboard',
             visible: true,
             active: true,
           });

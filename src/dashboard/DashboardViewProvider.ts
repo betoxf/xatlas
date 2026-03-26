@@ -280,7 +280,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-  <title>Operator</title>
+  <title>xatlas</title>
   <style>
     :root {
       --bg-primary: var(--vscode-editor-background);
@@ -534,7 +534,7 @@ export class DashboardViewProvider implements vscode.WebviewViewProvider {
   <button class="open-full-btn" id="openFullBtn">Open Full Dashboard</button>
 
   <div class="header">
-    <h2>Operator</h2>
+    <h2>xatlas</h2>
     <div class="header-actions">
       <button class="btn" id="addBtn" title="Add Project">+</button>
       <button class="btn" id="refreshBtn" title="Refresh">&#8635;</button>

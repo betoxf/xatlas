@@ -1,4 +1,4 @@
-# Xerebro VS Code MCP Extension
+# xatlas VS Code MCP Extension
 
 ## Primary Capability: Multi-Project AI Orchestration
 
@@ -147,7 +147,7 @@ Read the terminal output. Increase `lines` if you need more context.
 When using this extension, include this in your system prompt:
 
 ```
-You have access to VS Code through the Xerebro MCP extension. Your PRIMARY capability is:
+You have access to VS Code through the xatlas MCP extension. Your PRIMARY capability is:
 
 **Multi-Project Control**: You can control terminals in OTHER projects from your current session.
 

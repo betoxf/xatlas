@@ -107,7 +107,7 @@ export class DashboardPanel {
     // Otherwise, create a new panel
     const panel = vscode.window.createWebviewPanel(
       DashboardPanel.viewType,
-      'Xerebro',
+      'xatlas',
       column || vscode.ViewColumn.One,
       {
         enableScripts: true,
@@ -149,7 +149,7 @@ export class DashboardPanel {
     }
     this.mirrorNoticeAt = now;
     vscode.window.showInformationMessage(
-      `Xerebro is in mirror mode. Control terminals/projects in the host window (${this.mirrorHostLabel}).`
+      `xatlas is in mirror mode. Control terminals/projects in the host window (${this.mirrorHostLabel}).`
     );
   }
 
@@ -1457,7 +1457,7 @@ export class DashboardPanel {
    */
   private async addProject(): Promise<void> {
     try {
-      vscode.window.setStatusBarMessage('Xerebro: choose a project folder', 1500);
+      vscode.window.setStatusBarMessage('xatlas: choose a project folder', 1500);
       const defaultUri = vscode.workspace.workspaceFolders?.[0]?.uri;
       const folderUri = await vscode.window.showOpenDialog({
         canSelectFolders: true,
@@ -1599,7 +1599,7 @@ export class DashboardPanel {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; font-src ${webview.cspSource} data:; img-src ${webview.cspSource} data: blob:;">
-  <title>Xerebro</title>
+  <title>xatlas</title>
   <link rel="stylesheet" href="${xtermCssUri}">
   <style>
     :root {
@@ -2441,7 +2441,7 @@ export class DashboardPanel {
 <body>
   <div class="header">
     <div class="header-title">
-      <h1>Xerebro</h1>
+      <h1>xatlas</h1>
       <span class="mode-badge" id="modeBadge">Primary</span>
     </div>
     <div class="header-actions">

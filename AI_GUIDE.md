@@ -1,4 +1,4 @@
-# Xerebro VS Code MCP Server - AI Agent Guide
+# xatlas VS Code MCP Server - AI Agent Guide
 
 This guide describes what an AI assistant can do when connected to this MCP server, including the new AI activity tracking features.
 

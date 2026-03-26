@@ -27,8 +27,8 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.StatusBarAlignment.Right,
     99
   );
-  dashboardStatusBar.text = '$(layout) Xerebro';
-  dashboardStatusBar.tooltip = 'Open Xerebro';
+  dashboardStatusBar.text = '$(layout) xatlas';
+  dashboardStatusBar.tooltip = 'Open xatlas';
   dashboardStatusBar.command = 'vscode-mcp-server.openDashboard';
   dashboardStatusBar.show();
   context.subscriptions.push(dashboardStatusBar);
