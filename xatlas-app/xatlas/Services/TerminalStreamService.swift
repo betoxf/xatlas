@@ -1,12 +1,12 @@
 import Foundation
 
-final class TerminalStreamService {
-    nonisolated(unsafe) static let shared = TerminalStreamService()
+final class TerminalStreamService: @unchecked Sendable {
+    static let shared = TerminalStreamService()
 
     private struct Subscriber {
-        let onBootstrap: (ArraySlice<UInt8>) -> Void
-        let onData: (ArraySlice<UInt8>) -> Void
-        let onExit: (Int32?) -> Void
+        let onBootstrap: @Sendable (ArraySlice<UInt8>) -> Void
+        let onData: @Sendable (ArraySlice<UInt8>) -> Void
+        let onExit: @Sendable (Int32?) -> Void
         var hasBootstrapped: Bool
         var bufferedChunks: [Data]
     }
@@ -29,9 +29,9 @@ final class TerminalStreamService {
         sessionID: String,
         sessionName: String,
         paneID: String,
-        onBootstrap: @escaping (ArraySlice<UInt8>) -> Void,
-        onData: @escaping (ArraySlice<UInt8>) -> Void,
-        onExit: @escaping (Int32?) -> Void
+        onBootstrap: @escaping @Sendable (ArraySlice<UInt8>) -> Void,
+        onData: @escaping @Sendable (ArraySlice<UInt8>) -> Void,
+        onExit: @escaping @Sendable (Int32?) -> Void
     ) -> UUID {
         let token = UUID()
 
@@ -71,11 +71,7 @@ final class TerminalStreamService {
             }
 
             let workItem = DispatchWorkItem { [weak self] in
-                self?.queue.async {
-                    guard let self, let state = self.streams[sessionID], state.subscribers.isEmpty else { return }
-                    state.backend.stop()
-                    self.streams.removeValue(forKey: sessionID)
-                }
+                self?.performPendingShutdown(for: sessionID)
             }
 
             state.shutdownWorkItem = workItem
@@ -92,7 +88,7 @@ final class TerminalStreamService {
         backend.onExit = { [weak self] status in
             self?.handleExit(for: sessionID, status: status)
         }
-        _ = backend.start(size: .init(cols: 0, rows: 0))
+        backend.start()
 
         return StreamState(
             sessionName: sessionName,
@@ -188,6 +184,14 @@ final class TerminalStreamService {
                     subscriber.onExit(status)
                 }
             }
+        }
+    }
+
+    private func performPendingShutdown(for sessionID: String) {
+        queue.async { [weak self] in
+            guard let self, let state = self.streams[sessionID], state.subscribers.isEmpty else { return }
+            state.backend.stop()
+            self.streams.removeValue(forKey: sessionID)
         }
     }
 }

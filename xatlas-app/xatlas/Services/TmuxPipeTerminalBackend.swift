@@ -24,35 +24,23 @@ final class TmuxPipeTerminalBackend: @unchecked Sendable {
         self.fifoPath = "/tmp/xatlas_terminal_\(sessionName)_\(UUID().uuidString)"
     }
 
-    @discardableResult
-    func start(size: TerminalStreamSize) -> Bool {
+    func start() {
         let shouldStart = stateQueue.sync { () -> Bool in
             guard !isStarted else { return false }
             isStarted = true
             isStopped = false
             return true
         }
-        guard shouldStart else { return true }
+        guard shouldStart else { return }
 
-        let startupQueue = DispatchQueue.global(qos: .userInitiated)
-        startupQueue.async { [weak self] in
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.bootstrapStream()
         }
-        return true
     }
 
     func stop() {
         stateQueue.async { [weak self] in
             self?.shutdown(notifyExit: false)
-        }
-    }
-
-    func sendInput(_ data: ArraySlice<UInt8>) {
-        let bytes = Array(data)
-        guard !bytes.isEmpty else { return }
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            _ = TmuxService.shared.sendHexInput(toPane: self.paneID, bytes: bytes)
         }
     }
 
@@ -115,9 +103,4 @@ final class TmuxPipeTerminalBackend: @unchecked Sendable {
             }
         }
     }
-}
-
-struct TerminalStreamSize {
-    let cols: Int
-    let rows: Int
 }

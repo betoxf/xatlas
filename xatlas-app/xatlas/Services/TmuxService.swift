@@ -15,8 +15,8 @@ enum TmuxScrollDirection {
 }
 
 /// Manages named tmux sessions used by the native terminal tabs and MCP tools.
-final class TmuxService {
-    nonisolated(unsafe) static let shared = TmuxService()
+final class TmuxService: @unchecked Sendable {
+    static let shared = TmuxService()
 
     static let managedSessionPrefix = "xatlas_"
     private let socketName = "xatlas"

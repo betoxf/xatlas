@@ -172,7 +172,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
     }
 
 
-    final class Coordinator: NSObject, TerminalViewDelegate {
+    final class Coordinator: NSObject, TerminalViewDelegate, @unchecked Sendable {
         private static let minimumCols = 20
         private static let minimumRows = 6
 
@@ -272,12 +272,16 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
                         paneID: paneID,
                         onBootstrap: { [weak terminal] bytes in
                             guard let terminal else { return }
-                            terminal.terminal.resetToInitialState()
-                            terminal.feed(byteArray: bytes)
+                            DispatchQueue.main.async {
+                                terminal.terminal.resetToInitialState()
+                                terminal.feed(byteArray: bytes)
+                            }
                         },
                         onData: { [weak terminal] bytes in
                             guard let terminal else { return }
-                            terminal.feed(byteArray: bytes)
+                            DispatchQueue.main.async {
+                                terminal.feed(byteArray: bytes)
+                            }
                         },
                         onExit: { [weak self] _ in
                             self?.handleBackendExit()
@@ -347,7 +351,7 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         }
 
         func setTerminalTitle(source: TerminalView, title: String) {
-            TerminalService.shared.syncFromTmux(for: sessionID)
+            TerminalService.shared.syncFromTmuxAsync(for: sessionID)
         }
 
         func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
@@ -477,16 +481,6 @@ private final class ManagedTerminalView: TerminalView {
         } catch {
             return nil
         }
-    }
-}
-
-private extension Data {
-    func trimmingTerminalContent() -> Data {
-        var copy = self
-        while let last = copy.last, last == 0 || last == 10 || last == 13 || last == 32 {
-            copy.removeLast()
-        }
-        return copy
     }
 }
 

@@ -1,8 +1,8 @@
 import Foundation
 
 @Observable
-final class TerminalService {
-    nonisolated(unsafe) static let shared = TerminalService()
+final class TerminalService: @unchecked Sendable {
+    static let shared = TerminalService()
 
     var sessions: [TerminalSession] = []
 
@@ -259,22 +259,6 @@ final class TerminalService {
         updateSession(sessionID) { session in
             session.currentDirectory = directory
             session.lastActivityAt = .now
-            session.updatedAt = .now
-        }
-    }
-
-    func syncFromTmux(for sessionID: String) {
-        guard let session = session(id: sessionID) else { return }
-        let directory = tmux.currentDirectory(for: session.tmuxSessionName)
-        let title = tmux.sessionTitle(for: session.tmuxSessionName)
-
-        updateSession(sessionID) { session in
-            if let directory, !directory.isEmpty {
-                session.currentDirectory = directory
-            }
-            if session.pinnedTitle == nil, let title, !title.isEmpty {
-                session.title = title
-            }
             session.updatedAt = .now
         }
     }
