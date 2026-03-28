@@ -118,38 +118,40 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         Coordinator(sessionID: sessionID)
     }
 
-    func makeNSView(context: Context) -> ManagedLocalProcessTerminalView {
-        let terminal = ManagedLocalProcessTerminalView(frame: .zero)
+    func makeNSView(context: Context) -> ManagedTerminalView {
+        let terminal = ManagedTerminalView(frame: .zero)
         configure(terminal)
-        terminal.processDelegate = context.coordinator
+        terminal.terminalDelegate = context.coordinator
         terminal.inputObserver = { [weak coordinator = context.coordinator] text in
             coordinator?.captureInput(text)
+        }
+        terminal.inputHandler = { [weak coordinator = context.coordinator] data in
+            coordinator?.sendInput(data)
         }
         terminal.layoutObserver = { [weak coordinator = context.coordinator, weak terminal] in
             guard let coordinator, let terminal else { return }
             coordinator.attachIfNeeded(terminal)
         }
-        context.coordinator.installScrollMonitorIfNeeded(for: terminal)
         context.coordinator.attachIfNeeded(terminal)
         return terminal
     }
 
-    func updateNSView(_ terminal: ManagedLocalProcessTerminalView, context: Context) {
+    func updateNSView(_ terminal: ManagedTerminalView, context: Context) {
         configure(terminal)
         context.coordinator.prepareForSessionChange(to: sessionID, in: terminal)
         context.coordinator.attachIfNeeded(terminal)
         context.coordinator.focusIfNeeded(token: focusToken, in: terminal)
     }
 
-    static func dismantleNSView(_ terminal: ManagedLocalProcessTerminalView, coordinator: Coordinator) {
+    static func dismantleNSView(_ terminal: ManagedTerminalView, coordinator: Coordinator) {
         coordinator.detachCurrentSession(from: terminal)
-        coordinator.removeScrollMonitor()
-        terminal.processDelegate = nil
+        terminal.terminalDelegate = nil
         terminal.inputObserver = nil
+        terminal.inputHandler = nil
         terminal.layoutObserver = nil
     }
 
-    private func configure(_ terminal: ManagedLocalProcessTerminalView) {
+    private func configure(_ terminal: ManagedTerminalView) {
         terminal.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         terminal.nativeForegroundColor = NSColor(white: 0.14, alpha: 1.0)
         terminal.nativeBackgroundColor = .clear
@@ -170,44 +172,35 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
     }
 
 
-    final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
+    final class Coordinator: NSObject, TerminalViewDelegate {
         private static let minimumCols = 20
         private static let minimumRows = 6
-        private static let minimumPreloadLines = 240
-        private static let maximumPreloadLines = 720
-        private static let preloadViewportMultiplier = 10
 
         var sessionID: String
         private var attachedSessionID: String?
         private var attachedSessionName: String?
+        private var attachedPaneID: String?
+        private var streamSubscriptionID: UUID?
         private var attachmentInFlight = false
-        private var pendingTerminationSessionIDs: [String] = []
         private var inputBuffer = ""
         private var discardingEscapeSequence = false
         private var lastFocusToken: Int?
-        private var scrollMonitor: Any?
 
         init(sessionID: String) {
             self.sessionID = sessionID
         }
 
-        func prepareForSessionChange(to newSessionID: String, in terminal: ManagedLocalProcessTerminalView) {
+        func prepareForSessionChange(to newSessionID: String, in terminal: ManagedTerminalView) {
             guard sessionID != newSessionID else { return }
             sessionID = newSessionID
             detachCurrentSession(from: terminal)
         }
 
-        func detachCurrentSession(from terminal: ManagedLocalProcessTerminalView) {
-            let isRunning = MainActor.assumeIsolated {
-                terminal.process?.running ?? false
+        func detachCurrentSession(from terminal: ManagedTerminalView) {
+            if let streamSubscriptionID, let attachedSessionID {
+                TerminalStreamService.shared.unsubscribe(sessionID: attachedSessionID, subscriberID: streamSubscriptionID)
             }
-
-            if let attachedSessionID, isRunning {
-                pendingTerminationSessionIDs.append(attachedSessionID)
-                MainActor.assumeIsolated {
-                    terminal.terminate()
-                }
-            }
+            streamSubscriptionID = nil
 
             MainActor.assumeIsolated {
                 terminal.terminal.resetToInitialState()
@@ -215,142 +208,93 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
 
             attachedSessionID = nil
             attachedSessionName = nil
+            attachedPaneID = nil
             attachmentInFlight = false
             inputBuffer = ""
             discardingEscapeSequence = false
         }
 
-        func attachIfNeeded(_ terminal: ManagedLocalProcessTerminalView) {
+        func attachIfNeeded(_ terminal: ManagedTerminalView) {
             guard let session = TerminalService.shared.session(id: sessionID) else { return }
             let sessionName = session.tmuxSessionName
-            let isRunning = MainActor.assumeIsolated {
-                terminal.process?.running ?? false
-            }
+            let workingDirectory = session.currentDirectory ?? session.workingDirectory
+            let title = session.displayTitle
             guard !attachmentInFlight else { return }
-            guard attachedSessionName != sessionName || !isRunning else { return }
             guard hasUsableGrid(terminal) else { return }
-            attachmentInFlight = true
-            guard TerminalService.shared.ensureBackingSession(for: sessionID) else {
-                attachmentInFlight = false
+            if attachedSessionName == sessionName, streamSubscriptionID != nil {
                 return
             }
+            attachmentInFlight = true
 
-            attachedSessionID = sessionID
-            attachedSessionName = sessionName
-            inputBuffer = ""
-            discardingEscapeSequence = false
+            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak terminal] in
+                guard let self else { return }
 
-            preloadRecentHistory(into: terminal, sessionName: sessionName)
-
-            let command = TmuxService.shared.attachCommand(for: sessionName)
-            MainActor.assumeIsolated {
-                terminal.startProcess(
-                    executable: command.executable,
-                    args: command.args,
-                    environment: nil,
-                    execName: command.execName,
-                    currentDirectory: session.currentDirectory ?? session.workingDirectory
+                let didEnsure = TmuxService.shared.ensureSession(
+                    name: sessionName,
+                    cwd: workingDirectory,
+                    title: title
                 )
+                guard didEnsure else {
+                    DispatchQueue.main.async {
+                        guard self.sessionID == session.id else { return }
+                        TerminalService.shared.updateActivityState(.error, for: self.sessionID)
+                        self.attachmentInFlight = false
+                    }
+                    return
+                }
+
+                let paneID = TmuxService.shared.paneIdentifier(for: sessionName)
+
+                DispatchQueue.main.async {
+                    guard let terminal else {
+                        self.attachmentInFlight = false
+                        return
+                    }
+                    guard self.sessionID == session.id else {
+                        self.attachmentInFlight = false
+                        return
+                    }
+                    guard let paneID else {
+                        TerminalService.shared.updateActivityState(.error, for: self.sessionID)
+                        self.attachmentInFlight = false
+                        return
+                    }
+
+                    self.attachedSessionID = self.sessionID
+                    self.attachedSessionName = sessionName
+                    self.attachedPaneID = paneID
+                    self.inputBuffer = ""
+                    self.discardingEscapeSequence = false
+
+                    let subscriptionID = TerminalStreamService.shared.subscribe(
+                        sessionID: self.sessionID,
+                        sessionName: sessionName,
+                        paneID: paneID,
+                        onBootstrap: { [weak terminal] bytes in
+                            guard let terminal else { return }
+                            terminal.terminal.resetToInitialState()
+                            terminal.feed(byteArray: bytes)
+                        },
+                        onData: { [weak terminal] bytes in
+                            guard let terminal else { return }
+                            terminal.feed(byteArray: bytes)
+                        },
+                        onExit: { [weak self] _ in
+                            self?.handleBackendExit()
+                        }
+                    )
+
+                    self.streamSubscriptionID = subscriptionID
+                    self.attachmentInFlight = false
+                    TerminalService.shared.handleAttached(sessionID: self.sessionID)
+                }
             }
-            attachmentInFlight = false
-            TerminalService.shared.handleAttached(sessionID: sessionID)
         }
 
-        private func hasUsableGrid(_ terminal: ManagedLocalProcessTerminalView) -> Bool {
+        private func hasUsableGrid(_ terminal: ManagedTerminalView) -> Bool {
             MainActor.assumeIsolated {
                 terminal.terminal.cols >= Self.minimumCols && terminal.terminal.rows >= Self.minimumRows
             }
-        }
-
-        func installScrollMonitorIfNeeded(for terminal: ManagedLocalProcessTerminalView) {
-            guard scrollMonitor == nil else { return }
-            scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self, weak terminal] event in
-                guard let self, let terminal else { return event }
-                let eventWindowNumber = event.windowNumber
-                let eventLocation = event.locationInWindow
-                let shouldHandle = MainActor.assumeIsolated {
-                    guard let window = terminal.window, window.windowNumber == eventWindowNumber else { return false }
-                    let point = terminal.convert(eventLocation, from: nil)
-                    return terminal.bounds.contains(point)
-                }
-                guard shouldHandle else { return event }
-
-                return self.handleScroll(event, in: terminal) ? nil : event
-            }
-        }
-
-        func removeScrollMonitor() {
-            if let scrollMonitor {
-                NSEvent.removeMonitor(scrollMonitor)
-                self.scrollMonitor = nil
-            }
-        }
-
-        func handleScroll(_ event: NSEvent, in terminal: ManagedLocalProcessTerminalView) -> Bool {
-            guard let sessionName = attachedSessionName else { return false }
-            let delta = event.scrollingDeltaY != 0 ? event.scrollingDeltaY : event.deltaY
-            guard delta != 0 else { return false }
-
-            let canUseLocalScroll = MainActor.assumeIsolated {
-                terminal.canScroll
-            }
-            if canUseLocalScroll {
-                return false
-            }
-
-            let lines = scrollLineCount(for: delta, terminal: terminal)
-            let direction: TmuxScrollDirection = delta > 0 ? .up : .down
-
-            if TmuxService.shared.scrollCopyMode(session: sessionName, direction: direction, lines: lines) {
-                TerminalService.shared.handleAttached(sessionID: sessionID)
-                return true
-            }
-
-            return false
-        }
-
-        private func scrollLineCount(for delta: CGFloat, terminal: ManagedLocalProcessTerminalView) -> Int {
-            let magnitude = Int(abs(delta))
-            let viewportRows = MainActor.assumeIsolated { terminal.terminal.rows }
-            if magnitude > 9 {
-                return max(viewportRows, 20)
-            }
-            if magnitude > 5 {
-                return 10
-            }
-            if magnitude > 1 {
-                return 3
-            }
-            return 1
-        }
-
-        private func preloadRecentHistory(into terminal: ManagedLocalProcessTerminalView, sessionName: String) {
-            let visibleRows = MainActor.assumeIsolated { terminal.terminal.rows }
-            let requestedLines = min(
-                Self.maximumPreloadLines,
-                max(Self.minimumPreloadLines, visibleRows * Self.preloadViewportMultiplier)
-            )
-
-            guard let snapshot = TmuxService.shared.capturePane(session: sessionName, lines: requestedLines),
-                  let data = normalizedPreloadData(from: snapshot) else {
-                return
-            }
-
-            MainActor.assumeIsolated {
-                terminal.feed(byteArray: ArraySlice(data))
-            }
-        }
-
-        private func normalizedPreloadData(from snapshot: String) -> [UInt8]? {
-            let trimmed = snapshot.trimmingCharacters(in: .newlines)
-            guard !trimmed.isEmpty else { return nil }
-
-            let normalized = trimmed
-                .replacingOccurrences(of: "\r\n", with: "\n")
-                .replacingOccurrences(of: "\r", with: "\n")
-                .replacingOccurrences(of: "\n", with: "\r\n")
-
-            return Array(normalized.utf8)
         }
 
         func captureInput(_ text: String) {
@@ -382,12 +326,27 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             }
         }
 
-        func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {
-            guard let terminal = source as? ManagedLocalProcessTerminalView else { return }
+        func sendInput(_ data: ArraySlice<UInt8>) {
+            guard let attachedPaneID else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                _ = TmuxService.shared.sendHexInput(toPane: attachedPaneID, bytes: Array(data))
+            }
+        }
+
+        func send(source: TerminalView, data: ArraySlice<UInt8>) {
+            if let text = String(bytes: data, encoding: .utf8) {
+                captureInput(text)
+            }
+            sendInput(data)
+        }
+
+        func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+            guard let terminal = source as? ManagedTerminalView else { return }
+            guard newCols >= Self.minimumCols, newRows >= Self.minimumRows else { return }
             attachIfNeeded(terminal)
         }
 
-        func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+        func setTerminalTitle(source: TerminalView, title: String) {
             TerminalService.shared.syncFromTmux(for: sessionID)
         }
 
@@ -395,20 +354,40 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             TerminalService.shared.updateCurrentDirectory(directory, for: sessionID)
         }
 
-        func processTerminated(source: TerminalView, exitCode: Int32?) {
-            let terminatedSessionID = pendingTerminationSessionIDs.isEmpty
-                ? (attachedSessionID ?? sessionID)
-                : pendingTerminationSessionIDs.removeFirst()
+        func requestOpenLink(source: TerminalView, link: String, params: [String : String]) {
+            guard let url = URL(string: link) else { return }
+            NSWorkspace.shared.open(url)
+        }
 
-            TerminalService.shared.handleProcessTerminated(sessionID: terminatedSessionID)
-            if attachedSessionID == terminatedSessionID {
-                attachedSessionID = nil
-                attachedSessionName = nil
-            }
+        func scrolled(source: TerminalView, position: Double) {
+        }
+
+        func bell(source: TerminalView) {
+        }
+
+        func clipboardCopy(source: TerminalView, content: Data) {
+            guard let text = String(data: content, encoding: .utf8) else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([text as NSString])
+        }
+
+        func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {
+        }
+
+        func rangeChanged(source: TerminalView, startY: Int, endY: Int) {
+        }
+
+        private func handleBackendExit() {
+            let exitingSessionID = attachedSessionID ?? sessionID
+            TerminalService.shared.handleProcessTerminated(sessionID: exitingSessionID)
+            attachedSessionID = nil
+            attachedSessionName = nil
+            attachedPaneID = nil
+            streamSubscriptionID = nil
             attachmentInFlight = false
         }
 
-        func focusIfNeeded(token: Int, in terminal: ManagedLocalProcessTerminalView) {
+        func focusIfNeeded(token: Int, in terminal: ManagedTerminalView) {
             guard lastFocusToken != token else { return }
             lastFocusToken = token
             DispatchQueue.main.async {
@@ -419,8 +398,9 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
     }
 }
 
-private final class ManagedLocalProcessTerminalView: LocalProcessTerminalView {
+private final class ManagedTerminalView: TerminalView {
     var inputObserver: ((String) -> Void)?
+    var inputHandler: ((ArraySlice<UInt8>) -> Void)?
     var layoutObserver: (() -> Void)?
 
     // Prevent the host window's background-drag behavior from stealing text selection.
@@ -447,13 +427,6 @@ private final class ManagedLocalProcessTerminalView: LocalProcessTerminalView {
         layoutObserver?()
     }
 
-    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        if let text = String(bytes: data, encoding: .utf8) {
-            inputObserver?(text)
-        }
-        super.send(source: source, data: data)
-    }
-
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         droppedShellFragments(from: sender.draggingPasteboard).isEmpty ? [] : .copy
     }
@@ -469,7 +442,7 @@ private final class ManagedLocalProcessTerminalView: LocalProcessTerminalView {
     private func insertDroppedText(_ text: String) {
         guard !text.isEmpty else { return }
         inputObserver?(text)
-        process.send(data: ArraySlice(text.utf8))
+        inputHandler?(ArraySlice(text.utf8))
     }
 
     private func droppedShellFragments(from pasteboard: NSPasteboard) -> [String] {

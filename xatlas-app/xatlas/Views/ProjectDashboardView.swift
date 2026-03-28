@@ -632,8 +632,6 @@ struct ProjectQuickViewSheet: View {
     }
 
     var body: some View {
-        let _ = state.terminalEventVersion
-
         VStack(spacing: 0) {
             // Draggable title bar
             HStack {
@@ -811,14 +809,12 @@ struct ProjectQuickViewSheet: View {
         .offset(dragOffset)
         .onAppear {
             reconcileSessionState()
-            requestTerminalFocus()
-        }
-        .onChange(of: state.terminalEventVersion) { _, _ in
-            reconcileSessionState()
         }
         .onChange(of: activeSessionID) { _, sessionID in
             state.setQuickViewSelectedSessionID(sessionID, for: project.id)
-            requestTerminalFocus()
+            if sessionID != nil {
+                requestTerminalFocus()
+            }
         }
         .confirmationDialog(
             "Close running terminal?",

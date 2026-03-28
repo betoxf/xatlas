@@ -9,12 +9,6 @@ struct TmuxSessionDescriptor {
     let createdAt: Date?
 }
 
-struct TmuxLaunchCommand {
-    let executable: String
-    let args: [String]
-    let execName: String
-}
-
 enum TmuxScrollDirection {
     case up
     case down
@@ -57,19 +51,24 @@ final class TmuxService {
         return true
     }
 
-    func attachCommand(for sessionName: String) -> TmuxLaunchCommand {
-        TmuxLaunchCommand(
-            executable: executablePath,
-            args: socketArguments + ["attach-session", "-t", sessionName],
-            execName: "tmux"
-        )
-    }
-
     func sendKeys(session: String, keys: String, pressEnter: Bool = true) -> Bool {
         let typed = runTmux(["send-keys", "-t", session, "-l", keys]).status == 0
         guard typed else { return false }
         if pressEnter {
             return runTmux(["send-keys", "-t", session, "Enter"]).status == 0
+        }
+        return true
+    }
+
+    func sendHexInput(toPane paneID: String, bytes: [UInt8]) -> Bool {
+        guard !bytes.isEmpty else { return true }
+
+        let hexBytes = bytes.map { String(format: "%02x", $0) }
+        for chunk in hexBytes.chunked(into: 96) {
+            let status = runTmux(["send-keys", "-H", "-t", paneID] + chunk).status
+            if status != 0 {
+                return false
+            }
         }
         return true
     }
@@ -154,6 +153,12 @@ final class TmuxService {
         return result.output?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    func paneIdentifier(for sessionName: String) -> String? {
+        let result = runTmux(["display-message", "-p", "-t", sessionName, "#{pane_id}"])
+        guard result.status == 0 else { return nil }
+        return result.output?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+    }
+
     func sessionTitle(for sessionName: String) -> String? {
         let persisted = runTmux(["show-options", "-v", "-t", sessionName, titleOptionName])
         if persisted.status == 0,
@@ -190,15 +195,34 @@ final class TmuxService {
             ["set-option", "-t", name, "mouse", "off"]
         ]
         let windowOptions: [[String]] = [
-            ["set-window-option", "-t", name, "history-limit", "50000"],
-            ["set-window-option", "-t", name, "remain-on-exit", "on"],
-            ["set-window-option", "-t", name, "automatic-rename", "off"],
-            ["set-window-option", "-t", name, "allow-rename", "off"]
+            ["history-limit", "50000"],
+            ["remain-on-exit", "on"],
+            ["automatic-rename", "off"],
+            ["allow-rename", "off"]
         ]
 
-        for command in sessionOptions + windowOptions {
+        for command in sessionOptions {
             _ = runTmux(command)
         }
+
+        for target in windowTargets(for: name) {
+            for option in windowOptions {
+                _ = runTmux(["set-window-option", "-t", target] + option)
+            }
+        }
+    }
+
+    private func windowTargets(for sessionName: String) -> [String] {
+        let result = runTmux(["list-windows", "-t", sessionName, "-F", "#{session_name}:#{window_index}"])
+        guard result.status == 0, let output = result.output else {
+            return ["\(sessionName):0"]
+        }
+
+        let targets = output
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+
+        return targets.isEmpty ? ["\(sessionName):0"] : targets
     }
 
     @discardableResult
@@ -318,5 +342,23 @@ final class TmuxService {
     private func normalizeTimestamp(_ date: Date?) -> Date? {
         guard let date, date.timeIntervalSince1970 > 0 else { return nil }
         return date
+    }
+}
+
+private extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        guard size > 0, !isEmpty else { return isEmpty ? [] : [self] }
+
+        var chunks: [[Element]] = []
+        chunks.reserveCapacity((count + size - 1) / size)
+
+        var index = startIndex
+        while index < endIndex {
+            let end = Swift.min(index + size, endIndex)
+            chunks.append(Array(self[index..<end]))
+            index = end
+        }
+
+        return chunks
     }
 }

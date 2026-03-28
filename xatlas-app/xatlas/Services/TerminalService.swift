@@ -281,7 +281,7 @@ final class TerminalService {
 
     func handleAttached(sessionID: String) {
         updateActivityState(.idle, for: sessionID)
-        syncFromTmux(for: sessionID)
+        syncFromTmuxAsync(for: sessionID)
     }
 
     func handleProcessTerminated(sessionID: String) {
@@ -289,7 +289,30 @@ final class TerminalService {
         let stillAlive = tmux.sessionExists(session.tmuxSessionName)
         updateActivityState(stillAlive ? .detached : .exited, for: sessionID)
         if stillAlive {
-            syncFromTmux(for: sessionID)
+            syncFromTmuxAsync(for: sessionID)
+        }
+    }
+
+    func syncFromTmuxAsync(for sessionID: String) {
+        guard let session = session(id: sessionID) else { return }
+        let sessionName = session.tmuxSessionName
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            let directory = self.tmux.currentDirectory(for: sessionName)
+            let title = self.tmux.sessionTitle(for: sessionName)
+
+            DispatchQueue.main.async {
+                self.updateSession(sessionID) { session in
+                    if let directory, !directory.isEmpty {
+                        session.currentDirectory = directory
+                    }
+                    if session.pinnedTitle == nil, let title, !title.isEmpty {
+                        session.title = title
+                    }
+                    session.updatedAt = .now
+                }
+            }
         }
     }
 
