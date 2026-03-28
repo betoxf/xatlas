@@ -269,7 +269,6 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
                     let subscriptionID = TerminalStreamService.shared.subscribe(
                         sessionID: self.sessionID,
                         sessionName: sessionName,
-                        paneID: paneID,
                         onBootstrap: { [weak terminal] bytes in
                             guard let terminal else { return }
                             DispatchQueue.main.async {

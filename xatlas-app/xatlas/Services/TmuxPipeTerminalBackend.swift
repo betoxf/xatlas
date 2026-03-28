@@ -3,24 +3,18 @@ import Foundation
 
 final class TmuxPipeTerminalBackend: @unchecked Sendable {
     let sessionName: String
-    let paneID: String
 
     var onData: ((ArraySlice<UInt8>) -> Void)?
     var onExit: ((Int32?) -> Void)?
 
-    var isRunning: Bool {
-        stateQueue.sync { isStarted && !isStopped }
-    }
-
     private let stateQueue = DispatchQueue(label: "com.xatlas.tmux-pipe-backend")
-    private var fifoPath: String
+    private let fifoPath: String
     private var fileHandle: FileHandle?
     private var isStarted = false
     private var isStopped = false
 
-    init(sessionName: String, paneID: String) {
+    init(sessionName: String) {
         self.sessionName = sessionName
-        self.paneID = paneID
         self.fifoPath = "/tmp/xatlas_terminal_\(sessionName)_\(UUID().uuidString)"
     }
 

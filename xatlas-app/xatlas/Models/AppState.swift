@@ -77,10 +77,7 @@ final class AppState: @unchecked Sendable {
     private var detachedCleanupObserver: NSObjectProtocol?
     private var toastDismissWorkItem: DispatchWorkItem?
 
-    // Per-project tab storage
-    private var projectTabs: [UUID: [TabItem]] = [:]
-    private var projectSelectedTab: [UUID: TabItem] = [:]
-    private var projectQuickViewSelectedSessionID: [UUID: String] = [:]
+    private var workspaceStateByProjectID: [UUID: ProjectWorkspaceState] = [:]
 
     private init() {
         observeTerminalSessions()
@@ -183,9 +180,7 @@ final class AppState: @unchecked Sendable {
         if dashboardQuickViewProjectID == project.id {
             dashboardQuickViewProjectID = nil
         }
-        projectTabs.removeValue(forKey: project.id)
-        projectSelectedTab.removeValue(forKey: project.id)
-        projectQuickViewSelectedSessionID.removeValue(forKey: project.id)
+        workspaceStateByProjectID.removeValue(forKey: project.id)
         projects.removeAll { $0.id == project.id }
         TerminalService.shared.rehydrateSessions(projects: projects)
         if selectedProject?.id == project.id {
@@ -225,13 +220,13 @@ final class AppState: @unchecked Sendable {
 
         selectedProject = project
 
-        if let saved = projectTabs[project.id] {
-            if saved.isEmpty {
+        if let savedState = workspaceStateByProjectID[project.id] {
+            if savedState.tabs.isEmpty {
                 tabs = []
                 selectedTab = nil
             } else {
-                tabs = saved
-                selectedTab = restoredTab(from: projectSelectedTab[project.id], within: saved) ?? saved.first
+                tabs = savedState.tabs
+                selectedTab = restoredTab(withID: savedState.selectedTabID, within: savedState.tabs) ?? savedState.tabs.first
             }
         } else {
             let recovered = TerminalService.shared.sessionsForProject(project.id)
@@ -369,11 +364,13 @@ final class AppState: @unchecked Sendable {
     }
 
     func quickViewSelectedSessionID(for projectID: UUID) -> String? {
-        projectQuickViewSelectedSessionID[projectID]
+        workspaceStateByProjectID[projectID]?.quickViewSessionID
     }
 
     func setQuickViewSelectedSessionID(_ sessionID: String?, for projectID: UUID) {
-        projectQuickViewSelectedSessionID[projectID] = sessionID
+        var state = workspaceStateByProjectID[projectID] ?? ProjectWorkspaceState()
+        state.quickViewSessionID = sessionID
+        workspaceStateByProjectID[projectID] = state
     }
 
     @discardableResult
@@ -490,15 +487,12 @@ final class AppState: @unchecked Sendable {
             self.selectedTab = tabs.first(where: { $0.id == session.id }) ?? selectedTab
         }
 
-        for projectID in projectTabs.keys {
-            guard var storedTabs = projectTabs[projectID] else { continue }
-            let before = storedTabs
-            syncTitles(in: &storedTabs, for: session)
-            guard storedTabs != before else { continue }
-            projectTabs[projectID] = storedTabs
-            if projectSelectedTab[projectID]?.id == session.id {
-                projectSelectedTab[projectID] = storedTabs.first(where: { $0.id == session.id })
-            }
+        for (projectID, storedState) in workspaceStateByProjectID {
+            var nextState = storedState
+            let before = nextState.tabs
+            syncTitles(in: &nextState.tabs, for: session)
+            guard nextState.tabs != before else { continue }
+            workspaceStateByProjectID[projectID] = nextState
         }
     }
 
@@ -521,22 +515,18 @@ final class AppState: @unchecked Sendable {
             selectedTab = replacementSelection
         }
 
-        for projectID in projectTabs.keys {
-            guard var storedTabs = projectTabs[projectID] else { continue }
-            let replacementSelection = projectSelectedTab[projectID]?.id == sessionID
-                ? replacementTab(afterRemoving: sessionID, from: storedTabs)
-                : restoredTab(from: projectSelectedTab[projectID], within: storedTabs)
-            let replacementQuickViewSessionID = projectQuickViewSelectedSessionID[projectID] == sessionID
-                ? replacementTerminalSessionID(afterRemoving: sessionID, from: storedTabs)
-                : projectQuickViewSelectedSessionID[projectID]
-            storedTabs.removeAll { $0.id == sessionID }
-            projectTabs[projectID] = storedTabs
-            if projectSelectedTab[projectID]?.id == sessionID {
-                projectSelectedTab[projectID] = replacementSelection
-            }
-            if projectQuickViewSelectedSessionID[projectID] == sessionID {
-                projectQuickViewSelectedSessionID[projectID] = replacementQuickViewSessionID
-            }
+        for (projectID, storedState) in workspaceStateByProjectID {
+            var nextState = storedState
+            let replacementSelectionID = nextState.selectedTabID == sessionID
+                ? replacementTab(afterRemoving: sessionID, from: nextState.tabs)?.id
+                : restoredTab(withID: nextState.selectedTabID, within: nextState.tabs)?.id
+            let replacementQuickViewSessionID = nextState.quickViewSessionID == sessionID
+                ? replacementTerminalSessionID(afterRemoving: sessionID, from: nextState.tabs)
+                : nextState.quickViewSessionID
+            nextState.tabs.removeAll { $0.id == sessionID }
+            nextState.selectedTabID = replacementSelectionID
+            nextState.quickViewSessionID = replacementQuickViewSessionID
+            workspaceStateByProjectID[projectID] = nextState
         }
 
         TerminalService.shared.removeSession(sessionID, killTmux: killTmux)
@@ -568,17 +558,19 @@ final class AppState: @unchecked Sendable {
 
     private func persistTabState(for projectID: UUID?, tabs: [TabItem], selectedTab: TabItem?) {
         guard let projectID else { return }
-        projectTabs[projectID] = tabs
-        let resolvedSelection = restoredTab(from: selectedTab, within: tabs)
-        projectSelectedTab[projectID] = resolvedSelection
+        var state = workspaceStateByProjectID[projectID] ?? ProjectWorkspaceState()
+        state.tabs = tabs
+        let resolvedSelection = restoredTab(withID: selectedTab?.id, within: tabs)
+        state.selectedTabID = resolvedSelection?.id
         if case .terminal(let sessionID) = resolvedSelection?.kind {
-            projectQuickViewSelectedSessionID[projectID] = sessionID
+            state.quickViewSessionID = sessionID
         }
+        workspaceStateByProjectID[projectID] = state
     }
 
-    private func restoredTab(from selectedTab: TabItem?, within tabs: [TabItem]) -> TabItem? {
-        guard let selectedTab else { return nil }
-        return tabs.first(where: { $0.id == selectedTab.id })
+    private func restoredTab(withID tabID: String?, within tabs: [TabItem]) -> TabItem? {
+        guard let tabID else { return nil }
+        return tabs.first(where: { $0.id == tabID })
     }
 
     private func replacementTab(afterRemoving tabID: String, from tabs: [TabItem]) -> TabItem? {
@@ -618,4 +610,10 @@ struct TabItem: Identifiable, Equatable {
         case terminal(sessionID: String)
         case editor(filePath: String)
     }
+}
+
+private struct ProjectWorkspaceState {
+    var tabs: [TabItem] = []
+    var selectedTabID: String?
+    var quickViewSessionID: String?
 }

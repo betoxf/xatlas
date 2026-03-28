@@ -569,18 +569,10 @@ struct ProjectQuickViewSheet: View {
     let project: Project
     @Bindable var state: AppState
 
-    private struct SessionChipIdentity {
-        let baseTitle: String
-        let ordinal: Int
-    }
-
     @State private var showAllSessions = false
     @State private var sessionDisplayOrder: [String] = []
-    @State private var selectedSessionID: String?
     @State private var pendingCloseSessionID: String?
     @State private var isProjectCloseConfirmationPresented = false
-    @State private var sessionChipIdentities: [String: SessionChipIdentity] = [:]
-    @State private var nextOrdinalByTitle: [String: Int] = [:]
     @State private var terminalFocusToken = 0
     @State private var dragOffset: CGSize = .zero
     @State private var dragAccumulated: CGSize = .zero
@@ -612,8 +604,9 @@ struct ProjectQuickViewSheet: View {
     }
 
     private var activeSessionID: String? {
-        if let selectedSessionID, sessions.contains(where: { $0.id == selectedSessionID }) {
-            return selectedSessionID
+        if let rememberedSessionID = state.quickViewSelectedSessionID(for: project.id),
+           sessions.contains(where: { $0.id == rememberedSessionID }) {
+            return rememberedSessionID
         }
         return sessions.first?.id
     }
@@ -811,7 +804,6 @@ struct ProjectQuickViewSheet: View {
             reconcileSessionState()
         }
         .onChange(of: activeSessionID) { _, sessionID in
-            state.setQuickViewSelectedSessionID(sessionID, for: project.id)
             if sessionID != nil {
                 requestTerminalFocus()
             }
@@ -853,19 +845,12 @@ struct ProjectQuickViewSheet: View {
     private func reconcileSessionState() {
         let liveSessionIDs = Set(allProjectSessions.map(\.id))
         sessionDisplayOrder.removeAll { !liveSessionIDs.contains($0) }
-        sessionChipIdentities = sessionChipIdentities.filter { liveSessionIDs.contains($0.key) }
 
         let knownSessionIDs = Set(sessionDisplayOrder)
         sessionDisplayOrder.append(contentsOf: allProjectSessions
             .filter { !knownSessionIDs.contains($0.id) }
             .sorted(by: TerminalSession.creationOrder)
             .map(\.id))
-        reconcileSessionChipIdentities()
-
-        if let selectedSessionID,
-           sessions.contains(where: { $0.id == selectedSessionID }) {
-            return
-        }
 
         if let rememberedSessionID = state.quickViewSelectedSessionID(for: project.id),
            sessions.contains(where: { $0.id == rememberedSessionID }) {
@@ -874,20 +859,6 @@ struct ProjectQuickViewSheet: View {
         }
 
         selectSession(sessions.first?.id)
-    }
-
-    private func reconcileSessionChipIdentities() {
-        for session in allProjectSessions.sorted(by: TerminalSession.creationOrder) {
-            let title = session.displayTitle
-            if let existing = sessionChipIdentities[session.id],
-               existing.baseTitle == title {
-                continue
-            }
-
-            let ordinal = nextOrdinalByTitle[title] ?? 1
-            sessionChipIdentities[session.id] = SessionChipIdentity(baseTitle: title, ordinal: ordinal)
-            nextOrdinalByTitle[title] = ordinal + 1
-        }
     }
 
     private func requestClose(_ sessionID: String) {
@@ -902,7 +873,6 @@ struct ProjectQuickViewSheet: View {
         let nextSessionID = sessions.first(where: { $0.id != sessionID })?.id
         _ = state.closeTerminalSession(sessionID, killTmux: true)
         pendingCloseSessionID = nil
-        selectedSessionID = nextSessionID
         state.setQuickViewSelectedSessionID(nextSessionID, for: project.id)
         sessionDisplayOrder.removeAll { $0 == sessionID }
     }
@@ -914,9 +884,11 @@ struct ProjectQuickViewSheet: View {
     }
 
     private func sessionChipTitle(for session: TerminalSession) -> String {
-        let peers = sessions.filter { $0.displayTitle == session.displayTitle }
+        let peers = sessions
+            .filter { $0.displayTitle == session.displayTitle }
+            .sorted(by: TerminalSession.creationOrder)
         guard peers.count > 1 else { return session.displayTitle }
-        let ordinal = sessionChipIdentities[session.id]?.ordinal ?? 1
+        let ordinal = (peers.firstIndex { $0.id == session.id } ?? 0) + 1
         return "\(session.displayTitle) \(ordinal)"
     }
 
@@ -925,8 +897,7 @@ struct ProjectQuickViewSheet: View {
     }
 
     private func selectSession(_ sessionID: String?) {
-        let didChange = selectedSessionID != sessionID
-        selectedSessionID = sessionID
+        let didChange = state.quickViewSelectedSessionID(for: project.id) != sessionID
         state.setQuickViewSelectedSessionID(sessionID, for: project.id)
 
         if sessionID != nil {

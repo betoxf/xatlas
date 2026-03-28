@@ -195,7 +195,6 @@ final class TerminalService: @unchecked Sendable {
         let success = tmux.sendKeys(session: session.tmuxSessionName, keys: trimmed, pressEnter: true)
         if success {
             recordCommand(trimmed, for: sessionID)
-            updateActivityState(.running, for: sessionID)
         } else {
             updateActivityState(.error, for: sessionID)
             OperatorEventStore.shared.record(
@@ -251,7 +250,7 @@ final class TerminalService: @unchecked Sendable {
             )
         }
 
-        startCompletionMonitor(for: sessionID, command: cleaned)
+        startCompletionMonitor(for: sessionID)
     }
 
     func updateCurrentDirectory(_ directory: String?, for sessionID: String) {
@@ -388,7 +387,7 @@ final class TerminalService: @unchecked Sendable {
         )
     }
 
-    private func startCompletionMonitor(for sessionID: String, command: String) {
+    private func startCompletionMonitor(for sessionID: String) {
         let token = (completionMonitorTokens[sessionID] ?? 0) + 1
         completionMonitorTokens[sessionID] = token
         pollCompletion(sessionID: sessionID, token: token, remainingChecks: 150, lastTail: "", readyHits: 0)

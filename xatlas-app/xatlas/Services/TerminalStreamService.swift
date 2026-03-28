@@ -12,8 +12,6 @@ final class TerminalStreamService: @unchecked Sendable {
     }
 
     private struct StreamState {
-        let sessionName: String
-        let paneID: String
         let backend: TmuxPipeTerminalBackend
         var subscribers: [UUID: Subscriber]
         var shutdownWorkItem: DispatchWorkItem?
@@ -28,7 +26,6 @@ final class TerminalStreamService: @unchecked Sendable {
     func subscribe(
         sessionID: String,
         sessionName: String,
-        paneID: String,
         onBootstrap: @escaping @Sendable (ArraySlice<UInt8>) -> Void,
         onData: @escaping @Sendable (ArraySlice<UInt8>) -> Void,
         onExit: @escaping @Sendable (Int32?) -> Void
@@ -40,8 +37,7 @@ final class TerminalStreamService: @unchecked Sendable {
 
             var state = self.streams[sessionID] ?? self.makeStreamState(
                 sessionID: sessionID,
-                sessionName: sessionName,
-                paneID: paneID
+                sessionName: sessionName
             )
 
             state.shutdownWorkItem?.cancel()
@@ -80,8 +76,8 @@ final class TerminalStreamService: @unchecked Sendable {
         }
     }
 
-    private func makeStreamState(sessionID: String, sessionName: String, paneID: String) -> StreamState {
-        let backend = TmuxPipeTerminalBackend(sessionName: sessionName, paneID: paneID)
+    private func makeStreamState(sessionID: String, sessionName: String) -> StreamState {
+        let backend = TmuxPipeTerminalBackend(sessionName: sessionName)
         backend.onData = { [weak self] bytes in
             self?.handleLiveData(for: sessionID, bytes: bytes)
         }
@@ -91,8 +87,6 @@ final class TerminalStreamService: @unchecked Sendable {
         backend.start()
 
         return StreamState(
-            sessionName: sessionName,
-            paneID: paneID,
             backend: backend,
             subscribers: [:],
             shutdownWorkItem: nil
