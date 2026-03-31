@@ -79,3 +79,29 @@ Useful environment variables:
 - `XATLAS_PUSH_SERVICE_URL`: point completion pushes at a custom service
 - `XATLAS_REFRESH_ENABLED`: enable desktop refresh hooks for the macOS app
 - `XATLAS_MCP_PORT`: force the xatlas macOS app MCP port when needed
+
+## MCPorter CLI
+
+xatlas now ships a repo-local `mcporter` config at `config/mcporter.json` that targets the existing app stdio bridge instead of bypassing MCP. That keeps the app MCP-native while making it easy to use `mcporter` as a human-facing CLI layer.
+
+Run `mcporter` against the local app:
+
+```bash
+./xatlas-app/scripts/run-mcporter.sh list xatlas
+./xatlas-app/scripts/run-mcporter.sh list xatlas --schema
+./xatlas-app/scripts/run-mcporter.sh call xatlas.xatlas_terminal_list
+./xatlas-app/scripts/run-mcporter.sh call xatlas.xatlas_project_list
+```
+
+Generate a dedicated standalone CLI wrapper from the live server:
+
+```bash
+./xatlas-app/scripts/generate-mcporter-cli.sh
+node ./output/mcporter/xatlasctl.cjs --help
+```
+
+Notes:
+
+- The generator is pinned to `mcporter@0.8.0` by default. Override with `MCPORTER_VERSION=...` if you want to test a newer release.
+- `mcp-stdio-bridge.js` remains the compatibility layer. It resolves the active local MCP port from the app state file and can auto-launch `xatlas.app` if the app is not already running.
+- The generated `xatlasctl` artifact is intentionally kept out of git under `output/mcporter/`.

@@ -11,6 +11,7 @@ final class MCPHandler {
     }
 
     static let supportedProtocolVersions = [
+        "2025-11-25",
         "2025-06-18",
         "2025-03-26",
         "2024-11-05",

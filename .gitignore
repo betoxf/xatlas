@@ -3,6 +3,7 @@
 Build/
 DerivedData/
 .derived/
+output/mcporter/
 
 # SPM
 .swiftpm/

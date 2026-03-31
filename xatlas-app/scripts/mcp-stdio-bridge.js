@@ -16,6 +16,7 @@ let protocolVersion = process.env.XATLAS_MCP_PROTOCOL_VERSION || '';
 let inputBuffer = Buffer.alloc(0);
 let queue = Promise.resolve();
 let launchAttempted = false;
+let transportMode = '';
 
 process.stdin.on('data', (chunk) => {
   inputBuffer = Buffer.concat([inputBuffer, chunk]);
@@ -33,8 +34,30 @@ process.stdin.on('error', (error) => {
 
 function drainInput() {
   while (true) {
+    const parsed = parseInputMessage();
+    if (!parsed) return;
+
+    const { body } = parsed;
+    queue = queue.then(() => forwardMessage(body)).catch((error) => {
+      console.error(`[xatlas-bridge] ${error.stack || error.message}`);
+      process.exitCode = 1;
+    });
+  }
+}
+
+function parseInputMessage() {
+  if (inputBuffer.length === 0) {
+    return null;
+  }
+
+  const prefix = inputBuffer
+    .subarray(0, Math.min(inputBuffer.length, 32))
+    .toString('utf8')
+    .toLowerCase();
+
+  if (prefix.startsWith('content-length:')) {
     const headerEnd = inputBuffer.indexOf('\r\n\r\n');
-    if (headerEnd === -1) return;
+    if (headerEnd === -1) return null;
 
     const headerText = inputBuffer.subarray(0, headerEnd).toString('utf8');
     const contentLength = parseContentLength(headerText);
@@ -45,15 +68,25 @@ function drainInput() {
 
     const messageStart = headerEnd + 4;
     const messageEnd = messageStart + contentLength;
-    if (inputBuffer.length < messageEnd) return;
+    if (inputBuffer.length < messageEnd) return null;
 
+    transportMode = transportMode || 'framed';
     const body = inputBuffer.subarray(messageStart, messageEnd).toString('utf8');
     inputBuffer = inputBuffer.subarray(messageEnd);
-    queue = queue.then(() => forwardMessage(body)).catch((error) => {
-      console.error(`[xatlas-bridge] ${error.stack || error.message}`);
-      process.exitCode = 1;
-    });
+    return { body };
   }
+
+  const newlineIndex = inputBuffer.indexOf('\n');
+  if (newlineIndex === -1) return null;
+
+  const line = inputBuffer.subarray(0, newlineIndex).toString('utf8').replace(/\r$/, '');
+  inputBuffer = inputBuffer.subarray(newlineIndex + 1);
+  if (!line.trim()) {
+    return { body: '' };
+  }
+
+  transportMode = transportMode || 'line';
+  return { body: line };
 }
 
 function parseContentLength(headerText) {
@@ -67,6 +100,10 @@ function parseContentLength(headerText) {
 }
 
 async function forwardMessage(body) {
+  if (!body.trim()) {
+    return;
+  }
+
   logEvent(`stdin ${body}`);
   const response = await postMessageWithRetry(body);
   logEvent(`http ${response.statusCode} ${response.body}`);
@@ -89,7 +126,7 @@ async function forwardMessage(body) {
     return;
   }
 
-  writeFramedMessage(response.body);
+  writeMessage(response.body);
 }
 
 async function postMessageWithRetry(body) {
@@ -274,8 +311,14 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function writeFramedMessage(body) {
+function writeMessage(body) {
   logEvent(`stdout ${body}`);
+
+  if (transportMode === 'line') {
+    process.stdout.write(`${body}\n`);
+    return;
+  }
+
   const payload = Buffer.from(body, 'utf8');
   process.stdout.write(`Content-Length: ${payload.length}\r\n\r\n`);
   process.stdout.write(payload);

@@ -562,9 +562,22 @@ final class AppState: @unchecked Sendable {
         state.tabs = tabs
         let resolvedSelection = restoredTab(withID: selectedTab?.id, within: tabs)
         state.selectedTabID = resolvedSelection?.id
-        if case .terminal(let sessionID) = resolvedSelection?.kind {
+
+        let terminalIDs = Set(tabs.compactMap { tab -> String? in
+            guard case .terminal(let sessionID) = tab.kind else { return nil }
+            return sessionID
+        })
+
+        if let quickViewSessionID = state.quickViewSessionID,
+           !terminalIDs.contains(quickViewSessionID) {
+            state.quickViewSessionID = nil
+        }
+
+        if state.quickViewSessionID == nil,
+           case .terminal(let sessionID) = resolvedSelection?.kind {
             state.quickViewSessionID = sessionID
         }
+
         workspaceStateByProjectID[projectID] = state
     }
 

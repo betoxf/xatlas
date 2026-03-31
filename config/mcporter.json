@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "xatlas": {
+      "description": "Local xatlas.app exposed through the stdio bridge. The bridge resolves the active MCP port and can launch the app when needed.",
+      "command": "node",
+      "args": [
+        "../xatlas-app/scripts/mcp-stdio-bridge.js"
+      ]
+    }
+  }
+}

@@ -206,19 +206,18 @@ final class MCPServer: @unchecked Sendable {
         }
 
         if method == "GET" {
-            guard let sessionID = headers["mcp-session-id"], mcpSession(for: sessionID) != nil else {
-                sendResponse(connection: connection, status: 400, body: "{\"error\":\"mcp session required\"}")
-                return
+            var responseHeaders = ["Allow": "POST, DELETE"]
+            if let sessionID = headers["mcp-session-id"], mcpSession(for: sessionID) != nil {
+                responseHeaders["MCP-Session-Id"] = sessionID
             }
 
+            // Report unsupported streamable GET uniformly so HTTP MCP clients can
+            // fall back to POST-only flows instead of treating this as a hard failure.
             sendResponse(
                 connection: connection,
                 status: 405,
                 body: "{\"error\":\"streamable HTTP GET streams are not implemented\"}",
-                headers: [
-                    "Allow": "POST, DELETE",
-                    "MCP-Session-Id": sessionID,
-                ]
+                headers: responseHeaders
             )
             return
         }

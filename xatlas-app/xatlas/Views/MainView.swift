@@ -31,19 +31,7 @@ struct MainView: View {
                     }
                     .allowsHitTesting(quickViewProject == nil)
 
-                    if let project = quickViewProject {
-                        Color.black.opacity(0.25)
-                            .ignoresSafeArea()
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                state.closeProjectQuickView()
-                            }
-
-                        ProjectQuickViewSheet(project: project, state: state)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
-                            .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                    }
+                    QuickViewOverlay(state: state)
                 }
                 .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
             }
@@ -73,6 +61,61 @@ struct MainView: View {
                     let tab = TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
                     state.openTab(tab)
                 }
+            }
+        }
+    }
+}
+
+private struct QuickViewOverlay: View {
+    @Bindable var state: AppState
+    @State private var retainedProjectID: UUID?
+
+    private var activeProjectID: UUID? {
+        state.dashboardQuickViewProjectID ?? retainedProjectID
+    }
+
+    private var project: Project? {
+        guard let activeProjectID else { return nil }
+        return state.projects.first(where: { $0.id == activeProjectID })
+    }
+
+    private var isPresented: Bool {
+        state.dashboardQuickViewProjectID != nil && project != nil
+    }
+
+    var body: some View {
+        Group {
+            if let project {
+                Color.black.opacity(isPresented ? 0.25 : 0)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .allowsHitTesting(isPresented)
+                    .onTapGesture {
+                        state.closeProjectQuickView()
+                    }
+
+                ProjectQuickViewSheet(project: project, state: state)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
+                    .scaleEffect(isPresented ? 1 : 0.97)
+                    .opacity(isPresented ? 1 : 0)
+                    .allowsHitTesting(isPresented)
+            }
+        }
+        .onAppear {
+            if let projectID = state.dashboardQuickViewProjectID {
+                retainedProjectID = projectID
+            }
+        }
+        .onChange(of: state.dashboardQuickViewProjectID) { _, projectID in
+            if let projectID {
+                retainedProjectID = projectID
+            }
+        }
+        .onChange(of: state.projects) { _, projects in
+            guard let retainedProjectID else { return }
+            if !projects.contains(where: { $0.id == retainedProjectID }) {
+                self.retainedProjectID = nil
             }
         }
     }
