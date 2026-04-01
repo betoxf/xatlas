@@ -4,7 +4,7 @@ import Network
 /// WebSocket server for streaming terminal output to iOS clients.
 /// Runs on a separate port from MCPServer, using NWProtocolWebSocket for framing.
 final class StreamingServer: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = StreamingServer()
+    static let shared = StreamingServer()
 
     private var listener: NWListener?
     private(set) var boundPort: UInt16?
@@ -109,7 +109,7 @@ final class StreamingServer: @unchecked Sendable {
         connection.receiveMessage { [weak self] data, context, isComplete, error in
             guard let self else { return }
 
-            if let error {
+            if error != nil {
                 if let client { self.removeClient(client) }
                 connection.cancel()
                 return
@@ -191,7 +191,7 @@ final class StreamingServer: @unchecked Sendable {
     private func handleBinaryMessage(_ data: Data, client: WebSocketClient) {
         // Forward raw keystrokes to tmux
         if let keys = String(data: data, encoding: .utf8) {
-            TmuxService.shared.sendKeys(session: client.tmuxSessionName, keys: keys, pressEnter: false)
+            _ = TmuxService.shared.sendKeys(session: client.tmuxSessionName, keys: keys, pressEnter: false)
         }
     }
 

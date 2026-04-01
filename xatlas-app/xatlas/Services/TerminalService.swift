@@ -1,13 +1,22 @@
 import Foundation
 
 @Observable
-final class TerminalService {
-    nonisolated(unsafe) static let shared = TerminalService()
+final class TerminalService: @unchecked Sendable {
+    static let shared = TerminalService()
+
+    private struct SnapshotCacheEntry {
+        let lines: Int
+        let value: String
+        let capturedAt: Date
+    }
+
+    private static let snapshotCacheTTL: TimeInterval = 0.9
 
     var sessions: [TerminalSession] = []
 
     private let tmux = TmuxService.shared
     private var completionMonitorTokens: [String: Int] = [:]
+    private var snapshotCache: [String: SnapshotCacheEntry] = [:]
 
     func createSession(title: String? = nil, projectID: UUID? = nil, workingDirectory: String? = nil) -> TerminalSession {
         let sessionID = UUID().uuidString
@@ -44,6 +53,7 @@ final class TerminalService {
     func removeSession(_ id: String, killTmux: Bool = false) {
         guard let session = session(id: id) else { return }
         completionMonitorTokens.removeValue(forKey: id)
+        snapshotCache.removeValue(forKey: id)
         if killTmux {
             _ = tmux.killSession(name: session.tmuxSessionName)
         }
@@ -86,7 +96,22 @@ final class TerminalService {
 
     func snapshot(for sessionID: String, lines: Int = 200) -> String? {
         guard let session = session(id: sessionID) else { return nil }
-        return tmux.capturePane(session: session.tmuxSessionName, lines: lines)
+        if let cached = snapshotCache[sessionID],
+           cached.lines >= lines,
+           Date().timeIntervalSince(cached.capturedAt) <= Self.snapshotCacheTTL {
+            return cached.value
+        }
+
+        guard let snapshot = tmux.capturePane(session: session.tmuxSessionName, lines: lines) else {
+            return nil
+        }
+
+        snapshotCache[sessionID] = SnapshotCacheEntry(
+            lines: lines,
+            value: snapshot,
+            capturedAt: Date()
+        )
+        return snapshot
     }
 
     func rehydrateSessions(projects: [Project]) {

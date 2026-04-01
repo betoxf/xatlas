@@ -45,6 +45,72 @@ struct AppToast: Identifiable, Equatable {
     let style: AppToastStyle
 }
 
+private struct ProjectWorkspaceState {
+    var tabs: [TabItem] = []
+    var selectedTabID: String?
+    var quickViewSessionID: String?
+
+    var selectedTab: TabItem? {
+        guard let selectedTabID else { return nil }
+        return tabs.first(where: { $0.id == selectedTabID })
+    }
+
+    mutating func store(tabs: [TabItem], selectedTab: TabItem?) {
+        self.tabs = tabs
+        selectedTabID = selectedTab.flatMap { candidate in
+            tabs.contains(where: { $0.id == candidate.id }) ? candidate.id : nil
+        }
+
+        let terminalSessionIDs = tabs.compactMap(\.terminalSessionID)
+        guard !terminalSessionIDs.isEmpty else {
+            quickViewSessionID = nil
+            return
+        }
+
+        if let quickViewSessionID, terminalSessionIDs.contains(quickViewSessionID) {
+            return
+        }
+
+        quickViewSessionID = selectedTab?.terminalSessionID ?? terminalSessionIDs.first
+    }
+
+    mutating func removeTerminalSession(_ sessionID: String) {
+        let nextSelectedTabID = selectedTabID == sessionID
+            ? replacementTabID(afterRemoving: sessionID, from: tabs)
+            : selectedTab?.id
+        let nextQuickViewSessionID = quickViewSessionID == sessionID
+            ? replacementTerminalSessionID(afterRemoving: sessionID, from: tabs)
+            : quickViewSessionID
+
+        tabs.removeAll { $0.id == sessionID }
+        selectedTabID = nextSelectedTabID
+        quickViewSessionID = nextQuickViewSessionID
+    }
+
+    private func replacementTabID(afterRemoving tabID: String, from tabs: [TabItem]) -> String? {
+        guard let removedIndex = tabs.firstIndex(where: { $0.id == tabID }) else {
+            return tabs.last?.id
+        }
+
+        var remainingTabs = tabs
+        remainingTabs.remove(at: removedIndex)
+        guard !remainingTabs.isEmpty else { return nil }
+        return remainingTabs[min(removedIndex, remainingTabs.count - 1)].id
+    }
+
+    private func replacementTerminalSessionID(afterRemoving sessionID: String, from tabs: [TabItem]) -> String? {
+        let terminalIDs = tabs.compactMap(\.terminalSessionID)
+        guard let removedIndex = terminalIDs.firstIndex(of: sessionID) else {
+            return terminalIDs.last
+        }
+
+        var remainingTerminalIDs = terminalIDs
+        remainingTerminalIDs.remove(at: removedIndex)
+        guard !remainingTerminalIDs.isEmpty else { return nil }
+        return remainingTerminalIDs[min(removedIndex, remainingTerminalIDs.count - 1)]
+    }
+}
+
 @Observable
 final class AppState: @unchecked Sendable {
     static let shared = AppState()
@@ -65,7 +131,6 @@ final class AppState: @unchecked Sendable {
     var isCommandBarFocused = false
     var isSettingsPresented = false
     var sidebarWidth: CGFloat = 220
-    var terminalEventVersion: Int = 0
     var projectSurfaceMode: ProjectSurfaceMode = .dashboard
     var dashboardQuickViewProjectID: UUID?
     var dashboardSearchQuery: String = ""
@@ -73,14 +138,10 @@ final class AppState: @unchecked Sendable {
     var activeToast: AppToast?
     private(set) var isProjectPickerPresented = false
 
-    private var terminalSessionObserver: NSObjectProtocol?
     private var detachedCleanupObserver: NSObjectProtocol?
     private var toastDismissWorkItem: DispatchWorkItem?
 
-    // Per-project tab storage
-    private var projectTabs: [UUID: [TabItem]] = [:]
-    private var projectSelectedTab: [UUID: TabItem] = [:]
-    private var projectQuickViewSelectedSessionID: [UUID: String] = [:]
+    private var projectWorkspaces: [UUID: ProjectWorkspaceState] = [:]
 
     private init() {
         observeTerminalSessions()
@@ -88,9 +149,6 @@ final class AppState: @unchecked Sendable {
     }
 
     deinit {
-        if let terminalSessionObserver {
-            NotificationCenter.default.removeObserver(terminalSessionObserver)
-        }
         if let detachedCleanupObserver {
             NotificationCenter.default.removeObserver(detachedCleanupObserver)
         }
@@ -100,7 +158,6 @@ final class AppState: @unchecked Sendable {
     func loadProjects() {
         projects = ProjectManager.shared.loadProjects()
         TerminalService.shared.rehydrateSessions(projects: projects)
-        ensureDefaultTerminals(for: projects)
         ProjectOperatorService.shared.bootstrap(projects: projects)
         if selectedProject == nil {
             selectedProject = projects.first
@@ -119,7 +176,6 @@ final class AppState: @unchecked Sendable {
         let project = Project(name: name, path: path)
         projects.append(project)
         TerminalService.shared.rehydrateSessions(projects: projects)
-        ensureDefaultTerminal(for: project)
         switch behavior {
         case .selectInWorkspace:
             switchToProject(project)
@@ -129,7 +185,6 @@ final class AppState: @unchecked Sendable {
         }
         ProjectManager.shared.saveProjects(projects)
         ProjectOperatorService.shared.syncProjects(projects)
-        ProjectOperatorService.shared.refreshProject(project)
         showToast(
             title: "Project added",
             message: project.name,
@@ -183,9 +238,7 @@ final class AppState: @unchecked Sendable {
         if dashboardQuickViewProjectID == project.id {
             dashboardQuickViewProjectID = nil
         }
-        projectTabs.removeValue(forKey: project.id)
-        projectSelectedTab.removeValue(forKey: project.id)
-        projectQuickViewSelectedSessionID.removeValue(forKey: project.id)
+        projectWorkspaces.removeValue(forKey: project.id)
         projects.removeAll { $0.id == project.id }
         TerminalService.shared.rehydrateSessions(projects: projects)
         if selectedProject?.id == project.id {
@@ -219,33 +272,9 @@ final class AppState: @unchecked Sendable {
             return
         }
 
-        if let current = selectedProject {
-            persistTabState(for: current.id, tabs: tabs, selectedTab: selectedTab)
-        }
-
+        persistCurrentProjectWorkspace()
         selectedProject = project
-
-        if let saved = projectTabs[project.id] {
-            if saved.isEmpty {
-                tabs = []
-                selectedTab = nil
-            } else {
-                tabs = saved
-                selectedTab = restoredTab(from: projectSelectedTab[project.id], within: saved) ?? saved.first
-            }
-        } else {
-            let recovered = TerminalService.shared.sessionsForProject(project.id)
-            if !recovered.isEmpty {
-                tabs = recovered.map {
-                    TabItem(id: $0.id, title: $0.displayTitle, kind: .terminal(sessionID: $0.id))
-                }
-                selectedTab = tabs.first
-            } else {
-                tabs = []
-                selectedTab = nil
-            }
-            persistTabState(for: project.id, tabs: tabs, selectedTab: selectedTab)
-        }
+        applyWorkspaceState(workspaceState(for: project))
     }
 
     @discardableResult
@@ -369,11 +398,13 @@ final class AppState: @unchecked Sendable {
     }
 
     func quickViewSelectedSessionID(for projectID: UUID) -> String? {
-        projectQuickViewSelectedSessionID[projectID]
+        projectWorkspaces[projectID]?.quickViewSessionID
     }
 
     func setQuickViewSelectedSessionID(_ sessionID: String?, for projectID: UUID) {
-        projectQuickViewSelectedSessionID[projectID] = sessionID
+        var workspace = projectWorkspaces[projectID] ?? ProjectWorkspaceState()
+        workspace.quickViewSessionID = sessionID
+        projectWorkspaces[projectID] = workspace
     }
 
     @discardableResult
@@ -441,17 +472,6 @@ final class AppState: @unchecked Sendable {
     }
 
     private func observeTerminalSessions() {
-        terminalSessionObserver = NotificationCenter.default.addObserver(
-            forName: .xatlasTerminalSessionDidChange,
-            object: nil,
-            queue: .main
-        ) { [weak self] note in
-            guard let self,
-                  let session = note.userInfo?["session"] as? TerminalSession else { return }
-            self.terminalEventVersion &+= 1
-            self.syncTitles(for: session)
-        }
-
         detachedCleanupObserver = NotificationCenter.default.addObserver(
             forName: .xatlasDetachedSessionCleanupDidRun,
             object: nil,
@@ -483,32 +503,6 @@ final class AppState: @unchecked Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.6, execute: workItem)
     }
 
-    private func syncTitles(for session: TerminalSession) {
-        syncTitles(in: &tabs, for: session)
-
-        if let selectedTab, selectedTab.id == session.id {
-            self.selectedTab = tabs.first(where: { $0.id == session.id }) ?? selectedTab
-        }
-
-        for projectID in projectTabs.keys {
-            guard var storedTabs = projectTabs[projectID] else { continue }
-            let before = storedTabs
-            syncTitles(in: &storedTabs, for: session)
-            guard storedTabs != before else { continue }
-            projectTabs[projectID] = storedTabs
-            if projectSelectedTab[projectID]?.id == session.id {
-                projectSelectedTab[projectID] = storedTabs.first(where: { $0.id == session.id })
-            }
-        }
-    }
-
-    private func syncTitles(in collection: inout [TabItem], for session: TerminalSession) {
-        for index in collection.indices {
-            guard case .terminal(let sessionID) = collection[index].kind, sessionID == session.id else { continue }
-            collection[index].title = session.displayTitle
-        }
-    }
-
     @discardableResult
     private func discardTerminalSession(_ sessionID: String, killTmux: Bool) -> TerminalSession? {
         guard let session = TerminalService.shared.session(id: sessionID) else { return nil }
@@ -521,22 +515,10 @@ final class AppState: @unchecked Sendable {
             selectedTab = replacementSelection
         }
 
-        for projectID in projectTabs.keys {
-            guard var storedTabs = projectTabs[projectID] else { continue }
-            let replacementSelection = projectSelectedTab[projectID]?.id == sessionID
-                ? replacementTab(afterRemoving: sessionID, from: storedTabs)
-                : restoredTab(from: projectSelectedTab[projectID], within: storedTabs)
-            let replacementQuickViewSessionID = projectQuickViewSelectedSessionID[projectID] == sessionID
-                ? replacementTerminalSessionID(afterRemoving: sessionID, from: storedTabs)
-                : projectQuickViewSelectedSessionID[projectID]
-            storedTabs.removeAll { $0.id == sessionID }
-            projectTabs[projectID] = storedTabs
-            if projectSelectedTab[projectID]?.id == sessionID {
-                projectSelectedTab[projectID] = replacementSelection
-            }
-            if projectQuickViewSelectedSessionID[projectID] == sessionID {
-                projectQuickViewSelectedSessionID[projectID] = replacementQuickViewSessionID
-            }
+        for projectID in projectWorkspaces.keys {
+            guard var workspace = projectWorkspaces[projectID] else { continue }
+            workspace.removeTerminalSession(sessionID)
+            projectWorkspaces[projectID] = workspace
         }
 
         TerminalService.shared.removeSession(sessionID, killTmux: killTmux)
@@ -548,37 +530,42 @@ final class AppState: @unchecked Sendable {
         return TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
     }
 
-    private func ensureDefaultTerminals(for projects: [Project]) {
-        for project in projects {
-            ensureDefaultTerminal(for: project)
+    private func persistCurrentProjectWorkspace() {
+        persistTabState(for: selectedProject?.id, tabs: tabs, selectedTab: selectedTab)
+    }
+
+    private func workspaceState(for project: Project) -> ProjectWorkspaceState {
+        if let workspace = projectWorkspaces[project.id] {
+            return workspace
+        }
+
+        let recoveredTabs = recoveredTerminalTabs(for: project.id)
+        var workspace = ProjectWorkspaceState()
+        workspace.store(tabs: recoveredTabs, selectedTab: recoveredTabs.first)
+        projectWorkspaces[project.id] = workspace
+        return workspace
+    }
+
+    private func recoveredTerminalTabs(for projectID: UUID) -> [TabItem] {
+        TerminalService.shared.sessionsForProject(projectID).map {
+            TabItem(id: $0.id, title: $0.displayTitle, kind: .terminal(sessionID: $0.id))
         }
     }
 
-    private func ensureDefaultTerminal(for project: Project) {
-        let hasLiveSession = TerminalService.shared
-            .sessionsForProject(project.id)
-            .contains { $0.activityState != .exited }
-        guard !hasLiveSession else { return }
-        _ = makeTerminalTab(for: project.id, workingDirectory: project.path)
+    private func applyWorkspaceState(_ workspace: ProjectWorkspaceState) {
+        tabs = workspace.tabs
+        selectedTab = workspace.selectedTab ?? workspace.tabs.first
     }
 
     private func persistActiveProjectTabState() {
-        persistTabState(for: selectedProject?.id, tabs: tabs, selectedTab: selectedTab)
+        persistCurrentProjectWorkspace()
     }
 
     private func persistTabState(for projectID: UUID?, tabs: [TabItem], selectedTab: TabItem?) {
         guard let projectID else { return }
-        projectTabs[projectID] = tabs
-        let resolvedSelection = restoredTab(from: selectedTab, within: tabs)
-        projectSelectedTab[projectID] = resolvedSelection
-        if case .terminal(let sessionID) = resolvedSelection?.kind {
-            projectQuickViewSelectedSessionID[projectID] = sessionID
-        }
-    }
-
-    private func restoredTab(from selectedTab: TabItem?, within tabs: [TabItem]) -> TabItem? {
-        guard let selectedTab else { return nil }
-        return tabs.first(where: { $0.id == selectedTab.id })
+        var workspace = projectWorkspaces[projectID] ?? ProjectWorkspaceState()
+        workspace.store(tabs: tabs, selectedTab: selectedTab)
+        projectWorkspaces[projectID] = workspace
     }
 
     private func replacementTab(afterRemoving tabID: String, from tabs: [TabItem]) -> TabItem? {
@@ -592,21 +579,6 @@ final class AppState: @unchecked Sendable {
         return remainingTabs[min(removedIndex, remainingTabs.count - 1)]
     }
 
-    private func replacementTerminalSessionID(afterRemoving sessionID: String, from tabs: [TabItem]) -> String? {
-        let terminalIDs = tabs.compactMap { tab -> String? in
-            guard case .terminal(let candidateSessionID) = tab.kind else { return nil }
-            return candidateSessionID
-        }
-
-        guard let removedIndex = terminalIDs.firstIndex(of: sessionID) else {
-            return terminalIDs.last
-        }
-
-        var remainingTerminalIDs = terminalIDs
-        remainingTerminalIDs.remove(at: removedIndex)
-        guard !remainingTerminalIDs.isEmpty else { return nil }
-        return remainingTerminalIDs[min(removedIndex, remainingTerminalIDs.count - 1)]
-    }
 }
 
 struct TabItem: Identifiable, Equatable {
@@ -617,5 +589,14 @@ struct TabItem: Identifiable, Equatable {
     enum TabKind: Equatable {
         case terminal(sessionID: String)
         case editor(filePath: String)
+    }
+
+    var terminalSessionID: String? {
+        guard case .terminal(let sessionID) = kind else { return nil }
+        return sessionID
+    }
+
+    func resolvedTitle(using terminalService: TerminalService = .shared) -> String {
+        terminalSessionID.map(terminalService.displayTitle(for:)) ?? title
     }
 }

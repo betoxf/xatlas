@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentAreaView: View {
     @Bindable var state: AppState
+    @State private var terminalService = TerminalService.shared
     @State private var pendingCloseSessionID: String?
     @State private var terminalFocusToken = 0
 
@@ -66,7 +67,8 @@ struct ContentAreaView: View {
             HStack(spacing: 6) {
                 ForEach(state.tabs) { tab in
                     TabButton(
-                        tab: tab,
+                        title: tab.resolvedTitle(using: terminalService),
+                        isTerminal: tab.kind.isTerminal,
                         requiresAttention: requiresAttention(for: tab),
                         isSelected: state.selectedTab?.id == tab.id,
                         onSelect: {
@@ -105,8 +107,7 @@ struct ContentAreaView: View {
 
     private func requiresAttention(for tab: TabItem) -> Bool {
         guard case .terminal(let sessionID) = tab.kind else { return false }
-        _ = state.terminalEventVersion
-        return state.terminalRequiresAttention(sessionID)
+        return terminalService.session(id: sessionID)?.requiresAttention ?? false
     }
 
     private func requestClose(for tab: TabItem) {
@@ -175,7 +176,8 @@ struct ContentAreaView: View {
 }
 
 private struct TabButton: View {
-    let tab: TabItem
+    let title: String
+    let isTerminal: Bool
     let requiresAttention: Bool
     let isSelected: Bool
     let onSelect: () -> Void
@@ -185,10 +187,10 @@ private struct TabButton: View {
         HStack(spacing: 4) {
             Button(action: onSelect) {
                 HStack(spacing: 4) {
-                    Image(systemName: tab.kind.isTerminal ? "terminal" : "doc.text")
+                    Image(systemName: isTerminal ? "terminal" : "doc.text")
                         .font(.system(size: 10))
 
-                    Text(tab.title)
+                    Text(title)
                         .font(XatlasFont.monoSmall)
                         .lineLimit(1)
 

@@ -5,8 +5,10 @@ struct ProjectDashboardView: View {
     @Bindable var state: AppState
     @State private var operatorService = ProjectOperatorService.shared
     @State private var operatorInput = ""
-    @State private var isOperatorCollapsed = false
+    @State private var isOperatorCollapsed = true
+    @State private var previewTick = 0
     @FocusState private var isOperatorFocused: Bool
+    private let previewTimer = Timer.publish(every: 2.4, on: .main, in: .common).autoconnect()
 
     private let columns = [
         GridItem(.adaptive(minimum: 214, maximum: 258), spacing: 16, alignment: .top)
@@ -26,6 +28,7 @@ struct ProjectDashboardView: View {
                         ProjectDashboardCard(
                             project: project,
                             state: state,
+                            previewTick: previewTick,
                             onQuickView: {
                                 _ = state.openProjectQuickView(id: project.id)
                             }
@@ -56,8 +59,8 @@ struct ProjectDashboardView: View {
             .padding(.horizontal, 22)
             .padding(.bottom, 14)
         }
-        .onAppear {
-            activateOperatorInput()
+        .onReceive(previewTimer) { _ in
+            previewTick &+= 1
         }
     }
 
@@ -71,6 +74,7 @@ struct ProjectDashboardView: View {
 
     private func activateOperatorInput() {
         guard !isOperatorCollapsed else { return }
+        _ = operatorService.activateConsole()
         isOperatorFocused = true
     }
 
@@ -79,16 +83,17 @@ struct ProjectDashboardView: View {
 private struct ProjectDashboardCard: View {
     let project: Project
     @Bindable var state: AppState
+    let previewTick: Int
     let onQuickView: () -> Void
 
+    @State private var terminalService = TerminalService.shared
     @State private var previewText = "No terminal output yet."
     @State private var isHovered = false
     @State private var previewHistoryBySessionID: [String: String] = [:]
     @State private var previewSessionID: String?
-    private let previewTimer = Timer.publish(every: 1.1, on: .main, in: .common).autoconnect()
 
     private var allSessions: [TerminalSession] {
-        TerminalService.shared.liveSessionsForProject(project.id)
+        terminalService.liveSessionsForProject(project.id)
     }
 
     private var primarySession: TerminalSession? {
@@ -108,8 +113,6 @@ private struct ProjectDashboardCard: View {
     }
 
     var body: some View {
-        let _ = state.terminalEventVersion
-
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -184,12 +187,12 @@ private struct ProjectDashboardCard: View {
             syncPreviewSessionSelection()
             refreshPreview()
         }
-        .onChange(of: state.terminalEventVersion) { _, _ in
+        .onChange(of: allSessions.map(\.id)) { _, _ in
             syncPreviewSessionSelection()
             refreshPreview()
         }
-        .onReceive(previewTimer) { _ in
-            guard primarySession != nil else { return }
+        .onChange(of: previewTick) { _, _ in
+            guard shouldRefreshPreviewOnTick else { return }
             refreshPreview()
         }
     }
@@ -221,6 +224,14 @@ private struct ProjectDashboardCard: View {
         case .exited:
             return .secondary.opacity(0.45)
         }
+    }
+
+    private var shouldRefreshPreviewOnTick: Bool {
+        guard let primarySession else { return false }
+        if isHovered || isSelected {
+            return true
+        }
+        return primarySession.activityState == .running
     }
 
     private func refreshPreview() {
@@ -440,7 +451,7 @@ private struct DashboardOperatorOverlay: View {
     private var placeholder: String {
         isReady
             ? "Message the operator. Codex --yolo is running in the background…"
-            : "Starting the Codex operator…"
+            : "Open the operator to start the background Codex session…"
     }
 
     private var sheetBackground: some View {
@@ -568,25 +579,20 @@ private struct OperatorBubble: View {
 struct ProjectQuickViewSheet: View {
     let project: Project
     @Bindable var state: AppState
-
-    private struct SessionChipIdentity {
-        let baseTitle: String
-        let ordinal: Int
-    }
+    let isPresented: Bool
 
     @State private var showAllSessions = false
     @State private var sessionDisplayOrder: [String] = []
     @State private var selectedSessionID: String?
     @State private var pendingCloseSessionID: String?
     @State private var isProjectCloseConfirmationPresented = false
-    @State private var sessionChipIdentities: [String: SessionChipIdentity] = [:]
-    @State private var nextOrdinalByTitle: [String: Int] = [:]
     @State private var terminalFocusToken = 0
     @State private var dragOffset: CGSize = .zero
     @State private var dragAccumulated: CGSize = .zero
+    @State private var terminalService = TerminalService.shared
 
     private var allProjectSessions: [TerminalSession] {
-        TerminalService.shared.liveSessionsForProject(project.id)
+        terminalService.liveSessionsForProject(project.id)
     }
 
     private var visibleSessions: [TerminalSession] {
@@ -594,7 +600,7 @@ struct ProjectQuickViewSheet: View {
             return allProjectSessions.sorted(by: TerminalSession.priorityOrder)
         }
 
-        return TerminalService.shared.visibleSessionsForProject(project.id, maxDetached: 6)
+        return terminalService.visibleSessionsForProject(project.id, maxDetached: 6)
     }
 
     private var sessions: [TerminalSession] {
@@ -620,7 +626,7 @@ struct ProjectQuickViewSheet: View {
 
     private var hiddenSessionCount: Int {
         if showAllSessions { return 0 }
-        return TerminalService.shared.hiddenSessionCountForProject(project.id, maxDetached: 6)
+        return terminalService.hiddenSessionCountForProject(project.id, maxDetached: 6)
     }
 
     private var totalVisibleSessionCount: Int {
@@ -742,26 +748,7 @@ struct ProjectQuickViewSheet: View {
             .padding(.bottom, 12)
 
             // Terminal area
-            Group {
-                if let sessionID = activeSessionID {
-                    StyledTerminalView(
-                        sessionID: sessionID,
-                        appState: state,
-                        focusToken: terminalFocusToken
-                    )
-                } else {
-                    VStack(spacing: 10) {
-                        Image(systemName: "terminal")
-                            .font(.system(size: 26, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text("No terminal selected")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(16)
-                }
-            }
+            terminalArea
             .clipped()
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -809,6 +796,12 @@ struct ProjectQuickViewSheet: View {
         .offset(dragOffset)
         .onAppear {
             reconcileSessionState()
+            requestTerminalFocus()
+        }
+        .onChange(of: isPresented) { _, presented in
+            guard presented else { return }
+            reconcileSessionState()
+            requestTerminalFocus()
         }
         .onChange(of: activeSessionID) { _, sessionID in
             state.setQuickViewSelectedSessionID(sessionID, for: project.id)
@@ -850,17 +843,48 @@ struct ProjectQuickViewSheet: View {
         }
     }
 
+    @ViewBuilder
+    private var terminalArea: some View {
+        if sessions.isEmpty {
+            VStack(spacing: 10) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("No terminal selected")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(16)
+        } else if let activeSessionID {
+            StyledTerminalView(
+                sessionID: activeSessionID,
+                appState: state,
+                focusToken: terminalFocusToken
+            )
+        } else {
+            VStack(spacing: 10) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("No terminal selected")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(16)
+        }
+    }
+
     private func reconcileSessionState() {
         let liveSessionIDs = Set(allProjectSessions.map(\.id))
         sessionDisplayOrder.removeAll { !liveSessionIDs.contains($0) }
-        sessionChipIdentities = sessionChipIdentities.filter { liveSessionIDs.contains($0.key) }
 
         let knownSessionIDs = Set(sessionDisplayOrder)
         sessionDisplayOrder.append(contentsOf: allProjectSessions
             .filter { !knownSessionIDs.contains($0.id) }
             .sorted(by: TerminalSession.creationOrder)
             .map(\.id))
-        reconcileSessionChipIdentities()
 
         if let selectedSessionID,
            sessions.contains(where: { $0.id == selectedSessionID }) {
@@ -874,20 +898,6 @@ struct ProjectQuickViewSheet: View {
         }
 
         selectSession(sessions.first?.id)
-    }
-
-    private func reconcileSessionChipIdentities() {
-        for session in allProjectSessions.sorted(by: TerminalSession.creationOrder) {
-            let title = session.displayTitle
-            if let existing = sessionChipIdentities[session.id],
-               existing.baseTitle == title {
-                continue
-            }
-
-            let ordinal = nextOrdinalByTitle[title] ?? 1
-            sessionChipIdentities[session.id] = SessionChipIdentity(baseTitle: title, ordinal: ordinal)
-            nextOrdinalByTitle[title] = ordinal + 1
-        }
     }
 
     private func requestClose(_ sessionID: String) {
@@ -914,9 +924,11 @@ struct ProjectQuickViewSheet: View {
     }
 
     private func sessionChipTitle(for session: TerminalSession) -> String {
-        let peers = sessions.filter { $0.displayTitle == session.displayTitle }
+        let peers = allProjectSessions
+            .filter { $0.displayTitle == session.displayTitle }
+            .sorted(by: TerminalSession.creationOrder)
         guard peers.count > 1 else { return session.displayTitle }
-        let ordinal = sessionChipIdentities[session.id]?.ordinal ?? 1
+        let ordinal = (peers.firstIndex(where: { $0.id == session.id }) ?? 0) + 1
         return "\(session.displayTitle) \(ordinal)"
     }
 

@@ -452,7 +452,7 @@ final class MCPServer: @unchecked Sendable {
             TerminalService.shared.sendCommand(command, to: sessionId)
             sendResponse(connection: connection, status: 200, body: "{\"ok\":true}")
         } else if let keys = json["keys"] as? String {
-            TmuxService.shared.sendKeys(session: session.tmuxSessionName, keys: keys, pressEnter: false)
+            _ = TmuxService.shared.sendKeys(session: session.tmuxSessionName, keys: keys, pressEnter: false)
             sendResponse(connection: connection, status: 200, body: "{\"ok\":true}")
         } else {
             sendResponse(connection: connection, status: 400, body: "{\"error\":\"command or keys required\"}")
@@ -633,7 +633,8 @@ final class MCPServer: @unchecked Sendable {
             var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
             if getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
                            &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
-                return String(cString: hostname)
+                let bytes = hostname.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+                return String(decoding: bytes, as: UTF8.self)
             }
         }
         return nil

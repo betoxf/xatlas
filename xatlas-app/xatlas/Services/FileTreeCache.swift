@@ -1,7 +1,7 @@
 import Foundation
 
 final class FileTreeCache: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = FileTreeCache()
+    static let shared = FileTreeCache()
 
     private let fileManager = FileManager.default
     private let workerQueue = DispatchQueue(

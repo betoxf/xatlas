@@ -29,21 +29,8 @@ struct MainView: View {
                         .padding(.trailing, XatlasLayout.windowPadding)
                         .padding(.bottom, XatlasLayout.windowPadding)
                     }
-                    .allowsHitTesting(quickViewProject == nil)
 
-                    if let project = quickViewProject {
-                        Color.black.opacity(0.25)
-                            .ignoresSafeArea()
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                state.closeProjectQuickView()
-                            }
-
-                        ProjectQuickViewSheet(project: project, state: state)
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
-                            .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                    }
+                    QuickViewOverlay(project: quickViewProject, state: state)
                 }
                 .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
             }
@@ -60,19 +47,33 @@ struct MainView: View {
         .onAppear {
             if let project = state.selectedProject {
                 state.switchToProject(project, forceWorkspace: false)
-            } else if state.tabs.isEmpty {
-                if let recovered = TerminalService.shared.sessions.first(where: { $0.displayTitle != "Operator" }) {
-                    let tab = TabItem(
-                        id: recovered.id,
-                        title: recovered.displayTitle,
-                        kind: .terminal(sessionID: recovered.id)
-                    )
-                    state.openTab(tab)
-                } else {
-                    let session = TerminalService.shared.createSession(workingDirectory: NSHomeDirectory())
-                    let tab = TabItem(id: session.id, title: session.displayTitle, kind: .terminal(sessionID: session.id))
-                    state.openTab(tab)
-                }
+            }
+        }
+    }
+}
+
+private struct QuickViewOverlay: View {
+    let project: Project?
+    @Bindable var state: AppState
+
+    var body: some View {
+        ZStack {
+            if let project {
+                Color.black.opacity(0.25)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        state.closeProjectQuickView()
+                    }
+
+                ProjectQuickViewSheet(
+                    project: project,
+                    state: state,
+                    isPresented: true
+                )
+                .id(project.id)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: .black.opacity(0.18), radius: 40, y: 12)
             }
         }
     }
@@ -129,6 +130,7 @@ private struct AppToastView: View {
 
 struct ToolbarView: View {
     @Bindable var state: AppState
+    @State private var terminalService = TerminalService.shared
     @FocusState private var isSearchFocused: Bool
 
     private var isDashboard: Bool {
@@ -228,7 +230,7 @@ struct ToolbarView: View {
         if state.selectedSection != .projects {
             return state.selectedSection.title
         }
-        return state.selectedTab?.title ?? "xatlas"
+        return state.selectedTab?.resolvedTitle(using: terminalService) ?? "xatlas"
     }
 }
 

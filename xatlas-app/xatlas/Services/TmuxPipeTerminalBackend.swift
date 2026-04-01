@@ -5,8 +5,8 @@ final class TmuxPipeTerminalBackend: @unchecked Sendable {
     let sessionName: String
     let paneID: String
 
-    var onData: ((ArraySlice<UInt8>) -> Void)?
-    var onExit: ((Int32?) -> Void)?
+    var onData: (@Sendable (ArraySlice<UInt8>) -> Void)?
+    var onExit: (@Sendable (Int32?) -> Void)?
 
     var isRunning: Bool {
         stateQueue.sync { isStarted && !isStopped }

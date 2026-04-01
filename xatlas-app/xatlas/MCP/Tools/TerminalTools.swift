@@ -197,7 +197,7 @@ struct TerminalTools: MCPToolSet {
                         attention = false
                     }
                     let isSelected = Self.onMain { AppState.shared.selectedTab?.id == tab.id }
-                    return "{\"id\":\"\(Self.escape(tab.id))\",\"title\":\"\(Self.escape(tab.title))\",\"kind\":\"\(kind)\",\"selected\":\(isSelected ? "true" : "false"),\"attention\":\(attention ? "true" : "false")}"
+                    return "{\"id\":\"\(Self.escape(tab.id))\",\"title\":\"\(Self.escape(tab.resolvedTitle()))\",\"kind\":\"\(kind)\",\"selected\":\(isSelected ? "true" : "false"),\"attention\":\(attention ? "true" : "false")}"
                 }
                 return "[\(tabs.joined(separator: ","))]"
             }

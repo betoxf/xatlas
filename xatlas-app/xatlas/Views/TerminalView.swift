@@ -171,7 +171,6 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         terminal.installColors(palette)
     }
 
-
     final class Coordinator: NSObject, TerminalViewDelegate {
         private static let minimumCols = 20
         private static let minimumRows = 6
@@ -359,11 +358,9 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             NSWorkspace.shared.open(url)
         }
 
-        func scrolled(source: TerminalView, position: Double) {
-        }
+        func scrolled(source: TerminalView, position: Double) {}
 
-        func bell(source: TerminalView) {
-        }
+        func bell(source: TerminalView) {}
 
         func clipboardCopy(source: TerminalView, content: Data) {
             guard let text = String(data: content, encoding: .utf8) else { return }
@@ -371,11 +368,9 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             NSPasteboard.general.writeObjects([text as NSString])
         }
 
-        func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {
-        }
+        func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
 
-        func rangeChanged(source: TerminalView, startY: Int, endY: Int) {
-        }
+        func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 
         private func handleBackendExit() {
             let exitingSessionID = attachedSessionID ?? sessionID
@@ -403,7 +398,6 @@ private final class ManagedTerminalView: TerminalView {
     var inputHandler: ((ArraySlice<UInt8>) -> Void)?
     var layoutObserver: (() -> Void)?
 
-    // Prevent the host window's background-drag behavior from stealing text selection.
     override var mouseDownCanMoveWindow: Bool { false }
 
     override init(frame frameRect: NSRect) {
@@ -487,14 +481,5 @@ private extension Data {
             copy.removeLast()
         }
         return copy
-    }
-}
-
-private extension String {
-    func shellQuotedForTerminal() -> String {
-        if isEmpty {
-            return "''"
-        }
-        return "'" + replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 }

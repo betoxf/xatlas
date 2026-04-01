@@ -1,12 +1,15 @@
 import Foundation
 
-final class TerminalStreamService {
-    nonisolated(unsafe) static let shared = TerminalStreamService()
+typealias TerminalStreamBytesHandler = @Sendable (ArraySlice<UInt8>) -> Void
+typealias TerminalStreamExitHandler = @Sendable (Int32?) -> Void
 
-    private struct Subscriber {
-        let onBootstrap: (ArraySlice<UInt8>) -> Void
-        let onData: (ArraySlice<UInt8>) -> Void
-        let onExit: (Int32?) -> Void
+final class TerminalStreamService: @unchecked Sendable {
+    static let shared = TerminalStreamService()
+
+    private struct Subscriber: Sendable {
+        let onBootstrap: TerminalStreamBytesHandler
+        let onData: TerminalStreamBytesHandler
+        let onExit: TerminalStreamExitHandler
         var hasBootstrapped: Bool
         var bufferedChunks: [Data]
     }
@@ -29,16 +32,14 @@ final class TerminalStreamService {
         sessionID: String,
         sessionName: String,
         paneID: String,
-        onBootstrap: @escaping (ArraySlice<UInt8>) -> Void,
-        onData: @escaping (ArraySlice<UInt8>) -> Void,
-        onExit: @escaping (Int32?) -> Void
+        onBootstrap: @escaping TerminalStreamBytesHandler,
+        onData: @escaping TerminalStreamBytesHandler,
+        onExit: @escaping TerminalStreamExitHandler
     ) -> UUID {
         let token = UUID()
 
-        queue.async { [weak self] in
-            guard let self else { return }
-
-            var state = self.streams[sessionID] ?? self.makeStreamState(
+        queue.async { [service = self] in
+            var state = service.streams[sessionID] ?? service.makeStreamState(
                 sessionID: sessionID,
                 sessionName: sessionName,
                 paneID: paneID
@@ -53,44 +54,37 @@ final class TerminalStreamService {
                 hasBootstrapped: false,
                 bufferedChunks: []
             )
-            self.streams[sessionID] = state
-            self.captureBootstrapSnapshot(for: sessionID, subscriberID: token, sessionName: sessionName)
+            service.streams[sessionID] = state
+            service.captureBootstrapSnapshot(for: sessionID, subscriberID: token, sessionName: sessionName)
         }
 
         return token
     }
 
     func unsubscribe(sessionID: String, subscriberID: UUID) {
-        queue.async { [weak self] in
-            guard let self, var state = self.streams[sessionID] else { return }
+        queue.async { [service = self] in
+            guard var state = service.streams[sessionID] else { return }
             state.subscribers.removeValue(forKey: subscriberID)
 
             guard state.subscribers.isEmpty else {
-                self.streams[sessionID] = state
+                service.streams[sessionID] = state
                 return
             }
 
-            let workItem = DispatchWorkItem { [weak self] in
-                self?.queue.async {
-                    guard let self, let state = self.streams[sessionID], state.subscribers.isEmpty else { return }
-                    state.backend.stop()
-                    self.streams.removeValue(forKey: sessionID)
-                }
-            }
-
+            let workItem = service.makeShutdownWorkItem(for: sessionID)
             state.shutdownWorkItem = workItem
-            self.streams[sessionID] = state
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + self.shutdownGracePeriod, execute: workItem)
+            service.streams[sessionID] = state
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + service.shutdownGracePeriod, execute: workItem)
         }
     }
 
     private func makeStreamState(sessionID: String, sessionName: String, paneID: String) -> StreamState {
         let backend = TmuxPipeTerminalBackend(sessionName: sessionName, paneID: paneID)
-        backend.onData = { [weak self] bytes in
-            self?.handleLiveData(for: sessionID, bytes: bytes)
+        backend.onData = { [service = self] bytes in
+            service.handleLiveData(for: sessionID, bytes: bytes)
         }
-        backend.onExit = { [weak self] status in
-            self?.handleExit(for: sessionID, status: status)
+        backend.onExit = { [service = self] status in
+            service.handleExit(for: sessionID, status: status)
         }
         _ = backend.start(size: .init(cols: 0, rows: 0))
 
@@ -103,13 +97,22 @@ final class TerminalStreamService {
         )
     }
 
-    private func captureBootstrapSnapshot(for sessionID: String, subscriberID: UUID, sessionName: String) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else { return }
-            let data = self.snapshotData(for: sessionName) ?? Data()
+    private func makeShutdownWorkItem(for sessionID: String) -> DispatchWorkItem {
+        DispatchWorkItem { [service = self] in
+            service.queue.async { [service] in
+                guard let state = service.streams[sessionID], state.subscribers.isEmpty else { return }
+                state.backend.stop()
+                service.streams.removeValue(forKey: sessionID)
+            }
+        }
+    }
 
-            self.queue.async {
-                guard let state = self.streams[sessionID],
+    private func captureBootstrapSnapshot(for sessionID: String, subscriberID: UUID, sessionName: String) {
+        DispatchQueue.global(qos: .userInitiated).async { [service = self] in
+            let data = service.snapshotData(for: sessionName) ?? Data()
+
+            service.queue.async { [service] in
+                guard let state = service.streams[sessionID],
                       var subscriber = state.subscribers[subscriberID],
                       !subscriber.hasBootstrapped else { return }
 
@@ -119,7 +122,7 @@ final class TerminalStreamService {
 
                 var nextState = state
                 nextState.subscribers[subscriberID] = subscriber
-                self.streams[sessionID] = nextState
+                service.streams[sessionID] = nextState
 
                 DispatchQueue.main.async {
                     subscriber.onBootstrap(ArraySlice(data))
@@ -151,8 +154,8 @@ final class TerminalStreamService {
     private func handleLiveData(for sessionID: String, bytes: ArraySlice<UInt8>) {
         let data = Data(bytes)
 
-        queue.async { [weak self] in
-            guard let self, var state = self.streams[sessionID] else { return }
+        queue.async { [service = self] in
+            guard var state = service.streams[sessionID] else { return }
 
             var immediateSubscribers: [Subscriber] = []
             for (id, var subscriber) in state.subscribers {
@@ -167,7 +170,7 @@ final class TerminalStreamService {
                 }
             }
 
-            self.streams[sessionID] = state
+            service.streams[sessionID] = state
 
             guard !immediateSubscribers.isEmpty else { return }
             DispatchQueue.main.async {
@@ -179,8 +182,8 @@ final class TerminalStreamService {
     }
 
     private func handleExit(for sessionID: String, status: Int32?) {
-        queue.async { [weak self] in
-            guard let self, let state = self.streams.removeValue(forKey: sessionID) else { return }
+        queue.async { [service = self] in
+            guard let state = service.streams.removeValue(forKey: sessionID) else { return }
             state.shutdownWorkItem?.cancel()
             let subscribers = Array(state.subscribers.values)
             DispatchQueue.main.async {

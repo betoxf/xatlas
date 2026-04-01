@@ -3,7 +3,7 @@ import SwiftUI
 
 @Observable
 final class ProjectOperatorService: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = ProjectOperatorService()
+    static let shared = ProjectOperatorService()
 
     private(set) var states: [UUID: ProjectOperatorState]
     private(set) var consoleMessages: [OperatorConsoleMessage]
@@ -39,16 +39,12 @@ final class ProjectOperatorService: @unchecked Sendable {
 
     func bootstrap(projects: [Project]) {
         syncProjects(projects)
-        _ = ensureGlobalOperatorSession()
         for project in projects {
             let current = state(for: project.id)
             if current.lastScanAt == nil, current.status == .unscanned, current.autonomy != .drive {
                 mutate(project.id) { state in
                     state.autonomy = .drive
                 }
-            }
-            if current.lastScanAt == nil && current.status != .scanning {
-                refreshProject(project)
             }
         }
     }
@@ -209,6 +205,11 @@ final class ProjectOperatorService: @unchecked Sendable {
             )
         }
         return sent
+    }
+
+    @discardableResult
+    func activateConsole() -> Bool {
+        ensureGlobalOperatorSession() != nil
     }
 
     private func handleSessionUpdate(_ session: TerminalSession) {

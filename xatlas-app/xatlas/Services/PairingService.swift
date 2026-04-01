@@ -10,7 +10,7 @@ struct PairedDevice: Codable, Identifiable {
 }
 
 final class PairingService: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = PairingService()
+    static let shared = PairingService()
 
     private(set) var pairingCode: String
     private(set) var pairedDevices: [PairedDevice] = []

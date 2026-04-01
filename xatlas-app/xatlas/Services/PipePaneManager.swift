@@ -3,7 +3,7 @@ import Foundation
 /// Manages tmux pipe-pane for streaming terminal output to iOS clients.
 /// Creates FIFOs per-session, reads them asynchronously, and broadcasts via StreamingServer.
 final class PipePaneManager: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = PipePaneManager()
+    static let shared = PipePaneManager()
 
     private let lock = NSLock()
     private var activeStreams: [String: StreamState] = [:]
