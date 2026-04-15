@@ -2,115 +2,11 @@ import AppKit
 import SwiftUI
 import SwiftTerm
 
-struct StyledTerminalView: View {
-    let sessionID: String
-    @Bindable var appState: AppState
-    var focusToken: Int = 0
-    @State private var session: TerminalSession?
-
-    var body: some View {
-        Group {
-            if let session {
-                VStack(spacing: 0) {
-                    header(for: session)
-                    NativeTmuxTerminalView(sessionID: sessionID, focusToken: focusToken)
-                        .id(sessionID)
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 12)
-                }
-                .xatlasSectionSurface(
-                    radius: XatlasLayout.sectionCornerRadius,
-                    fill: .white.opacity(0.4),
-                    stroke: .white.opacity(0.34)
-                )
-                .padding(XatlasLayout.contentInset)
-            } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 28, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text("Terminal session unavailable")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .onAppear(perform: refreshSession)
-        .onChange(of: sessionID) { _, _ in
-            refreshSession()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .xatlasTerminalSessionDidChange)) { note in
-            guard let changed = note.userInfo?["session"] as? TerminalSession,
-                  changed.id == sessionID else { return }
-            session = changed
-        }
-    }
-
-    @ViewBuilder
-    private func header(for session: TerminalSession) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "terminal.fill")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.primary.opacity(0.3))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayTitle)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.primary.opacity(0.72))
-                    .lineLimit(1)
-
-                Text(session.displayDirectory)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.primary.opacity(0.38))
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            Text(statusLabel(for: session))
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(statusColor(for: session))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule().fill(statusColor(for: session).opacity(0.12))
-                )
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(XatlasSurface.divider)
-                .frame(height: 1)
-                .padding(.horizontal, 12)
-        }
-    }
-
-    private func activityColor(for state: TerminalActivityState) -> SwiftUI.Color {
-        switch state {
-        case .idle: return .blue.opacity(0.8)
-        case .running: return .green.opacity(0.8)
-        case .detached: return .orange.opacity(0.8)
-        case .exited: return .secondary
-        case .error: return .red.opacity(0.8)
-        }
-    }
-
-    private func statusColor(for session: TerminalSession) -> SwiftUI.Color {
-        session.requiresAttention ? .red.opacity(0.82) : activityColor(for: session.activityState)
-    }
-
-    private func statusLabel(for session: TerminalSession) -> String {
-        session.requiresAttention ? "1" : session.activityState.label
-    }
-
-    private func refreshSession() {
-        session = TerminalService.shared.session(id: sessionID)
-    }
-}
-
-private struct NativeTmuxTerminalView: NSViewRepresentable {
+/// SwiftUI bridge for SwiftTerm's NSView-based terminal. Owns the
+/// attach/detach lifecycle against TmuxService + TerminalStreamService,
+/// captures user input for command-history tracking, and forwards focus
+/// hints from the parent.
+struct NativeTmuxTerminalView: NSViewRepresentable {
     let sessionID: String
     let focusToken: Int
 
@@ -171,7 +67,11 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
         terminal.installColors(palette)
     }
 
-    final class Coordinator: NSObject, TerminalViewDelegate {
+    /// Drives the terminal-to-tmux bridge: tracks the active subscription
+    /// against TerminalStreamService, queues attach attempts when the grid
+    /// is too small, and translates user keystrokes into command-history
+    /// entries on TerminalService.
+    final class Coordinator: NSObject, TerminalViewDelegate, @unchecked Sendable {
         private static let minimumCols = 20
         private static let minimumRows = 6
 
@@ -225,31 +125,27 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
             }
             attachmentInFlight = true
 
-            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak terminal] in
-                guard let self else { return }
-
+            let expectedSessionID = session.id
+            Task.detached(priority: .userInitiated) { [weak terminal] in
                 let didEnsure = TmuxService.shared.ensureSession(
                     name: sessionName,
                     cwd: workingDirectory,
                     title: title
                 )
-                guard didEnsure else {
-                    DispatchQueue.main.async {
-                        guard self.sessionID == session.id else { return }
-                        TerminalService.shared.updateActivityState(.error, for: self.sessionID)
-                        self.attachmentInFlight = false
-                    }
-                    return
-                }
+                let paneID = didEnsure ? TmuxService.shared.paneIdentifier(for: sessionName) : nil
 
-                let paneID = TmuxService.shared.paneIdentifier(for: sessionName)
-
-                DispatchQueue.main.async {
-                    guard let terminal else {
+                await MainActor.run { [weak self, weak terminal] in
+                    guard let self else { return }
+                    guard self.sessionID == expectedSessionID else {
                         self.attachmentInFlight = false
                         return
                     }
-                    guard self.sessionID == session.id else {
+                    guard didEnsure else {
+                        TerminalService.shared.updateActivityState(.error, for: self.sessionID)
+                        self.attachmentInFlight = false
+                        return
+                    }
+                    guard let terminal else {
                         self.attachmentInFlight = false
                         return
                     }
@@ -270,16 +166,22 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
                         sessionName: sessionName,
                         paneID: paneID,
                         onBootstrap: { [weak terminal] bytes in
-                            guard let terminal else { return }
-                            terminal.terminal.resetToInitialState()
-                            terminal.feed(byteArray: bytes)
+                            Task { @MainActor in
+                                guard let terminal else { return }
+                                terminal.terminal.resetToInitialState()
+                                terminal.feed(byteArray: bytes)
+                            }
                         },
                         onData: { [weak terminal] bytes in
-                            guard let terminal else { return }
-                            terminal.feed(byteArray: bytes)
+                            Task { @MainActor in
+                                guard let terminal else { return }
+                                terminal.feed(byteArray: bytes)
+                            }
                         },
                         onExit: { [weak self] _ in
-                            self?.handleBackendExit()
+                            Task { @MainActor in
+                                self?.handleBackendExit()
+                            }
                         }
                     )
 
@@ -390,96 +292,5 @@ private struct NativeTmuxTerminalView: NSViewRepresentable {
                 _ = terminal.becomeFirstResponder()
             }
         }
-    }
-}
-
-private final class ManagedTerminalView: TerminalView {
-    var inputObserver: ((String) -> Void)?
-    var inputHandler: ((ArraySlice<UInt8>) -> Void)?
-    var layoutObserver: (() -> Void)?
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        commonInit()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        commonInit()
-    }
-
-    private func commonInit() {
-        wantsLayer = true
-        layer?.backgroundColor = NSColor.clear.cgColor
-        registerForDraggedTypes([.fileURL, .URL, .tiff, .png])
-    }
-
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        layoutObserver?()
-    }
-
-    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        droppedShellFragments(from: sender.draggingPasteboard).isEmpty ? [] : .copy
-    }
-
-    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        let fragments = droppedShellFragments(from: sender.draggingPasteboard)
-        guard !fragments.isEmpty else { return false }
-        window?.makeFirstResponder(self)
-        insertDroppedText(fragments.joined(separator: " "))
-        return true
-    }
-
-    private func insertDroppedText(_ text: String) {
-        guard !text.isEmpty else { return }
-        inputObserver?(text)
-        inputHandler?(ArraySlice(text.utf8))
-    }
-
-    private func droppedShellFragments(from pasteboard: NSPasteboard) -> [String] {
-        if let fileURLs = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
-           !fileURLs.isEmpty {
-            return fileURLs.map { $0.path.shellQuotedForTerminal() }
-        }
-
-        if let imageURL = writeDroppedImage(from: pasteboard) {
-            return [imageURL.path.shellQuotedForTerminal()]
-        }
-
-        return []
-    }
-
-    private func writeDroppedImage(from pasteboard: NSPasteboard) -> URL? {
-        guard let image = NSImage(pasteboard: pasteboard),
-              let tiffData = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffData),
-              let pngData = bitmap.representation(using: .png, properties: [:]) else {
-            return nil
-        }
-
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("xatlas-drops", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-
-        let fileURL = directory.appendingPathComponent("drop-\(UUID().uuidString).png")
-        do {
-            try pngData.write(to: fileURL, options: .atomic)
-            return fileURL
-        } catch {
-            return nil
-        }
-    }
-}
-
-private extension Data {
-    func trimmingTerminalContent() -> Data {
-        var copy = self
-        while let last = copy.last, last == 0 || last == 10 || last == 13 || last == 32 {
-            copy.removeLast()
-        }
-        return copy
     }
 }
