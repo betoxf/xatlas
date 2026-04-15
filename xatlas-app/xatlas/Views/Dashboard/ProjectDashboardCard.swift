@@ -105,13 +105,13 @@ struct ProjectDashboardCard: View {
                 .strokeBorder(strokeStyle, lineWidth: isSelected ? 1.4 : 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous))
+        .onTapGesture {
+            onQuickView()
+        }
         .scaleEffect(isHovered ? 1.012 : 1.0)
         .offset(y: isHovered ? -1 : 0)
         .animation(XatlasMotion.hover, value: isHovered)
         .xatlasPressEffect()
-        .onTapGesture {
-            onQuickView()
-        }
         .onHover { isHovered = $0 }
         .onAppear {
             syncPreviewSessionSelection()

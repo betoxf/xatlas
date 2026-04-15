@@ -37,7 +37,6 @@ struct MainView: View {
 
                     QuickViewOverlay(project: quickViewProject, state: state)
                 }
-                .animation(XatlasMotion.layout, value: state.dashboardQuickViewProjectID)
             }
         }
         .background(XatlasSurface.windowBackground)

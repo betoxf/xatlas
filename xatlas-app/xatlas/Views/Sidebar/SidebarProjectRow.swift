@@ -20,36 +20,43 @@ struct SidebarProjectRow: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(isSelected ? .white : .blue.opacity(0.6))
-                    .frame(width: 20, alignment: .center)
+                HStack(spacing: 8) {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(isSelected ? .white : .blue.opacity(0.6))
+                        .frame(width: 20, alignment: .center)
 
-                Text(project.name)
-                    .font(isSelected ? XatlasFont.bodyMedium : XatlasFont.body)
-                    .foregroundStyle(isSelected ? .white : .primary)
-                    .lineLimit(1)
+                    Text(project.name)
+                        .font(isSelected ? XatlasFont.bodyMedium : XatlasFont.body)
+                        .foregroundStyle(isSelected ? .white : .primary)
+                        .lineLimit(1)
 
-                Spacer()
+                    Spacer()
 
-                if attentionCount > 0 {
-                    Text("\(attentionCount)")
-                        .font(XatlasFont.badge)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .xatlasBadgeFill(tint: .red)
+                    if attentionCount > 0 {
+                        Text("\(attentionCount)")
+                            .font(XatlasFont.badge)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .xatlasBadgeFill(tint: .red)
+                    }
+
+                    if let status = gitStatus, status.isRepo, !status.changes.isEmpty {
+                        SidebarGitButton(
+                            status: status,
+                            isSelected: isSelected,
+                            isSyncing: isSyncing,
+                            onSync: { syncProject() },
+                            onRefresh: { refreshGit() },
+                            projectPath: project.path
+                        )
+                    }
                 }
-
-                if let status = gitStatus, status.isRepo, !status.changes.isEmpty {
-                    SidebarGitButton(
-                        status: status,
-                        isSelected: isSelected,
-                        isSyncing: isSyncing,
-                        onSync: { syncProject() },
-                        onRefresh: { refreshGit() },
-                        projectPath: project.path
-                    )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onSelect()
+                    withAnimation(XatlasMotion.layout) { isExpanded = true }
                 }
 
                 Button {
@@ -67,11 +74,6 @@ struct SidebarProjectRow: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
             .background(SidebarSelectionBackground(isSelected: isSelected, isHovered: isHovered))
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onSelect()
-                withAnimation(XatlasMotion.layout) { isExpanded = true }
-            }
             .onHover { isHovered = $0 }
             .animation(XatlasMotion.fadeFast, value: isHovered)
             .animation(XatlasMotion.layout, value: isSelected)
