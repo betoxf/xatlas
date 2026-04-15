@@ -11,7 +11,6 @@ final class TerminalStreamService: @unchecked Sendable {
         let onData: TerminalStreamBytesHandler
         let onExit: TerminalStreamExitHandler
         var hasBootstrapped: Bool
-        var bufferedChunks: [Data]
     }
 
     private struct StreamState {
@@ -19,6 +18,9 @@ final class TerminalStreamService: @unchecked Sendable {
         let paneID: String
         let backend: TmuxPipeTerminalBackend
         var subscribers: [UUID: Subscriber]
+        var bootstrapSnapshot: Data?
+        var recentChunks: [Data]
+        var bootstrapCaptureInFlight: Bool
         var shutdownWorkItem: DispatchWorkItem?
     }
 
@@ -51,11 +53,10 @@ final class TerminalStreamService: @unchecked Sendable {
                 onBootstrap: onBootstrap,
                 onData: onData,
                 onExit: onExit,
-                hasBootstrapped: false,
-                bufferedChunks: []
+                hasBootstrapped: false
             )
             service.streams[sessionID] = state
-            service.captureBootstrapSnapshot(for: sessionID, subscriberID: token, sessionName: sessionName)
+            service.bootstrapIfNeeded(for: sessionID, subscriberID: token)
         }
 
         return token
@@ -93,6 +94,9 @@ final class TerminalStreamService: @unchecked Sendable {
             paneID: paneID,
             backend: backend,
             subscribers: [:],
+            bootstrapSnapshot: nil,
+            recentChunks: [],
+            bootstrapCaptureInFlight: false,
             shutdownWorkItem: nil
         )
     }
@@ -107,28 +111,87 @@ final class TerminalStreamService: @unchecked Sendable {
         }
     }
 
-    private func captureBootstrapSnapshot(for sessionID: String, subscriberID: UUID, sessionName: String) {
+    private func bootstrapIfNeeded(for sessionID: String, subscriberID: UUID) {
+        guard let state = streams[sessionID],
+              let subscriber = state.subscribers[subscriberID] else { return }
+
+        if let bootstrapSnapshot = state.bootstrapSnapshot {
+            var nextState = state
+            nextState.subscribers[subscriberID]?.hasBootstrapped = true
+            streams[sessionID] = nextState
+            deliverBootstrap(
+                to: subscriber,
+                snapshot: bootstrapSnapshot,
+                replayChunks: state.recentChunks
+            )
+            return
+        }
+
+        guard !state.bootstrapCaptureInFlight else { return }
+        streams[sessionID]?.bootstrapCaptureInFlight = true
+        captureBootstrapSnapshot(for: sessionID, sessionName: state.sessionName)
+    }
+
+    private func captureBootstrapSnapshot(for sessionID: String, sessionName: String) {
         DispatchQueue.global(qos: .userInitiated).async { [service = self] in
             let data = service.snapshotData(for: sessionName) ?? Data()
 
             service.queue.async { [service] in
-                guard let state = service.streams[sessionID],
-                      var subscriber = state.subscribers[subscriberID],
-                      !subscriber.hasBootstrapped else { return }
+                guard var state = service.streams[sessionID] else { return }
+                state.bootstrapSnapshot = data
+                state.bootstrapCaptureInFlight = false
 
-                let buffered = subscriber.bufferedChunks
-                subscriber.bufferedChunks.removeAll(keepingCapacity: false)
-                subscriber.hasBootstrapped = true
+                let replayChunks = state.recentChunks
+                let targetSubscribers = state.subscribers.compactMap { id, subscriber -> Subscriber? in
+                    guard !subscriber.hasBootstrapped else { return nil }
+                    state.subscribers[id]?.hasBootstrapped = true
+                    return subscriber
+                }
 
-                var nextState = state
-                nextState.subscribers[subscriberID] = subscriber
-                service.streams[sessionID] = nextState
+                service.streams[sessionID] = state
 
-                DispatchQueue.main.async {
-                    subscriber.onBootstrap(ArraySlice(data))
-                    for chunk in buffered {
-                        subscriber.onData(ArraySlice(chunk))
-                    }
+                guard !targetSubscribers.isEmpty else { return }
+                for subscriber in targetSubscribers {
+                    service.deliverBootstrap(
+                        to: subscriber,
+                        snapshot: data,
+                        replayChunks: replayChunks
+                    )
+                }
+            }
+        }
+    }
+
+    private func deliverBootstrap(to subscriber: Subscriber, snapshot: Data, replayChunks: [Data]) {
+        DispatchQueue.main.async {
+            subscriber.onBootstrap(ArraySlice(snapshot))
+            for chunk in replayChunks {
+                subscriber.onData(ArraySlice(chunk))
+            }
+        }
+    }
+
+    private func appendRecentChunk(_ data: Data, to state: inout StreamState) {
+        state.recentChunks.append(data)
+        if state.recentChunks.count > 24 {
+            state.recentChunks.removeFirst(state.recentChunks.count - 24)
+        }
+    }
+
+    private func handleLiveData(for sessionID: String, bytes: ArraySlice<UInt8>) {
+        let data = Data(bytes)
+
+        queue.async { [service = self] in
+            guard var state = service.streams[sessionID] else { return }
+            service.appendRecentChunk(data, to: &state)
+
+            let immediateSubscribers = state.subscribers.values.filter(\.hasBootstrapped)
+            service.streams[sessionID] = state
+
+            guard !immediateSubscribers.isEmpty else { return }
+            DispatchQueue.main.async {
+                for subscriber in immediateSubscribers {
+                    subscriber.onData(bytes)
                 }
             }
         }
@@ -149,36 +212,6 @@ final class TerminalStreamService: @unchecked Sendable {
             .replacingOccurrences(of: "\n", with: "\r\n")
 
         return Data(normalized.utf8)
-    }
-
-    private func handleLiveData(for sessionID: String, bytes: ArraySlice<UInt8>) {
-        let data = Data(bytes)
-
-        queue.async { [service = self] in
-            guard var state = service.streams[sessionID] else { return }
-
-            var immediateSubscribers: [Subscriber] = []
-            for (id, var subscriber) in state.subscribers {
-                if subscriber.hasBootstrapped {
-                    immediateSubscribers.append(subscriber)
-                } else {
-                    subscriber.bufferedChunks.append(data)
-                    if subscriber.bufferedChunks.count > 24 {
-                        subscriber.bufferedChunks.removeFirst(subscriber.bufferedChunks.count - 24)
-                    }
-                    state.subscribers[id] = subscriber
-                }
-            }
-
-            service.streams[sessionID] = state
-
-            guard !immediateSubscribers.isEmpty else { return }
-            DispatchQueue.main.async {
-                for subscriber in immediateSubscribers {
-                    subscriber.onData(bytes)
-                }
-            }
-        }
     }
 
     private func handleExit(for sessionID: String, status: Int32?) {
