@@ -2,6 +2,14 @@
   "name": "xatlas-bridge",
   "version": "0.2.0",
   "description": "xatlas CLE (Command Line Environment): a fusion of IDE and CLI for managing projects, terminals, skills, MCPs, and automations from one place. Run `xatlas up` to start.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/betoxf/xatlas-cle"
+  },
+  "homepage": "https://github.com/betoxf/xatlas-cle",
+  "bugs": {
+    "url": "https://github.com/betoxf/xatlas-cle/issues"
+  },
   "main": "src/index.js",
   "bin": {
     "xatlas": "./bin/xatlas-bridge.js",
@@ -14,7 +22,6 @@
   ],
   "scripts": {
     "start": "node ./bin/xatlas-bridge.js up",
-    "test": "node --test ./test/*.test.js",
     "prepack": "node ./scripts/prepare-private-defaults.js",
     "postpack": "node ./scripts/cleanup-private-defaults.js"
   },
