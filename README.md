@@ -2,8 +2,6 @@
 
 > A command line environment for macOS: projects, terminals, Git, MCPs, skills, and automations in one native workspace.
 
-xatlas is the renamed continuation of the old `xerebro-operator-manager` project. It started around the VS Code extension, but the project now centers on the native xatlas app and its runtime.
-
 Keep multiple repos open at once, jump between live terminals, inspect Git state, manage MCP servers and skills, and run AI-heavy workflows from one place without living inside a single editor window.
 
 <p align="center">
@@ -15,8 +13,6 @@ Keep multiple repos open at once, jump between live terminals, inspect Git state
 - `xatlas-app/`: the native macOS workspace for projects, terminals, source control, MCPs, skills, and automations
 - `xatlas-bridge/`: the CLI/runtime package that users install as `xatlas`
 - `relay/`: the optional pairing and reconnect service if you want to self-host that path
-
-The VS Code extension in this repo is no longer the main product surface.
 
 ## Interface
 

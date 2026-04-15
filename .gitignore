@@ -40,3 +40,6 @@ node_modules/
 
 # Reference repos (cloned for study, not project code)
 remodex/
+
+# Agent / tool guidance — local only, not part of the project source
+CLAUDE.md

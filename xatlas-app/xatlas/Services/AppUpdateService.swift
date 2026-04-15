@@ -409,7 +409,7 @@ final class AppUpdateService {
             .compactMap { line -> String? in
                 guard line.count >= 4 else { return nil }
                 let path = String(line.dropFirst(3))
-                if path.hasPrefix("xatlas-app/.dist/") || path == "vscode-extension" {
+                if path.hasPrefix("xatlas-app/.dist/") {
                     return nil
                 }
                 return path
