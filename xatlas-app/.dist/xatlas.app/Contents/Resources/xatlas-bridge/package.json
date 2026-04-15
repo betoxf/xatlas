@@ -1,6 +1,6 @@
 {
   "name": "xatlas-bridge",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "xatlas CLE (Command Line Environment): a fusion of IDE and CLI for managing projects, terminals, skills, MCPs, and automations from one place. Run `xatlas up` to start.",
   "repository": {
     "type": "git",
