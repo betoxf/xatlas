@@ -1,49 +1,6 @@
 import AppKit
 import SwiftUI
 
-enum WorkspaceSection: String, CaseIterable, Identifiable {
-    case projects
-    case mcp
-    case automations
-    case skills
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .projects: return "Projects"
-        case .mcp: return "MCP"
-        case .automations: return "Automations"
-        case .skills: return "Skills"
-        }
-    }
-}
-
-enum ProjectSurfaceMode: String, CaseIterable, Identifiable {
-    case workspace
-    case dashboard
-
-    var id: String { rawValue }
-}
-
-enum ProjectAdditionBehavior {
-    case selectInWorkspace
-    case stayOnDashboard
-}
-
-enum AppToastStyle: Equatable {
-    case neutral
-    case success
-    case warning
-    case error
-}
-
-struct AppToast: Identifiable, Equatable {
-    let id = UUID()
-    let title: String
-    let message: String?
-    let style: AppToastStyle
-}
 
 private struct ProjectWorkspaceState {
     var tabs: [TabItem] = []
@@ -407,6 +364,31 @@ final class AppState: @unchecked Sendable {
         projectWorkspaces[projectID] = workspace
     }
 
+    func preferredProjectSessionID(
+        for projectID: UUID,
+        availableSessionIDs: [String],
+        fallbackSelection: String? = nil
+    ) -> String? {
+        guard !availableSessionIDs.isEmpty else { return nil }
+
+        if let rememberedSessionID = quickViewSelectedSessionID(for: projectID),
+           availableSessionIDs.contains(rememberedSessionID) {
+            return rememberedSessionID
+        }
+
+        if selectedProject?.id == projectID,
+           case .terminal(let sessionID) = selectedTab?.kind,
+           availableSessionIDs.contains(sessionID) {
+            return sessionID
+        }
+
+        if let fallbackSelection, availableSessionIDs.contains(fallbackSelection) {
+            return fallbackSelection
+        }
+
+        return availableSessionIDs.first
+    }
+
     @discardableResult
     func runProjectBrief(for project: Project, provider: AISyncProvider? = nil) -> String? {
         let command = AISyncService.shared.projectBriefCommand(for: project.path, provider: provider)
@@ -581,22 +563,3 @@ final class AppState: @unchecked Sendable {
 
 }
 
-struct TabItem: Identifiable, Equatable {
-    let id: String
-    var title: String
-    let kind: TabKind
-
-    enum TabKind: Equatable {
-        case terminal(sessionID: String)
-        case editor(filePath: String)
-    }
-
-    var terminalSessionID: String? {
-        guard case .terminal(let sessionID) = kind else { return nil }
-        return sessionID
-    }
-
-    func resolvedTitle(using terminalService: TerminalService = .shared) -> String {
-        terminalSessionID.map(terminalService.displayTitle(for:)) ?? title
-    }
-}
