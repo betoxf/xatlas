@@ -495,7 +495,7 @@ private struct SettingsRow<Trailing: View>: View {
 
 // MARK: - Relay Models
 
-/// Matches the QR payload format from remodex/xatlas-bridge (CodexPairingQRPayload v2)
+/// Matches the QR payload format produced by xatlas-bridge (CodexPairingQRPayload v2)
 struct RelayPairingPayload {
     let v: Int           // protocol version (must be 2)
     let relay: String    // WebSocket relay base URL
