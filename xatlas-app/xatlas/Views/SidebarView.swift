@@ -105,12 +105,12 @@ private struct ProjectItemView: View {
             // Project row
             HStack(spacing: 8) {
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(isSelected ? .white : .blue.opacity(0.6))
                     .frame(width: 20, alignment: .center)
 
                 Text(project.name)
-                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .font(isSelected ? XatlasFont.bodyMedium : XatlasFont.body)
                     .foregroundStyle(isSelected ? .white : .primary)
                     .lineLimit(1)
 
@@ -118,13 +118,11 @@ private struct ProjectItemView: View {
 
                 if attentionCount > 0 {
                     Text("\(attentionCount)")
-                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .font(XatlasFont.badge)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(
-                            Capsule().fill(.red.opacity(isSelected ? 0.82 : 0.72))
-                        )
+                        .xatlasBadgeFill(tint: .red)
                 }
 
                 // Git status button
@@ -141,7 +139,7 @@ private struct ProjectItemView: View {
 
                 // Chevron
                 Button {
-                    withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+                    withAnimation(XatlasMotion.layout) { isExpanded.toggle() }
                 } label: {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .bold))
@@ -150,19 +148,19 @@ private struct ProjectItemView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .xatlasPressEffect(scale: 0.88)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
-                    .fill(isSelected ? Color.accentColor : XatlasSurface.hoverFill.opacity(isHovered ? 1 : 0))
-            )
+            .background(selectionBackground)
             .contentShape(Rectangle())
             .onTapGesture {
                 onSelect()
-                withAnimation(.easeOut(duration: 0.15)) { isExpanded = true }
+                withAnimation(XatlasMotion.layout) { isExpanded = true }
             }
             .onHover { isHovered = $0 }
+            .animation(XatlasMotion.fadeFast, value: isHovered)
+            .animation(XatlasMotion.layout, value: isSelected)
             .contextMenu {
                 Button("Close Project") { isRemoveConfirmationPresented = true }
             }
@@ -188,8 +186,44 @@ private struct ProjectItemView: View {
         .onChange(of: isSelected) { _, sel in
             if sel {
                 refreshGit()
-                withAnimation(.easeOut(duration: 0.15)) { isExpanded = true }
+                withAnimation(XatlasMotion.layout) { isExpanded = true }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var selectionBackground: some View {
+        if isSelected {
+            RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.accentColor,
+                            Color.accentColor.opacity(0.84)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.32),
+                                    .white.opacity(0.04)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.6
+                        )
+                )
+                .shadow(color: Color.accentColor.opacity(0.22), radius: 6, y: 2)
+                .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+        } else {
+            RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                .fill(XatlasSurface.hoverFill.opacity(isHovered ? 1 : 0))
         }
     }
 
@@ -254,7 +288,7 @@ private struct GitInlineButton: View {
                 }
 
                 Text("\(changeCount)")
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .font(XatlasFont.badge)
             }
             .foregroundStyle(badgeColor)
             .padding(.horizontal, 5)
@@ -262,12 +296,17 @@ private struct GitInlineButton: View {
             .background(
                 Capsule()
                     .fill(badgeBgColor)
+                    .overlay(
+                        Capsule()
+                            .strokeBorder(badgeColor.opacity(0.18), lineWidth: 0.5)
+                    )
             )
             .scaleEffect(isGitHovered ? 1.1 : 1.0)
         }
         .buttonStyle(.plain)
         .onHover { isGitHovered = $0 }
-        .animation(.easeOut(duration: 0.12), value: isGitHovered)
+        .animation(XatlasMotion.hover, value: isGitHovered)
+        .xatlasPressEffect(scale: 0.92)
         .onAppear { refreshRemoteURL() }
         .help("Commit & push \(changeCount) change\(changeCount == 1 ? "" : "s")")
         .contextMenu {
@@ -356,7 +395,7 @@ private struct SectionHeader<Accessory: View>: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.system(size: 11, weight: .semibold))
+                .font(XatlasFont.sectionLabel)
                 .foregroundStyle(.tertiary)
                 .textCase(.uppercase)
                 .tracking(0.5)
@@ -381,9 +420,14 @@ private struct HeaderModeToggleButton: View {
                 .background(
                     RoundedRectangle(cornerRadius: XatlasLayout.compactCornerRadius, style: .continuous)
                         .fill(.white.opacity(0.5))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: XatlasLayout.compactCornerRadius, style: .continuous)
+                                .strokeBorder(.white.opacity(0.40), lineWidth: 0.6)
+                        )
                 )
         }
         .buttonStyle(.plain)
+        .xatlasPressEffect()
     }
 }
 
@@ -443,7 +487,7 @@ private struct FolderRow: View {
     var body: some View {
         VStack(spacing: 0) {
             Button {
-                withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+                withAnimation(XatlasMotion.layout) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 0) {
                     Spacer().frame(width: CGFloat(depth) * 14)
@@ -454,12 +498,12 @@ private struct FolderRow: View {
                         .frame(width: 14)
 
                     Image(systemName: isExpanded ? "folder.fill" : "folder")
-                        .font(.system(size: 11.5))
+                        .font(.system(size: 11.5, weight: .medium))
                         .foregroundStyle(.blue.opacity(0.55))
                         .frame(width: 18)
 
                     Text(entry.name)
-                        .font(.system(size: 12))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.primary.opacity(0.8))
                         .lineLimit(1)
 
@@ -496,12 +540,12 @@ private struct FileRow: View {
                 Spacer().frame(width: CGFloat(depth) * 14 + 14)
 
                 Image(systemName: iconForFile(entry.name))
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundStyle(colorForFile(entry.name))
                     .frame(width: 18)
 
                 Text(entry.name)
-                    .font(.system(size: 12))
+                    .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(.primary.opacity(0.75))
                     .lineLimit(1)
 
@@ -581,12 +625,12 @@ private struct SidebarItem: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 13, weight: .regular))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(isSelected ? .white : .primary.opacity(0.5))
                     .frame(width: 20, alignment: .center)
 
                 Text(label)
-                    .font(.system(size: 13))
+                    .font(XatlasFont.body)
                     .foregroundStyle(isSelected ? .white : .primary)
                     .lineLimit(1)
 
@@ -594,13 +638,49 @@ private struct SidebarItem: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
-                    .fill(isSelected ? Color.accentColor : XatlasSurface.hoverFill.opacity(isHovered ? 1 : 0))
-            )
+            .background(selectionBackground)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
+        .animation(XatlasMotion.fadeFast, value: isHovered)
+        .animation(XatlasMotion.layout, value: isSelected)
+        .xatlasPressEffect()
+    }
+
+    @ViewBuilder
+    private var selectionBackground: some View {
+        if isSelected {
+            RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.accentColor,
+                            Color.accentColor.opacity(0.84)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    .white.opacity(0.32),
+                                    .white.opacity(0.04)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.6
+                        )
+                )
+                .shadow(color: Color.accentColor.opacity(0.22), radius: 6, y: 2)
+                .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+        } else {
+            RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                .fill(XatlasSurface.hoverFill.opacity(isHovered ? 1 : 0))
+        }
     }
 }
 
@@ -629,6 +709,7 @@ private struct SidebarCircleButton: View {
         )
         .onHover { isHovered = $0 }
         .scaleEffect(isHovered ? 1.08 : 1.0)
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .animation(XatlasMotion.hover, value: isHovered)
+        .xatlasPressEffect()
     }
 }

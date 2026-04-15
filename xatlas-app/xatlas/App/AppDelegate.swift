@@ -70,10 +70,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.center()
         window.delegate = self
 
-        // Host the SwiftUI content
+        // Host the SwiftUI content. The window corner radius is derived from
+        // the panel radius so the inner panels and the window frame stay
+        // concentric instead of fighting each other at the corners.
         let hostingView = NSHostingView(rootView: MainView().frame(minWidth: 800, minHeight: 500))
         hostingView.wantsLayer = true
-        hostingView.layer?.cornerRadius = 24
+        hostingView.layer?.cornerRadius = XatlasLayout.windowCornerRadius
+        hostingView.layer?.cornerCurve = .continuous
         hostingView.layer?.masksToBounds = true
 
         window.contentView = hostingView

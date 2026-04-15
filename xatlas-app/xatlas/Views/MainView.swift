@@ -26,13 +26,14 @@ struct MainView: View {
                             ContentAreaView(state: state)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .xatlasPanelSurface()
                         .padding(.trailing, XatlasLayout.windowPadding)
-                        .padding(.bottom, XatlasLayout.windowPadding)
+                        .padding(.vertical, XatlasLayout.windowPadding)
                     }
 
                     QuickViewOverlay(project: quickViewProject, state: state)
                 }
-                .animation(.easeInOut(duration: 0.2), value: state.dashboardQuickViewProjectID)
+                .animation(XatlasMotion.layout, value: state.dashboardQuickViewProjectID)
             }
         }
         .background(XatlasSurface.windowBackground)
@@ -141,7 +142,7 @@ struct ToolbarView: View {
         HStack(spacing: 10) {
             if isDashboard {
                 Text("Projects")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(XatlasFont.largeTitle)
                     .foregroundStyle(.primary)
 
                 Text("Overview")
@@ -149,7 +150,7 @@ struct ToolbarView: View {
                     .foregroundStyle(.secondary)
             } else {
                 Text(toolbarTitle)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(XatlasFont.title)
                     .foregroundStyle(.primary)
             }
 
@@ -178,6 +179,7 @@ struct ToolbarView: View {
                     RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
                         .fill(.white.opacity(0.5))
                 )
+                .xatlasFocusRing(isFocused: isSearchFocused)
                 .frame(maxWidth: 200)
                 .onChange(of: state.isDashboardSearchActive) { _, active in
                     if active { isSearchFocused = true }
@@ -203,15 +205,20 @@ struct ToolbarView: View {
                         state.presentProjectPicker()
                     } label: {
                         Label("Add Project", systemImage: "plus")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(XatlasFont.captionEmphasized)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 7)
                             .background(
                                 RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
                                     .fill(.white.opacity(0.48))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                                            .strokeBorder(.white.opacity(0.40), lineWidth: 0.6)
+                                    )
                             )
                     }
                     .buttonStyle(.plain)
+                    .xatlasPressEffect()
                 }
             }
         }
@@ -219,9 +226,7 @@ struct ToolbarView: View {
         .padding(.top, 12)
         .padding(.bottom, 10)
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(XatlasSurface.divider)
-                .frame(height: 1)
+            xatlasFadingDivider()
                 .padding(.horizontal, 14)
         }
     }
@@ -262,6 +267,7 @@ private struct ToolbarCircleButton: View {
         )
         .onHover { isHovered = $0 }
         .scaleEffect(isHovered ? 1.03 : 1.0)
-        .animation(.easeOut(duration: 0.15), value: isHovered)
+        .animation(XatlasMotion.hover, value: isHovered)
+        .xatlasPressEffect()
     }
 }

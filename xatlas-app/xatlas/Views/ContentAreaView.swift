@@ -89,18 +89,21 @@ struct ContentAreaView: View {
                         .background(
                             RoundedRectangle(cornerRadius: XatlasLayout.compactCornerRadius, style: .continuous)
                                 .fill(.white.opacity(0.5))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: XatlasLayout.compactCornerRadius, style: .continuous)
+                                        .strokeBorder(.white.opacity(0.40), lineWidth: 0.6)
+                                )
                         )
                 }
                 .buttonStyle(.plain)
+                .xatlasPressEffect()
             }
             .padding(.horizontal, XatlasLayout.contentInset)
             .padding(.vertical, 10)
         }
         .frame(height: 42)
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(XatlasSurface.divider)
-                .frame(height: 1)
+            xatlasFadingDivider()
                 .padding(.horizontal, XatlasLayout.contentInset)
         }
     }
@@ -148,7 +151,7 @@ struct ContentAreaView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Image(systemName: "terminal")
-                .font(.system(size: 40))
+                .font(.system(size: 40, weight: .medium))
                 .foregroundStyle(.tertiary)
             Button {
                 _ = state.createTerminalForSelectedProject()
@@ -157,9 +160,18 @@ struct ContentAreaView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Capsule().fill(.white.opacity(0.52)))
+                    .background(
+                        Capsule()
+                            .fill(.white.opacity(0.52))
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(.white.opacity(0.42), lineWidth: 0.6)
+                            )
+                            .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
+                    )
             }
             .buttonStyle(.plain)
+            .xatlasPressEffect()
             Text("Press ⌘K to open command bar")
                 .font(XatlasFont.mono)
                 .foregroundStyle(.secondary)
@@ -188,7 +200,7 @@ private struct TabButton: View {
             Button(action: onSelect) {
                 HStack(spacing: 4) {
                     Image(systemName: isTerminal ? "terminal" : "doc.text")
-                        .font(.system(size: 10))
+                        .font(.system(size: 10, weight: .medium))
 
                     Text(title)
                         .font(XatlasFont.monoSmall)
@@ -196,11 +208,11 @@ private struct TabButton: View {
 
                     if requiresAttention {
                         Text("1")
-                            .font(.system(size: 9, weight: .bold, design: .rounded))
+                            .font(XatlasFont.badge)
                             .foregroundStyle(.white)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(Capsule().fill(.red.opacity(0.78)))
+                            .xatlasBadgeFill(tint: .red)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -213,14 +225,47 @@ private struct TabButton: View {
             }
             .buttonStyle(.plain)
             .opacity(isSelected ? 0.6 : 0)
+            .xatlasPressEffect(scale: 0.85)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(
-            isSelected ? .white.opacity(0.55) : .clear,
-            in: RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
-        )
+        .background(chipBackground)
         .contentShape(Rectangle())
+        .animation(XatlasMotion.layout, value: isSelected)
+    }
+
+    @ViewBuilder
+    private var chipBackground: some View {
+        if isSelected {
+            RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                .fill(.white.opacity(0.78))
+                .overlay(
+                    RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [.white.opacity(0.30), .white.opacity(0.0)],
+                                startPoint: .top,
+                                endPoint: UnitPoint(x: 0.5, y: 0.34)
+                            )
+                        )
+                        .allowsHitTesting(false)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: XatlasLayout.controlCornerRadius, style: .continuous)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(0.85), .white.opacity(0.32)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.7
+                        )
+                )
+                .shadow(color: .black.opacity(0.07), radius: 3, y: 1)
+                .shadow(color: .black.opacity(0.05), radius: 8, y: 4)
+        } else {
+            Color.clear
+        }
     }
 }
 

@@ -6,9 +6,7 @@ struct ProjectDashboardView: View {
     @State private var operatorService = ProjectOperatorService.shared
     @State private var operatorInput = ""
     @State private var isOperatorCollapsed = true
-    @State private var previewTick = 0
     @FocusState private var isOperatorFocused: Bool
-    private let previewTimer = Timer.publish(every: 2.4, on: .main, in: .common).autoconnect()
 
     private let columns = [
         GridItem(.adaptive(minimum: 214, maximum: 258), spacing: 16, alignment: .top)
@@ -28,7 +26,6 @@ struct ProjectDashboardView: View {
                         ProjectDashboardCard(
                             project: project,
                             state: state,
-                            previewTick: previewTick,
                             onQuickView: {
                                 _ = state.openProjectQuickView(id: project.id)
                             }
@@ -59,9 +56,6 @@ struct ProjectDashboardView: View {
             .padding(.horizontal, 22)
             .padding(.bottom, 14)
         }
-        .onReceive(previewTimer) { _ in
-            previewTick &+= 1
-        }
     }
 
     private func sendOperatorMessage() {
@@ -83,14 +77,16 @@ struct ProjectDashboardView: View {
 private struct ProjectDashboardCard: View {
     let project: Project
     @Bindable var state: AppState
-    let previewTick: Int
     let onQuickView: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var terminalService = TerminalService.shared
     @State private var previewText = "No terminal output yet."
     @State private var isHovered = false
     @State private var previewHistoryBySessionID: [String: String] = [:]
     @State private var previewSessionID: String?
+    @State private var previewRefreshTask: Task<Void, Never>?
+    private let previewRefreshInterval: Duration = .seconds(2.4)
 
     private var allSessions: [TerminalSession] {
         terminalService.liveSessionsForProject(project.id)
@@ -118,7 +114,7 @@ private struct ProjectDashboardCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text(project.name)
-                            .font(.system(size: 16, weight: .semibold))
+                            .font(XatlasFont.largeTitle)
                             .foregroundStyle(.primary)
                             .lineLimit(1)
 
@@ -128,12 +124,12 @@ private struct ProjectDashboardCard: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
-                                .background(Capsule().fill(.red.opacity(0.8)))
+                                .xatlasBadgeFill(tint: .red)
                         }
                     }
 
                     Text(project.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(XatlasFont.monoCaption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -176,9 +172,13 @@ private struct ProjectDashboardCard: View {
         .background(cardBackground)
         .overlay(
             RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous)
-                .strokeBorder(strokeColor, lineWidth: isSelected ? 1.4 : 1)
+                .strokeBorder(strokeStyle, lineWidth: isSelected ? 1.4 : 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous))
+        .scaleEffect(isHovered ? 1.012 : 1.0)
+        .offset(y: isHovered ? -1 : 0)
+        .animation(XatlasMotion.hover, value: isHovered)
+        .xatlasPressEffect()
         .onTapGesture {
             onQuickView()
         }
@@ -186,28 +186,83 @@ private struct ProjectDashboardCard: View {
         .onAppear {
             syncPreviewSessionSelection()
             refreshPreview()
+            refreshPreviewLoop()
         }
+        .onDisappear(perform: stopPreviewLoop)
         .onChange(of: allSessions.map(\.id)) { _, _ in
             syncPreviewSessionSelection()
             refreshPreview()
+            refreshPreviewLoop()
         }
-        .onChange(of: previewTick) { _, _ in
-            guard shouldRefreshPreviewOnTick else { return }
+        .onChange(of: state.quickViewSelectedSessionID(for: project.id)) { _, _ in
+            syncPreviewSessionSelection()
             refreshPreview()
+            refreshPreviewLoop()
+        }
+        .onChange(of: state.selectedTab?.id) { _, _ in
+            syncPreviewSessionSelection()
+            refreshPreview()
+            refreshPreviewLoop()
+        }
+        .onChange(of: state.selectedProject?.id) { _, _ in
+            syncPreviewSessionSelection()
+            refreshPreviewLoop()
+        }
+        .onChange(of: state.projectSurfaceMode) { _, _ in
+            refreshPreviewLoop()
+        }
+        .onChange(of: scenePhase) { _, _ in
+            refreshPreviewLoop()
+        }
+        .onChange(of: isHovered) { _, _ in
+            refreshPreviewLoop()
         }
     }
 
     private var cardBackground: some View {
         RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous)
             .fill(.white.opacity(isHovered || isSelected ? 0.62 : 0.48))
-            .shadow(color: .black.opacity(isSelected ? 0.12 : 0.08), radius: 16, y: 8)
+            .overlay(
+                RoundedRectangle(cornerRadius: XatlasLayout.panelCornerRadius, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                .white.opacity(isHovered ? 0.34 : 0.22),
+                                .white.opacity(0.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: UnitPoint(x: 0.5, y: 0.34)
+                        )
+                    )
+                    .allowsHitTesting(false)
+            )
+            .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+            .shadow(
+                color: .black.opacity(isHovered ? 0.11 : isSelected ? 0.1 : 0.07),
+                radius: isHovered ? 16 : 12,
+                y: isHovered ? 8 : 6
+            )
+            .shadow(
+                color: .black.opacity(isHovered ? 0.07 : 0.04),
+                radius: isHovered ? 32 : 24,
+                y: isHovered ? 18 : 14
+            )
     }
 
-    private var strokeColor: Color {
+    private var strokeStyle: AnyShapeStyle {
         if isSelected {
-            return .accentColor.opacity(0.58)
+            return AnyShapeStyle(Color.accentColor.opacity(0.58))
         }
-        return .white.opacity(0.32)
+        return AnyShapeStyle(
+            LinearGradient(
+                colors: [
+                    .white.opacity(0.78),
+                    .white.opacity(0.26)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
     }
 
     private var previewIndicatorColor: Color {
@@ -226,7 +281,8 @@ private struct ProjectDashboardCard: View {
         }
     }
 
-    private var shouldRefreshPreviewOnTick: Bool {
+    private var shouldAutoRefreshPreview: Bool {
+        guard scenePhase == .active else { return false }
         guard let primarySession else { return false }
         if isHovered || isSelected {
             return true
@@ -236,7 +292,7 @@ private struct ProjectDashboardCard: View {
 
     private func refreshPreview() {
         guard let session = primarySession else {
-            previewText = "Starting terminal…"
+            previewText = "No terminal yet."
             return
         }
 
@@ -258,29 +314,33 @@ private struct ProjectDashboardCard: View {
         previewText = nextPreview
     }
 
-    private func syncPreviewSessionSelection() {
-        if let quickViewSessionID = state.quickViewSelectedSessionID(for: project.id),
-           containsSession(id: quickViewSessionID) {
-            previewSessionID = quickViewSessionID
-            return
-        }
+    private func refreshPreviewLoop() {
+        stopPreviewLoop()
+        guard shouldAutoRefreshPreview else { return }
 
-        if state.selectedProject?.id == project.id,
-           case .terminal(let sessionID) = state.selectedTab?.kind,
-           containsSession(id: sessionID) {
-            previewSessionID = sessionID
-            return
+        previewRefreshTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: previewRefreshInterval)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    guard shouldAutoRefreshPreview else { return }
+                    refreshPreview()
+                }
+            }
         }
-
-        if let previewSessionID, containsSession(id: previewSessionID) {
-            return
-        }
-
-        previewSessionID = preferredPreviewSession()?.id
     }
 
-    private func containsSession(id: String) -> Bool {
-        allSessions.contains(where: { $0.id == id })
+    private func stopPreviewLoop() {
+        previewRefreshTask?.cancel()
+        previewRefreshTask = nil
+    }
+
+    private func syncPreviewSessionSelection() {
+        previewSessionID = state.preferredProjectSessionID(
+            for: project.id,
+            availableSessionIDs: allSessions.map(\.id),
+            fallbackSelection: previewSessionID
+        )
     }
 
     private func preferredPreviewSession() -> TerminalSession? {
@@ -441,7 +501,7 @@ private struct DashboardOperatorOverlay: View {
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity, alignment: .center)
         .onHover { isHovered = $0 }
-        .animation(.spring(response: 0.3, dampingFraction: 0.86), value: isCollapsed)
+        .animation(XatlasMotion.layout, value: isCollapsed)
     }
 
     private var isInteractive: Bool {
@@ -500,14 +560,14 @@ private struct DashboardOperatorOverlay: View {
     }
 
     private func collapseTray() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+        withAnimation(XatlasMotion.layout) {
             isCollapsed = true
         }
         isFocused.wrappedValue = false
     }
 
     private func expandTray() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+        withAnimation(XatlasMotion.layout) {
             isCollapsed = false
         }
         DispatchQueue.main.async {
@@ -886,18 +946,13 @@ struct ProjectQuickViewSheet: View {
             .sorted(by: TerminalSession.creationOrder)
             .map(\.id))
 
-        if let selectedSessionID,
-           sessions.contains(where: { $0.id == selectedSessionID }) {
-            return
-        }
-
-        if let rememberedSessionID = state.quickViewSelectedSessionID(for: project.id),
-           sessions.contains(where: { $0.id == rememberedSessionID }) {
-            selectSession(rememberedSessionID)
-            return
-        }
-
-        selectSession(sessions.first?.id)
+        let preferredSessionID = state.preferredProjectSessionID(
+            for: project.id,
+            availableSessionIDs: sessions.map(\.id),
+            fallbackSelection: selectedSessionID
+        )
+        guard preferredSessionID != selectedSessionID else { return }
+        selectSession(preferredSessionID)
     }
 
     private func requestClose(_ sessionID: String) {
@@ -975,6 +1030,10 @@ private struct AddProjectTile: View {
             )
         }
         .buttonStyle(.plain)
+        .scaleEffect(isHovered ? 1.012 : 1.0)
+        .offset(y: isHovered ? -1 : 0)
+        .animation(XatlasMotion.hover, value: isHovered)
+        .xatlasPressEffect()
         .onHover { isHovered = $0 }
     }
 }

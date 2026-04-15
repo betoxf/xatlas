@@ -11,7 +11,7 @@ struct SourceControlView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             Button {
-                withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+                withAnimation(XatlasMotion.layout) { isExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     Text("SOURCE CONTROL")
