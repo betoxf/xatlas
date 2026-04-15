@@ -4,15 +4,10 @@
 
 Keep multiple repos open at once, jump between live terminals, inspect Git state, manage MCP servers and skills, and run AI-heavy workflows from one place without living inside a single editor window.
 
-<p align="center">
-  <img src="branding/readme/codex-demo.gif" alt="xatlas running Codex in the native app" width="960">
-</p>
-
 ## What xatlas includes
 
 - `xatlas-app/`: the native macOS workspace for projects, terminals, source control, MCPs, skills, and automations
 - `xatlas-bridge/`: the CLI/runtime package that users install as `xatlas`
-- `relay/`: the optional pairing and reconnect service if you want to self-host that path
 
 ## Interface
 
@@ -71,7 +66,6 @@ xatlas up
 
 Useful environment variables:
 
-- `XATLAS_RELAY`: override the relay URL used by the runtime
 - `XATLAS_PUSH_SERVICE_URL`: point completion pushes at a custom service
 - `XATLAS_REFRESH_ENABLED`: enable desktop refresh hooks for the macOS app
 - `XATLAS_MCP_PORT`: force the xatlas macOS app MCP port when needed

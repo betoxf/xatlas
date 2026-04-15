@@ -38,7 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(isHeadless ? .accessory : .regular)
-        MCPServer.shared.start()
+        // MCP server intentionally disabled. Re-enable by uncommenting the
+        // start() call below (and the matching stop() in
+        // applicationWillTerminate). MCPServer source remains in the build
+        // so this is a one-line toggle.
+        // MCPServer.shared.start()
         if AppPreferences.shared.remoteAccessEnabled {
             StreamingServer.shared.start()
             RemoteAccessBridgeManager.shared.startIfNeeded()
@@ -96,7 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         RemoteAccessBridgeManager.shared.applicationWillTerminate()
         StreamingServer.shared.stop()
-        MCPServer.shared.stop()
+        // MCPServer.shared.stop()  // re-enable alongside start() above
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
