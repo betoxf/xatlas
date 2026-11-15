@@ -128,6 +128,7 @@ import { DEFAULT_APP_TOOL_SEARCH_MODE, type AppToolSearchMode } from "@zcode/sha
 import { useSettings } from "@/hooks/useSettingService.js";
 import type { CreateTaskRequest, RemoteConnectionOpenPreference } from "@/app-shell/types.js";
 import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
+import { ConnectPanel } from "@/connect/ConnectPanel.js";
 import { resolveModelProviderConnectivityWorkspacePath } from "@/lib/modelProviderConnectivityTarget.js";
 import {
   createSettingsPageConfig,
@@ -2226,6 +2227,8 @@ export function SettingsPage({
                                 handleEmbeddedBrowserAllowInsecureCertificatesChange
                               }
                             />
+                          ) : activeSection === "connections" ? (
+                            <ConnectPanel embedded />
                           ) : activeSection === "computerUse" ? (
                             <ComputerUseSection
                               isDesktop={Boolean(isDesktop)}

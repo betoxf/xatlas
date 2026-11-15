@@ -1,3 +1,6 @@
+import { getPathLeaf } from "@/lib/path.js";
+import { ConversationSummaryPopover } from "@/v4/ConversationSummaryPopover.js";
+import { collectConversationSources } from "@/v4/conversationSummarySources.js";
 import { completeNewModelSelection } from "@zcode/provider";
 import { useSubagents } from "@/hooks/useSubagents.js";
 import { ToolPresentationCapabilitiesProvider } from "@/ToolCallBlocks/presentationCapabilities.js";
@@ -5598,6 +5601,11 @@ export function SessionPane({
   // CLI V4 projection 是 running/count/manifest 的唯一权威；renderer 不再在 spawn
   // 事件后另发查询拼接第二份状态，避免并发 child 的 in-flight refresh 丢更新。
   const subagents = snapshot?.subagents ?? EMPTY_SUBAGENT_PROJECTION;
+  const snapshotRowsWindow = snapshot?.rows.window;
+  const conversationSources = useMemo(
+    () => collectConversationSources(snapshotRowsWindow ?? []),
+    [snapshotRowsWindow],
+  );
   useEffect(() => {
     const next = new Map(
       [...pendingSubagentStopsRef.current].filter(([, pending]) => {
@@ -6704,6 +6712,27 @@ export function SessionPane({
             onConfirm={handleConfirmShareSelection}
             onCancel={dismissShareSelectionPanel}
           />
+          {!isDraft && !compactForRemoteControl ? (
+            <ConversationSummaryPopover
+              projectName={getPathLeaf(workspacePath)}
+              branchName={gitSummary?.branchName ?? null}
+              changes={activeTaskChangeSummary ?? gitWorktreeChangeSummary ?? null}
+              runningSubagents={subagents.running.length}
+              endedSubagents={subagents.endedTotal}
+              sources={conversationSources}
+              onOpenChanges={onOpenGitReview ? () => onOpenGitReview() : undefined}
+              onOpenSubagents={
+                onOpenSubagentDirectory && sessionId
+                  ? () =>
+                      handleOpenSubagentDirectory({
+                        parentSessionId: sessionId,
+                        rootSessionId: rootSessionId ?? sessionId,
+                      })
+                  : undefined
+              }
+              onOpenLink={onOpenBrowserUrl}
+            />
+          ) : null}
           {!isDraft ? (
             <ConversationStatusPanel
               workspacePath={workspacePath}

@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- 模型菜单同时维护触发器、模型项、provider family 连接方式子菜单和焦点恢复，拆开会增加受控 Dropdown 状态同步成本。 */
+import { ProviderLogo } from "@/settings/model-provider-section/ProviderLogo.js";
 import {
   Fragment,
   memo,
@@ -80,6 +81,7 @@ export interface ModelSelectGroup {
   key: string;
   label: string;
   labelBadge?: string;
+  /** Provider brand icon shown before the label. */
   logo?: ProviderConfigObject["logo"];
   directItems?: boolean;
   selectedOptionKey?: string;
@@ -440,6 +442,9 @@ export const ModelConfigSelect = memo(function ModelConfigSelectComponent({
   const renderGroupLabel = useCallback(
     (group: ModelSelectGroup, options: { mutedLabel?: boolean } = {}) => (
       <span className="min-w-0 flex-1 items-center gap-1.5 text-left inline-flex">
+        {group.logo ? (
+          <ProviderLogo logo={group.logo} className="mr-1 size-[18px] rounded-[5px]" />
+        ) : null}
         <span
           className={cn(
             "min-w-0 whitespace-normal break-words text-ui-base",

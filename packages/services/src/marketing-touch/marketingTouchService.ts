@@ -26,6 +26,8 @@ export function createMarketingTouchService(options: {
   getDeviceMid: () => string | undefined;
   baseUrl: string;
   appVersion: string;
+  /** Skips the request without a Z.ai sign-in, which would otherwise send the device id. */
+  requireAccount?: boolean;
   onSnapshot?: (snapshot: ReturnType<typeof parseMarketingTouchResponse>) => void;
 }): IMarketingTouchService {
   let previousToken: string | undefined;
@@ -50,6 +52,15 @@ export function createMarketingTouchService(options: {
   return {
     async query({ locale }) {
       const identity = await context(locale);
+      if (options.requireAccount && !("Authorization" in identity.headers)) {
+        const snapshot = {
+          serverTime: Date.now(),
+          language: locale,
+          deliveries: [],
+          rejectedCount: 0,
+        };
+        return { ...snapshot, scope: identity.scope };
+      }
       const url = new URL("/api/v1/marketing/touch", options.baseUrl);
       url.searchParams.set("seq", String(bootRequestSeq++));
       const response = await readApiJson<unknown>(options.apiClient, url.href, {

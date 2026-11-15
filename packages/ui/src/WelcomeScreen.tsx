@@ -23,10 +23,16 @@ import {
 import { Alert, AlertDescription } from "./components/ui/alert.js";
 import { Button } from "./components/ui/button.js";
 import { ZCodeAboutLogo } from "@/components/ui/ZCodeAboutLogo.js";
+import { ConnectPanel } from "./connect/ConnectPanel.js";
+import { useOptionalServices } from "./hooks/useServices.js";
 import { useOAuth } from "./hooks/useOAuth.js";
 import { usePlatform } from "./hooks/usePlatform.js";
 import { useZCodeIntl } from "./i18n/IntlProvider.js";
 import { LoginApiKeyForm } from "./login/LoginApiKeyForm.js";
+import {
+  buildLoginApiKeySkipSettings,
+  resolveLoginApiKeyDefaultProvider,
+} from "./login/LoginApiKeyForm.helpers.js";
 import { ThemeHeroVisual } from "./openWorkspacePageThemeHero.js";
 import { useZCodeStore } from "./store/StoreProvider.js";
 import { DesktopOverlayWindowControls } from "@/DesktopOverlayWindowControls.js";
@@ -133,6 +139,8 @@ const LOGIN_PRIVACY_URL = "https://zcode.z.ai/privacy";
 
 interface WelcomeScreenProps {
   onComplete: (reason: LoginCompleteReason) => void | Promise<void>;
+  /** Start at the Connect window; flows that need an account go straight to the login. */
+  connectFirst?: boolean;
 }
 
 export type LoginCompleteReason = "oauth" | "apiKey" | "skip";
@@ -145,9 +153,23 @@ export function resolveLoginRegionForLocale(locale: string): SingleLoginRegion {
   return locale === "en-US" ? "global" : "domestic";
 }
 
-export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
-  const { intl } = useZCodeIntl();
+export function WelcomeScreen({ onComplete, connectFirst = false }: WelcomeScreenProps) {
+  const services = useOptionalServices();
+  const { intl, locale } = useZCodeIntl();
   const platform = usePlatform();
+  const canConnect = connectFirst && Boolean(services?.connectionsService);
+  const [showLogin, setShowLogin] = useState(false);
+
+  const finishConnecting = async () => {
+    const settingService = services?.settingService;
+    // Without a provider family the login entry would open again on every launch.
+    if (settingService && !(await settingService.get()).providerFamilyDomain) {
+      await settingService.update(
+        buildLoginApiKeySkipSettings(resolveLoginApiKeyDefaultProvider(locale), Date.now()),
+      );
+    }
+    await onComplete("skip");
+  };
   return (
     <main className="relative h-full min-h-dvh overflow-hidden bg-background text-foreground">
       <ThemeHeroVisual className="absolute inset-0" />
@@ -157,9 +179,27 @@ export function WelcomeScreen({ onComplete }: WelcomeScreenProps) {
       {/* 矮窗口展开表单时，绝对定位的协议会盖住操作区；同一滚动布局保证两者可达，窗控仍在外层。 */}
       <div className="relative z-10 flex h-dvh flex-col items-center overflow-y-auto px-4 pb-6 pt-14 sm:px-6">
         <div className="flex w-full flex-1 shrink-0 items-center justify-center py-6">
-          <section className="flex w-full max-w-sm shrink-0 flex-col gap-7 rounded-2xl bg-background p-8 text-ui-base/relaxed shadow-md sm:p-10">
-            <LoginPanel active onComplete={onComplete} />
-          </section>
+          {canConnect && !showLogin ? (
+            <section className="w-full max-w-md shrink-0 rounded-2xl bg-background p-6 text-ui-base/relaxed shadow-md">
+              <ConnectPanel
+                onDone={() => void finishConnecting()}
+                onUseApiKey={() => setShowLogin(true)}
+              />
+            </section>
+          ) : (
+            <section className="flex w-full max-w-sm shrink-0 flex-col gap-7 rounded-2xl bg-background p-8 text-ui-base/relaxed shadow-md sm:p-10">
+              <LoginPanel active onComplete={onComplete} />
+              {canConnect ? (
+                <button
+                  type="button"
+                  className="text-ui-sm text-foreground-subtle underline hover:text-foreground"
+                  onClick={() => setShowLogin(false)}
+                >
+                  {intl.formatMessage({ id: "connect.back" })}
+                </button>
+              ) : null}
+            </section>
+          )}
         </div>
         <footer className="pointer-events-none flex shrink-0 flex-col items-center gap-2 text-center text-ui-xs text-foreground-subtle">
           <p className="flex flex-wrap items-center justify-center gap-x-1">
@@ -678,16 +718,7 @@ function LoginPanelHeader({
 }
 
 function LoginPanelLogo() {
-  return (
-    // 登录 logo 壳是固定深色底，边框不能跟随浅色主题 token，否则浅色主题下边框过重。
-    <div
-      className="relative flex size-16 items-center justify-center rounded-2xl bg-[linear-gradient(180deg,#000000_0%,#151718_100%)] text-[#ffffff] shadow-lg/20 before:pointer-events-none before:absolute before:inset-0 before:rounded-2xl before:border before:border-[rgba(255,255,255,0.1)]"
-      aria-label="ZCode"
-      role="img"
-    >
-      <ZCodeAboutLogo className="h-auto w-10" />
-    </div>
-  );
+  return <ZCodeAboutLogo className="mb-1 size-16" />;
 }
 
 function getProviderPriority(provider: OAuthProviderMeta): number {

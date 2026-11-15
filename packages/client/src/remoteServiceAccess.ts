@@ -4,6 +4,10 @@ import {
   IFileService,
   IMediaPreviewService,
   IGitService,
+  IReleaseQueueService,
+  ISwarmService,
+  IOrchestratorService,
+  IConnectionsService,
   IGitCheckpointService,
   ISystemService,
   ITerminalService,
@@ -78,6 +82,10 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly fileService: IFileService;
   readonly mediaPreviewService: IMediaPreviewService;
   readonly gitService: IGitService;
+  readonly releaseQueueService: IReleaseQueueService;
+  readonly swarmService: ISwarmService;
+  readonly orchestratorService: IOrchestratorService;
+  readonly connectionsService: IConnectionsService;
   readonly gitCheckpointService: IGitCheckpointService;
   readonly systemService: ISystemService;
   readonly terminalService: ITerminalService;
@@ -177,6 +185,18 @@ export class RemoteServiceAccess implements IServiceAccessor {
     );
     this.gitService = ProxyChannel.toService<IGitService>(
       channelClient.getChannel(IGitService.channelName),
+    );
+    this.releaseQueueService = ProxyChannel.toService<IReleaseQueueService>(
+      channelClient.getChannel(IReleaseQueueService.channelName),
+    );
+    this.swarmService = ProxyChannel.toService<ISwarmService>(
+      channelClient.getChannel(ISwarmService.channelName),
+    );
+    this.orchestratorService = ProxyChannel.toService<IOrchestratorService>(
+      channelClient.getChannel(IOrchestratorService.channelName),
+    );
+    this.connectionsService = ProxyChannel.toService<IConnectionsService>(
+      channelClient.getChannel(IConnectionsService.channelName),
     );
     this.gitCheckpointService = ProxyChannel.toService<IGitCheckpointService>(
       channelClient.getChannel(IGitCheckpointService.channelName),

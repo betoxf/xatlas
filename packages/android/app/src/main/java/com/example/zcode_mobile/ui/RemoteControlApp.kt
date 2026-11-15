@@ -7,14 +7,18 @@ import android.content.pm.PackageManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.net.http.SslCertificate
+import android.net.http.SslError
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import java.security.MessageDigest
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -686,6 +690,9 @@ private fun createRemoteControlWebView(
     onMainFrameError: (String) -> Unit,
 ): WebView {
     CookieManager.getInstance().setAcceptCookie(true)
+    // A Mac serving the remote itself uses a self-signed certificate; the pairing link carries
+    // its SHA-256 (`fp`). Only that certificate, for that address, is accepted.
+    val pinnedCertificates = mutableMapOf<String, String>()
 
     return WebView(context).apply {
         layoutParams = ViewGroup.LayoutParams(
@@ -730,7 +737,7 @@ private fun createRemoteControlWebView(
 
                 val resolved = RemoteControlUrlPolicy.resolve(request.url)
                 if (resolved != null) {
-                    if (request.url.scheme == "zcode") {
+                    if (request.url.scheme == "xatlas") {
                         view.loadUrl(resolved)
                         return true
                     }
@@ -739,6 +746,29 @@ private fun createRemoteControlWebView(
 
                 openExternalUrl(view.context, request.url)
                 return true
+            }
+
+            override fun onReceivedSslError(
+                view: WebView?,
+                handler: SslErrorHandler,
+                error: SslError,
+            ) {
+                val uri = Uri.parse(error.url)
+                val host = uri.host?.lowercase()
+                val linkPin = uri.getQueryParameter("fp")?.lowercase()
+                if (host != null && linkPin != null) {
+                    pinnedCertificates[host] = linkPin
+                }
+                val pinned = host?.let { pinnedCertificates[it] }
+                val der = SslCertificate.saveState(error.certificate).getByteArray("x509-certificate")
+                val actual = der?.let { bytes ->
+                    MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+                }
+                if (pinned != null && actual == pinned && RemoteControlUrlPolicy.isAllowedRemoteUrl(error.url)) {
+                    handler.proceed()
+                } else {
+                    handler.cancel()
+                }
             }
 
             override fun onReceivedError(

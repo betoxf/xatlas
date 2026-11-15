@@ -343,6 +343,12 @@ body {
   --color-tooltip-tag: var(--color-neutral-200);
   --color-tooltip-tag-foreground: color-mix(in oklab, var(--color-neutral-950) 60%, transparent);
   --color-tag: var(--color-neutral-200);
+  /* Liquid-glass surfaces (Task Stack). Translucent fill over a blurred
+     backdrop, a bright rim, and a specular highlight. */
+  --color-glass: color-mix(in oklab, #ffffff 62%, transparent);
+  --color-glass-border: rgba(13, 13, 13, 0.1);
+  --color-glass-highlight: color-mix(in oklab, #ffffff 90%, transparent);
+  --color-glass-edge: rgba(13, 13, 13, 0.12);
   --color-remote-ssh-surface: var(--color-sky-50);
   --color-remote-ssh-foreground: var(--color-sky-700);
   --color-remote-ssh-border: var(--color-sky-200);
@@ -520,6 +526,11 @@ body {
   --color-tooltip-tag: var(--color-neutral-800);
   --color-tooltip-tag-foreground: color-mix(in oklab, var(--color-neutral-50) 60%, transparent);
   --color-tag: var(--color-neutral-700);
+  /* Liquid-glass surfaces (Task Stack). */
+  --color-glass: color-mix(in oklab, #2b2b2b 52%, transparent);
+  --color-glass-border: rgba(255, 255, 255, 0.14);
+  --color-glass-highlight: rgba(255, 255, 255, 0.22);
+  --color-glass-edge: rgba(0, 0, 0, 0.4);
   --color-remote-ssh-surface: color-mix(in oklab, var(--color-sky-500) 18%, transparent);
   --color-remote-ssh-foreground: var(--color-sky-300);
   --color-remote-ssh-border: var(--color-sky-700);
@@ -686,6 +697,12 @@ body {
   --color-tooltip-tag: #e6e6e6;
   --color-tooltip-tag-foreground: #5c5c5c;
   --color-tag: #e6e6e6;
+  /* Liquid-glass surfaces (Task Stack). Translucent fill over a blurred
+     backdrop, a bright rim, and a specular highlight. */
+  --color-glass: color-mix(in oklab, #ffffff 62%, transparent);
+  --color-glass-border: rgba(13, 13, 13, 0.1);
+  --color-glass-highlight: color-mix(in oklab, #ffffff 90%, transparent);
+  --color-glass-edge: rgba(13, 13, 13, 0.12);
   --color-remote-ssh-surface: #ebf4ff;
   --color-remote-ssh-foreground: #0867ce;
   --color-remote-ssh-border: #bad9ff;
@@ -852,6 +869,11 @@ body {
   --color-tooltip-tag: #363636;
   --color-tooltip-tag-foreground: #adadad;
   --color-tag: #363636;
+  /* Liquid-glass surfaces (Task Stack). */
+  --color-glass: color-mix(in oklab, #2b2b2b 52%, transparent);
+  --color-glass-border: rgba(255, 255, 255, 0.14);
+  --color-glass-highlight: rgba(255, 255, 255, 0.22);
+  --color-glass-edge: rgba(0, 0, 0, 0.4);
   --color-remote-ssh-surface: rgba(64, 153, 255, 0.16);
   --color-remote-ssh-foreground: #8fc0ff;
   --color-remote-ssh-border: rgba(64, 153, 255, 0.42);

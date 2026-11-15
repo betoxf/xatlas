@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useState } from "react";
 import { DesktopCommandIds } from "@zcode/shared";
 import {
@@ -39,8 +40,13 @@ import { toast } from "@/components/ui/toast.js";
 export function WorkspaceHelpMenuButton({
   className,
   isDesktop = false,
+  icon,
+  label,
 }: {
   className?: string;
+  /** Trigger icon and label, when the menu is offered as something else (e.g. "More"). */
+  icon?: ReactNode;
+  label?: string;
   /**
    * 是否桌面端。由挂载处注入而不是在组件内嗅探：Web 的 IPlatformService 桩同样实现了
    * executeDesktopCommand（no-op），拿它判定会让 Web 端出现一个点了没反应的「资源管理器」。
@@ -55,7 +61,7 @@ export function WorkspaceHelpMenuButton({
   const updateMenu = useDesktopUpdateMenu(isDesktop);
   const openFeedbackSubmit = useFeedbackStore((state) => state.openSubmit);
   const openFeatureRequest = useFeedbackStore((state) => state.openFeatureRequest);
-  const helpMenuLabel = intl.formatMessage({ id: "workspaceHeader.help.menu" });
+  const helpMenuLabel = label ?? intl.formatMessage({ id: "workspaceHeader.help.menu" });
   const helpMenuActions = createHelpMenuActionHandlers({
     platform,
     intl,
@@ -102,7 +108,7 @@ export function WorkspaceHelpMenuButton({
             aria-label={helpMenuLabel}
             data-testid={TID_WORKSPACE_HELP_MENU_TRIGGER}
           >
-            <CircleHelpIcon className="size-4" />
+            {icon ?? <CircleHelpIcon className="size-4" />}
           </Button>
         </DropdownMenuTrigger>
       </ControlHintTooltip>

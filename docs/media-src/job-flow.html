@@ -1,0 +1,55 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html, body { margin: 0; width: 1100px; height: 462px; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  body { position: relative; color: #0d0d0f; background:
+    radial-gradient(900px 600px at 10% 0%, #c7d2fe 0%, transparent 60%),
+    radial-gradient(800px 600px at 100% 100%, #ddd6fe 0%, transparent 60%),
+    linear-gradient(135deg, #eef2ff, #f5f3ff 55%, #faf5ff); }
+  body.dark { color: #f5f5f7; background:
+    radial-gradient(900px 600px at 10% 0%, #312e81 0%, transparent 60%),
+    radial-gradient(800px 600px at 100% 100%, #4c1d95 0%, transparent 60%),
+    linear-gradient(135deg, #0b1023, #140f2e 55%, #1a0f2b); }
+  h2 { position: absolute; left: 40px; top: 30px; margin: 0; font-size: 26px; letter-spacing: -.03em; font-weight: 740; }
+  .sub { position: absolute; left: 40px; top: 66px; margin: 0; font-size: 14px; opacity: .62; }
+  .row { position: absolute; left: 40px; right: 40px; top: 112px; display: flex; align-items: stretch; }
+  .node { flex: 1 1 0; min-width: 0; height: 208px; box-sizing: border-box; padding: 14px 13px; border-radius: 14px;
+    background: rgba(255,255,255,.78); box-shadow: 0 10px 28px rgba(30,20,80,.13), 0 0 0 .5px rgba(0,0,0,.1); }
+  body.dark .node { background: rgba(255,255,255,.07); box-shadow: 0 10px 28px rgba(0,0,0,.45), 0 0 0 .5px rgba(255,255,255,.16); }
+  .n { font-size: 11px; font-weight: 650; letter-spacing: .04em; opacity: .45; }
+  .t { margin: 5px 0 7px; font-size: 16px; font-weight: 700; letter-spacing: -.02em; }
+  .d { font-size: 12px; line-height: 1.42; opacity: .7; }
+  .arrow { flex: 0 0 20px; display: flex; align-items: center; justify-content: center; font-size: 15px; opacity: .38; }
+  .you { background: #111827; color: #fff; }
+  body.dark .you { background: #f5f5f7; color: #0d0d0f; }
+  .minis { margin-top: 9px; display: flex; flex-direction: column; gap: 4px; }
+  .minis i { display: block; height: 9px; border-radius: 5px; background: #6366f1; opacity: .8; }
+  .minis i:nth-child(2) { width: 78%; background: #8b5cf6; } .minis i:nth-child(3) { width: 56%; background: #0ea5e9; }
+  .band { position: absolute; left: 40px; right: 40px; top: 350px; height: 72px; box-sizing: border-box; padding: 0 20px; border-radius: 14px;
+    display: flex; align-items: center; gap: 28px; font-size: 13px; line-height: 1.4;
+    background: rgba(255,255,255,.5); box-shadow: 0 0 0 .5px rgba(0,0,0,.1); }
+  body.dark .band { background: rgba(255,255,255,.045); box-shadow: 0 0 0 .5px rgba(255,255,255,.14); }
+  .band div { flex: 1 1 0; } .band b { display: block; font-size: 13px; letter-spacing: -.01em; } .band span { opacity: .66; }
+</style></head><body>
+<h2>How a job travels</h2>
+<p class="sub">Send a message with Orchestrate. A job ends as reviewed branches, and merging stays with you.</p>
+<div class="row">
+  <div class="node you"><div class="n">YOU</div><div class="t">Message</div><div class="d">Direct goes to the conversation as always. Auto or Orchestrate can make it a job.</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="n">1</div><div class="t">Triage</div><div class="d">Says what it understood, asks what is unclear, and sizes the work.</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="n">2</div><div class="t">Plan</div><div class="d">One planner for small work. For big work, a parliament discusses until one plan stands.</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="n">3</div><div class="t">Steps</div><div class="d">The plan is divided. Each step owns its files and knows what it waits for.</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="n">4</div><div class="t">Build</div><div class="d">An agent per step, side by side, each in its own worktree and branch.</div><div class="minis"><i></i><i></i><i></i></div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="n">5</div><div class="t">Review</div><div class="d">A different agent reviews each step. Findings go back, up to three rounds.</div></div>
+  <div class="arrow">→</div>
+  <div class="node"><div class="n">6</div><div class="t">Final read</div><div class="d">The chair reads the whole job: done, or a question for you on its card.</div></div>
+</div>
+<div class="band">
+  <div><b>The board</b><span>Every agent sees the plan, the steps and each other's notes.</span></div>
+  <div><b>Oversight</b><span>Checks at the end of every turn. A step that leaves its own files is paused.</span></div>
+  <div><b>Extra heads</b><span>A split parliament asks outside advisors, then you. Nobody votes.</span></div>
+</div>
+<script>if (location.search.includes('dark')) document.body.classList.add('dark');</script>
+</body></html>

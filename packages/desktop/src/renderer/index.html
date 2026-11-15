@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ZCode</title>
+    <title>xatlas</title>
     <style>
       html,
       body,
@@ -44,31 +44,18 @@
         height: 96px;
         align-items: center;
         justify-content: center;
-        border-radius: 24px;
-        background: linear-gradient(180deg, #000000 0%, #151718 100%);
-        box-shadow:
-          0 20px 25px -5px rgb(0 0 0 / 0.2),
-          0 8px 10px -6px rgb(0 0 0 / 0.2);
         transform: scale(0.72);
         opacity: 0;
         animation: startup-logo-pop 0.72s cubic-bezier(0.22, 1, 0.36, 1) forwards;
         transform-origin: center;
       }
 
-      .startup-logo-shell::before {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        content: "";
-        /* 修复原因：启动 logo 壳是固定深色底，边框不能跟随浅色主题 token，否则首屏边框过重。 */
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: inherit;
-      }
-
       .startup-logo {
-        width: 56px;
-        height: auto;
-        color: #ffffff;
+        width: 96px;
+        height: 96px;
+        user-select: none;
+        /* xatlas: the icon carries its own rounded plate; the shadow follows its shape. */
+        filter: drop-shadow(0 14px 18px rgb(0 0 0 / 0.14)) drop-shadow(0 4px 6px rgb(0 0 0 / 0.1));
       }
 
       @keyframes startup-logo-pop {
@@ -109,25 +96,7 @@
     <div id="root"></div>
     <div id="loading" class="[app-region:drag]" role="status" aria-busy="true" aria-label="Loading...">
       <div class="startup-logo-shell">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="118"
-          height="100"
-          fill="none"
-          viewBox="0 0 256 218"
-          class="startup-logo"
-          aria-hidden="true"
-        >
-          <path
-            fill="currentColor"
-            d="M134.4 0.130152L116.48 25.6022C113.665 29.5699 109.054 32.0019 104.064 32.0019H6.3999V0C6.3999 0.130149 134.4 0.130152 134.4 0.130152Z"
-          />
-          <path fill="currentColor" d="M256 0.130127L102.401 217.732H0L153.599 0.130127H256Z" />
-          <path
-            fill="currentColor"
-            d="M121.601 217.732L139.65 192.134C142.465 188.166 147.076 185.734 152.067 185.734H249.604V217.736H121.601V217.732Z"
-          />
-        </svg>
+        <img src="./xatlas-logo.webp" alt="" class="startup-logo" aria-hidden="true" draggable="false" />
       </div>
     </div>
     <script type="module">

@@ -33,6 +33,9 @@ async function appendOnboardingRecord(
   ]);
 }
 
+/** xatlas starts at the Connect window; this survey only opens from Settings. */
+const OPENS_ON_FIRST_RUN: boolean = false;
+
 export function OccupationOnboarding({
   children,
   showWindowControls = false,
@@ -82,7 +85,8 @@ export function OccupationOnboarding({
     loadDeviceMid,
     update,
   });
-  const onboardingVisible = requested || (needsOnboarding === true && !dismissed);
+  const onboardingVisible =
+    requested || (OPENS_ON_FIRST_RUN && needsOnboarding === true && !dismissed);
   const captureEnd = useOnboardingTelemetry({
     platform,
     visible:

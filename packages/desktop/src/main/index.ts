@@ -163,7 +163,6 @@ import { applyAppIcon } from "./desktopWindowChrome.js";
 import { resolveWindowsAppUserModelIdForFlavor } from "../../scripts/desktop-product-identity.mjs";
 import type { DesktopWindowSize } from "./desktopWindowSize.js";
 import { maybeWarnArchitectureMismatch } from "./desktopArchitectureGuard.js";
-import { maybeBlockStartupForForceUpdate } from "./forceUpdateGuard.js";
 import { createDesktopTray, updateWindowsDesktopTrayMenu } from "./desktopTray.js";
 import {
   createCloseToTrayCapabilityMonitor,
@@ -1067,7 +1066,10 @@ const webRemoteControlManager = createWebRemoteControlManager({
       });
     },
   },
-  featureGate: createWebRemoteControlFeatureGate(),
+  // xatlas: phones pair with this Mac through packages/relay (desktopPhoneRemoteHost.ts), which
+  // still speaks Relay V1. Remote control now speaks ZCode's account-based Relay V2, so it stays
+  // off until the relay is ported: it must not fall back to registering this Mac with Z.ai.
+  featureGate: createWebRemoteControlFeatureGate(false),
   logger,
   relayMessageLogger: webRemoteControlRelayLogger,
   platformHandlers: {
@@ -2402,11 +2404,20 @@ app.whenReady().then(async () => {
   logWindowsBundledRuntimeIntegrityDiagnostic();
 
   // 启动自动更新检查（后台执行，不阻塞主界面）
-  // Preview 身份无论连接哪个后端都不自动更新：stable feed 上只分发正式 ZCode 安装包，
+  // Preview 身份无论连接哪个后端都不自动更新：stable feed 上只分发正式安装包，
   // 不向 Preview 渠道提供更新。构建期未启用自动更新时同样不更新
   // （见 docs/desktop/build-time-optional-capabilities.md）。
+  // xatlas has no release feed of its own yet. The default feed is ZCode's, whose packages
+  // would replace xatlas, so updates also need an explicit feed (ZCODE_UPDATE_FEED_URL).
+  const updateFeedSource = resolveUpdateFeedSourceFromStartupConfig({
+    argv: process.argv,
+    env: process.env,
+  });
   void initAutoUpdater({
-    enabled: ZCODE_PRODUCT_FLAVOR === "production" && ZCODE_AUTO_UPDATE_ENABLED,
+    enabled:
+      ZCODE_PRODUCT_FLAVOR === "production" &&
+      ZCODE_AUTO_UPDATE_ENABLED &&
+      updateFeedSource !== undefined,
     onBeforeQuitAndInstall: async () => {
       notifyStabilityLifecycle("update_install");
       await prepareAppQuit("auto-update quitAndInstall", "update-install");
@@ -2419,10 +2430,7 @@ app.whenReady().then(async () => {
     deviceMid,
     resolveEndpointOrigin: resolveCurrentZCodeEndpointOrigin,
     resolveZcodeJwtToken: () => autoUpdateCredentialService.load("zcodejwttoken"),
-    updateFeedSource: resolveUpdateFeedSourceFromStartupConfig({
-      argv: process.argv,
-      env: process.env,
-    }),
+    updateFeedSource,
   });
 
   if (process.platform === "darwin" || process.platform === "win32") {
@@ -2716,33 +2724,10 @@ app.whenReady().then(async () => {
   });
   registerDesktopNetworkTelemetry(logger);
 
-  // 本地未打包 dev 构建（app.isPackaged === false）必须跳过远端强制升级 gate。
-  // 原因：force-update gate 只看 ZCODE_ENV === "production"，但 dev 构建（如 dev:desktop:cua
-  // 连真实后端测 computer use）虽指向 production 后端，版本号却滞后于线上 release（feature
-  // 分支不 bump 版本），会被 release minimalVersion 误判为"需强制升级"而启动秒退。force-update
-  // 是面向打包发布客户端的安全门，对未打包 dev 运行时无意义。打包版 app.isPackaged === true，
-  // gate 照常生效，对真实用户零影响。
-  const skipForceUpdateForLocalDevRuntime = !app.isPackaged;
-  const forceUpdateGuardResult =
-    ZCODE_PRODUCT_FLAVOR === "production" && !skipForceUpdateForLocalDevRuntime
-      ? await maybeBlockStartupForForceUpdate({
-          resolveZcodeJwtToken: () => autoUpdateCredentialService.load("zcodejwttoken"),
-          locale: currentApplicationLocale,
-          logger,
-          endpointOrigin: await resolveCurrentZCodeEndpointOrigin(),
-          onBlocked: () => {
-            forceUpdateMainWindowCreationBlocked = true;
-          },
-        })
-      : { blocked: false };
-  if (ZCODE_PRODUCT_FLAVOR !== "production") {
-    logger.info("[force-update] Preview 跳过远端强制升级检查");
-  } else if (skipForceUpdateForLocalDevRuntime) {
-    logger.info("[force-update] 本地 dev 构建（未打包）跳过远端强制升级检查");
-  }
-  if (forceUpdateGuardResult.blocked) {
-    return;
-  }
+  // xatlas doesn't ask ZCode's minimum-version service (Z.ai's client config): its answer is
+  // about ZCode releases and could stop xatlas from starting. The gate comes back with
+  // xatlas's own release service.
+  logger.info("[force-update] skipped: no xatlas minimum-version service");
 
   logger.info("[startup] 创建主窗口");
   await primaryWindowCoordinator.ensurePrimaryWindow("app-ready");

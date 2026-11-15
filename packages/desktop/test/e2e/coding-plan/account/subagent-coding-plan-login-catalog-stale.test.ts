@@ -97,7 +97,7 @@ describe("BigModel 登录后 Subagent runtime catalog 滞后", () => {
     const authorizationUrl = await waitForBigModelAuthorizationUrl(openExternalMock);
     const state = new URL(authorizationUrl).searchParams.get("state");
     expect(state).toBeTruthy();
-    await deliverOAuthCallback(`zcode://oauth/callback?state=${state}&authCode=e2e-auth-code`);
+    await deliverOAuthCallback(`xatlas://oauth/callback?state=${state}&authCode=e2e-auth-code`);
 
     await waitForTestIdByDom(TID_TASK_SETTINGS_BUTTON, {
       timeout: 60_000,

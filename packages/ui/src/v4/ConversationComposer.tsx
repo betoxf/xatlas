@@ -7,6 +7,15 @@ import { StoreContext } from "@/store/StoreProvider.js";
 import { toTelemetryUiMode } from "@/lib/appTelemetry.js";
 import { ComposerSubmissionPendingContext } from "@/project-sidebar/index.js";
 /* oxlint-disable eslint(max-lines) -- composer 集中收口输入区 wiring（附件/草稿/历史/mention），拆分会打散收口粒度。 */
+import { OrchestratorRouteControl } from "@/app-shell/orchestrator/OrchestratorRouteControl.js";
+import { OrchestratorRouteTray } from "@/app-shell/orchestrator/OrchestratorRouteTray.js";
+import {
+  useOrchestratorProject,
+  useOrchestratorRoute,
+} from "@/app-shell/orchestrator/useOrchestratorRoute.js";
+import { SwarmComposerToggle } from "@/app-shell/swarm/SwarmComposerToggle.js";
+import { SwarmTray } from "@/app-shell/swarm/SwarmTray.js";
+import { useSwarmSession } from "@/app-shell/swarm/useSwarmSession.js";
 import { useRemoteProjectReconnect } from "@/hooks/RemoteProjectPresentationContext.js";
 import { useOptionalRemoteWorkspaceController } from "@/remote/useRemoteWorkspaceController.js";
 import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
@@ -272,6 +281,8 @@ type ComposerSubmit = (
   expectedHeldQueueItemIds?: readonly string[],
   existingTelemetrySeed?: ConversationPromptTelemetrySeed,
   requestedDelivery?: "startNow" | "queue" | "guide",
+  /** The orchestrator already said this message goes on in the conversation. */
+  routed?: boolean,
 ) => Promise<void>;
 function getComposerAttachmentTypeLabel(filename: string, mimeType: string): string {
   const leaf = filename.split(/[\\/]/u).at(-1) ?? filename;
@@ -667,6 +678,17 @@ function ConversationComposerImpl({
     sessionId ??
     (rootDraftScopeKey ? `${V4_DRAFT_SCOPE_ROOT}:${rootDraftScopeKey}` : V4_DRAFT_SCOPE_ROOT);
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
+  const swarm = useSwarmSession(workspaceKey);
+  const swarmRef = useRef(swarm);
+  swarmRef.current = swarm;
+  // The route choice: Direct sends as always; Auto and Orchestrate ask the orchestrator first.
+  const orchestratorProject = useOrchestratorProject(workspacePath, workspaceIdentity);
+  // The choice is the project's; a wait for a decision belongs to this draft alone.
+  const routeSendKey = `${workspaceKey}\0${draftScopeId}`;
+  const orchestratorRoute = useOrchestratorRoute(workspaceKey, orchestratorProject, routeSendKey);
+  const orchestratorRouteRef = useRef(orchestratorRoute);
+  orchestratorRouteRef.current = orchestratorRoute;
+  const routeInFlightRef = useRef(false);
   const configPickerScopeKey = `${workspaceKey}\0${draftScopeId}`;
   const [reloadText, setReloadText] = useState(false);
   const reloadTextRef = useRef(false);
@@ -1450,12 +1472,20 @@ function ConversationComposerImpl({
     setConnectionPending(pending);
   }, []);
   const canReload = recoveryAllowed && reloadText && remoteAvailable;
+  // A swarm runs in the agents' own CLIs: it needs text, not this conversation's model.
+  const swarmSending = swarm.session.active && textPresence.trimmed;
+  // While the orchestrator decides where the last message goes, nothing else is sent.
+  const routeDeciding = orchestratorRoute.deciding;
   const canSend =
-    !connectionPending &&
-    !disabled &&
-    !pending &&
-    hasDraftToSubmit &&
-    (canReload || (routingAllowsSend && attachmentsReady && submissionReady && !runtimeBlocked));
+    !routeDeciding &&
+    (swarmSending
+      ? !connectionPending && !disabled && !pending
+      : !connectionPending &&
+        !disabled &&
+        !pending &&
+        hasDraftToSubmit &&
+        (canReload ||
+          (routingAllowsSend && attachmentsReady && submissionReady && !runtimeBlocked)));
   // 旧 UI 状态机：streaming + 空草稿 → Stop；有草稿 → 发送键（入队）。
   const showStopControl = canStop && !hasDraftToSubmit;
 
@@ -1469,6 +1499,7 @@ function ConversationComposerImpl({
       expectedHeldQueueItemIds?: readonly string[],
       existingTelemetrySeed?: ConversationPromptTelemetrySeed,
       requestedDelivery?: "startNow" | "queue" | "guide",
+      routed?: boolean,
     ) => {
       // 连接 pending 同步进入 ref，覆盖菜单点击后 React 尚未提交的一帧及快捷键提交。
       // 只阻止新输入，不取消正在执行或已排队消息，也不清空草稿。
@@ -1503,12 +1534,27 @@ function ConversationComposerImpl({
           expectedHeldQueueItemIds,
           existingTelemetrySeed,
           requestedDelivery,
+          routed,
         );
       }
       const submittedAt = performance.timeOrigin + performance.now();
       // IME 候选期间 textRef 尚未接收最终 onChange；提交必须与 claim/恢复共用 Lexical 快照。
       const submittedDraft = snapshotDraftOfEditor();
       const trimmed = submittedDraft.text.trim();
+      // Swarm on: the message goes to the chosen models to plan, debate and vote on
+      // instead of to this conversation's agent. The winner comes back as a draft.
+      if (swarmRef.current.session.active && trimmed && !pendingRef.current) {
+        await swarmRef.current.start(trimmed, workspacePath);
+        // Clear the saved draft too, or it brings the message back.
+        if (draftPersistTimerRef.current !== null) {
+          window.clearTimeout(draftPersistTimerRef.current);
+          draftPersistTimerRef.current = null;
+        }
+        updateComposerContent({ text: "" });
+        inputApiRef.current?.clear();
+        updateText("");
+        return;
+      }
       const submittedQueueItemIds =
         snapshotRef.current?.queue.items.map((item) => item.queueItemId) ?? [];
       const hasPendingAttachments = attachmentsApi.attachments.length > 0;
@@ -1553,6 +1599,81 @@ function ConversationComposerImpl({
           setPending(false);
         }
         return;
+      }
+      // Auto or Orchestrate: ask the orchestrator where a plain-text message goes before it is
+      // sent. Only plain text: a job takes the text alone, so attachments and references, slash
+      // commands, edits and queue confirmations go on as always.
+      const route = orchestratorRouteRef.current;
+      if (
+        !routed &&
+        route.routes &&
+        trimmed &&
+        !trimmed.startsWith("/") &&
+        !draftScopeIdProp &&
+        !heldQueueDisposition &&
+        !existingTelemetrySeed &&
+        requestedDelivery !== "guide" &&
+        !hasPendingAttachments &&
+        !hasPendingCodeCommentContexts &&
+        !hasPendingWebElementContexts &&
+        !hasPendingPptxElementReferences &&
+        !hasPendingConversationSelections &&
+        !hasPendingPluginUiContexts &&
+        !submittedShareContext &&
+        !pendingRef.current &&
+        !targetSelectionPendingRef.current &&
+        remoteAvailable &&
+        submissionReady &&
+        !runtimeBlocked &&
+        !attachmentsApi.hasUnreadyAttachments
+      ) {
+        if (routeInFlightRef.current) return;
+        routeInFlightRef.current = true;
+        const target = draftTargetRef.current;
+        const scope = draftScopeRef.current;
+        const revision = contentRevisionRef.current;
+        let outcome: "send" | "job" = "send";
+        try {
+          outcome = await route.decide({
+            text: trimmed,
+            ...(sessionId ? { conversationId: sessionId } : {}),
+          });
+        } finally {
+          routeInFlightRef.current = false;
+        }
+        // Like the voice wait above: the composer may have moved to another conversation while
+        // the orchestrator decided. Then nothing is sent; the draft stays where it was typed.
+        const current = draftTargetRef.current;
+        if (
+          !composerMountedRef.current ||
+          current.scopeId !== target.scopeId ||
+          current.scopeToken !== target.scopeToken ||
+          current.workspacePath !== target.workspacePath ||
+          current.workspaceIdentity !== target.workspaceIdentity
+        ) {
+          logger.lifecycle.info("[orchestrator-route] send aborted", { reason: "target-changed" });
+          return;
+        }
+        if (outcome === "job") {
+          // It became a job: clear the message, unless the person kept typing meanwhile.
+          if (draftScopeRef.current === scope && contentRevisionRef.current === revision) {
+            if (draftPersistTimerRef.current !== null) {
+              window.clearTimeout(draftPersistTimerRef.current);
+              draftPersistTimerRef.current = null;
+            }
+            updateComposerContent({ text: "" });
+            inputApiRef.current?.clear();
+            updateText("");
+          }
+          return;
+        }
+        return latestSubmitRef.current?.(
+          heldQueueDisposition,
+          expectedHeldQueueItemIds,
+          existingTelemetrySeed,
+          requestedDelivery,
+          true,
+        );
       }
       // 草稿首发 accepted 后同一 composer 会原地从 __draft__ promotion 到
       // session scope；若成功清理时再读可变 ref，会误清新 scope，并把首条输入残留在
@@ -2818,6 +2939,13 @@ function ConversationComposerImpl({
           onConfigPickerOpenChange={handleConfigPickerOpenChange}
           onSwitchMode={onSwitchMode}
         />
+        <SwarmComposerToggle swarmKey={workspaceKey} disabled={disabled} />
+        <OrchestratorRouteControl
+          routeKey={workspaceKey}
+          workspacePath={workspacePath}
+          workspaceIdentity={workspaceIdentity}
+          disabled={disabled}
+        />
         {sessionId && workspaceHookAdmission ? (
           <WorkspaceHookPendingIndicator
             key={JSON.stringify([sessionId, workspaceHookAdmission.bundleDigest])}
@@ -2878,6 +3006,7 @@ function ConversationComposerImpl({
       backgroundWorks,
       workspaceIdentity,
       workspacePath,
+      workspaceKey,
     ],
   );
   const isBlockedByInteraction = blockingRequestId !== null;
@@ -2941,6 +3070,15 @@ function ConversationComposerImpl({
           />
         </div>
       ) : null}
+      <SwarmTray
+        swarmKey={workspaceKey}
+        onUsePlan={(prompt) => {
+          inputApiRef.current?.setText(prompt);
+          updateText(prompt);
+          inputApiRef.current?.focus();
+        }}
+      />
+      <OrchestratorRouteTray routeKey={workspaceKey} sendKey={routeSendKey} />
       {initialization?.status === "failed" ? (
         // 初始化中只限制执行，不额外显示提示；失败时才显示错误和重试。
         // 状态条悬在可滚动正文上方；必须使用不透明 card，避免历史文字透入错误提示。
@@ -3013,12 +3151,15 @@ function ConversationComposerImpl({
               : intl.formatMessage({ id: "remote.conversation.sendUnavailable" })
           }
           disabled={disabled || (mode === "reject" && !recoveryAvailable)}
-          submitting={pending}
+          submitting={pending || routeDeciding}
           submitDisabled={
-            pending ||
-            connectionPending ||
-            (!canReload &&
-              (runtimeBlocked || !routingAllowsSend || !attachmentsReady || !submissionReady))
+            routeDeciding ||
+            (swarmSending
+              ? pending || connectionPending
+              : pending ||
+                connectionPending ||
+                (!canReload &&
+                  (runtimeBlocked || !routingAllowsSend || !attachmentsReady || !submissionReady)))
           }
           allowSubmitWhenEmpty={
             // 发送按钮已把代码评论视为可发送上下文，但这里曾漏掉同一状态，

@@ -60,7 +60,7 @@ import {
 const DESKTOP_ZOOM_MIN_LEVEL = -3;
 const DESKTOP_ZOOM_MAX_LEVEL = 5;
 
-function getSidebarProfileName(user?: UserInfo | null): string {
+export function getSidebarProfileName(user?: UserInfo | null): string {
   const displayName = user?.displayName?.trim();
   if (displayName) {
     return displayName;
@@ -71,7 +71,7 @@ function getSidebarProfileName(user?: UserInfo | null): string {
     return username;
   }
 
-  return "ZCode";
+  return "xatlas";
 }
 
 function getSidebarProfileBadge(
@@ -85,7 +85,7 @@ function getSidebarProfileBadge(
   return formatMessage({ id: "sidebar.profile.notLoggedIn" });
 }
 
-function getAvatarFallbackText(user: UserInfo | null | undefined): string {
+export function getAvatarFallbackText(user: UserInfo | null | undefined): string {
   const source = user?.displayName?.trim() || user?.username?.trim() || "Z";
   return source[0]?.toUpperCase() ?? "Z";
 }

@@ -1,7 +1,14 @@
+import java.net.URI
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// The hosted phone UI the app opens. Override with -PxatlasRemoteUrl=https://<host>/remote once
+// xatlas's own remote is deployed; until then the desktop's QR codes point at Z.ai's.
+val remoteControlUrl = providers.gradleProperty("xatlasRemoteUrl").orElse("https://zcode.z.ai/remote").get()
+val remoteControlHost = URI(remoteControlUrl).host
 
 android {
     namespace = "com.example.zcode_mobile"
@@ -13,22 +20,20 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.zcode_mobile"
+        applicationId = "com.xatlas.android"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
-        buildConfigField("String", "REMOTE_CONTROL_DEFAULT_URL", "\"https://zcode.z.ai/remote\"")
+        // Phones reach the Mac's own remote over plain http on the local network.
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
+        manifestPlaceholders["remoteControlHost"] = remoteControlHost
+        buildConfigField("String", "REMOTE_CONTROL_DEFAULT_URL", "\"$remoteControlUrl\"")
     }
 
     buildTypes {
-        debug {
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
-            buildConfigField("String", "REMOTE_CONTROL_DEFAULT_URL", "\"https://zcode.z.ai/remote\"")
-        }
         release {
             isMinifyEnabled = false
             proguardFiles(

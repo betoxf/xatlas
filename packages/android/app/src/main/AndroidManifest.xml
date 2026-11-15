@@ -45,7 +45,7 @@
 
                 <data
                     android:host="remote"
-                    android:scheme="zcode" />
+                    android:scheme="xatlas" />
             </intent-filter>
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
@@ -54,7 +54,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
 
                 <data
-                    android:host="zcode.z.ai"
+                    android:host="${remoteControlHost}"
                     android:pathPrefix="/remote"
                     android:scheme="https" />
             </intent-filter>

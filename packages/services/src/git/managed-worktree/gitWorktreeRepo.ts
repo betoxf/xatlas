@@ -183,9 +183,18 @@ export function createGitWorktreeRepo(options: {
     const ignored: string[] = [];
     for (let index = 0; index < paths.length; index += CHECK_IGNORE_BATCH) {
       const batch = paths.slice(index, index + CHECK_IGNORE_BATCH);
-      const checked = await run(sourceRoot, ["check-ignore", "-z", "--", ...batch]);
-      // exit 1 = 这一批都没有被忽略；其他非 0 是真实错误。
-      if (checked.exitCode === 1) continue;
+      // Git refuses `check-ignore -z` without --stdin, and the provider has no stdin. ls-files
+      // applies the same standard ignore rules, keeps NUL output, and takes the paths literally.
+      const checked = await run(sourceRoot, [
+        "--literal-pathspecs",
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "-z",
+        "--",
+        ...batch,
+      ]);
       if (checked.exitCode !== 0)
         throw new WorktreeCopyError(WORKTREE_INCLUDE_FILE, stderrDetail(checked));
       ignored.push(...checked.stdout.split("\0").filter(Boolean));

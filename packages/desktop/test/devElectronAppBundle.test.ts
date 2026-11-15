@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 describe("dev Electron app bundle", () => {
-  it("adds a product identity and zcode URL scheme to the raw Electron plist", () => {
+  it("adds a product identity and xatlas URL scheme to the raw Electron plist", () => {
     const source = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
@@ -76,13 +76,13 @@ describe("dev Electron app bundle", () => {
       arch: "arm64",
     });
 
-    expect(result.appPath).toBe(`${outputRoot}/41.0.3-arm64/ZCode Dev.app`);
+    expect(result.appPath).toBe(`${outputRoot}/41.0.3-arm64/xatlas Dev.app`);
     expect(result.executablePath).toBe(
-      `${outputRoot}/41.0.3-arm64/ZCode Dev.app/Contents/MacOS/Electron`,
+      `${outputRoot}/41.0.3-arm64/xatlas Dev.app/Contents/MacOS/Electron`,
     );
     const plist = await readFile(join(result.appPath, "Contents", "Info.plist"), "utf8");
-    expect(plist).toContain("dev.zcode.app.development");
-    expect(plist).toContain("<string>zcode</string>");
+    expect(plist).toContain("com.xatlas.desktop.development");
+    expect(plist).toContain("<string>xatlas</string>");
   });
 
   // Windows 普通用户无符号链接权限（需开发者模式），fs.symlink EPERM；覆盖由 CI Linux 承担。

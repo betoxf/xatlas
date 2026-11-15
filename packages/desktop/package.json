@@ -80,6 +80,7 @@
     "@zcode/e2e-report": "workspace:*",
     "@zcode/provider": "workspace:*",
     "@zcode/provider-node": "workspace:*",
+    "@zcode/relay": "workspace:*",
     "@zcode/rpc": "workspace:*",
     "@zcode/server": "workspace:*",
     "@zcode/services": "workspace:*",

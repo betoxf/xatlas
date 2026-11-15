@@ -32,6 +32,10 @@ function fixture() {
   };
   const runtime = {
     config: { mode: "plan", taskType: "interactive" },
+    // xatlas: the runtime model layer hands CLI agents the current mode and approval path.
+    getMode: vi.fn(() => "plan"),
+    getPlanEnabled: vi.fn(() => false),
+    executor: {},
     sessionId: "task",
     sessionFeatures: new Set(),
     rootTraceContext: { traceId: "trace", spanId: "parent" },

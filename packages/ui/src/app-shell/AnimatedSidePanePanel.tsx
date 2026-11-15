@@ -1,7 +1,15 @@
 /* eslint-disable max-lines -- Side pane 当前集中承载 tabs、browser/git/code-viewer 内容；完整拆分需按 pane 功能边界继续推进。 */
 import type { CreateTaskRequest } from "@/app-shell/types.js";
 import { ServiceProvider, useComposerClientNamespace } from "@/hooks/useServices.js";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import type { IServiceAccessor } from "@zcode/services";
 import {
@@ -369,6 +377,9 @@ export function AnimatedSidePanePanel({
   onBrowserPageMetadataChange,
   onSelectGitSource,
   frameClassName = "rounded-xl border border-border",
+  panelClassName,
+  frameStyle,
+  frameOverlay,
   captionControlsStyle,
   showWindowControls,
   onCloseSidePane,
@@ -381,6 +392,11 @@ export function AnimatedSidePanePanel({
 }: {
   services: IServiceAccessor;
   frameClassName?: string;
+  /** Classes on the resizable panel itself, e.g. an inset that floats the frame. */
+  panelClassName?: string;
+  /** Style and extra children for the frame, e.g. to float it as a window. */
+  frameStyle?: CSSProperties;
+  frameOverlay?: ReactNode;
   captionControlsStyle?: CSSProperties;
   showWindowControls?: boolean;
   onCloseSidePane?: () => void;
@@ -983,6 +999,7 @@ export function AnimatedSidePanePanel({
         // 外框只需 z-0 建立自己的层叠上下文，按 DOM 顺序排在停靠层之下。
         fullView && "absolute inset-0 z-0",
       )}
+      style={mobileOverlay ? undefined : frameStyle}
     >
       <ScopedErrorBoundary
         scope="workspace-side-pane"
@@ -1494,6 +1511,7 @@ export function AnimatedSidePanePanel({
           </>
         ) : null}
       </ScopedErrorBoundary>
+      {frameOverlay}
     </div>
   );
 
@@ -1555,6 +1573,7 @@ export function AnimatedSidePanePanel({
           // 截图期间 panel 仍保持 opacity=1，避免 opacity=0 让 Chromium 丢弃 guest
           // compositor surface；实际 browser surface 已 fixed 到窗口内的低透明合成层，不会露出 tab 栏。
           isVisible || isScreenshotSurfaceActive ? "opacity-100" : "pointer-events-none opacity-0",
+          panelClassName,
         )}
       >
         {panelContent}

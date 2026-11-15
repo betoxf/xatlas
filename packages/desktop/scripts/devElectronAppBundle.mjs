@@ -1,11 +1,25 @@
-import { access, cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  cp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, posix } from "node:path";
+import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-export const DEV_ELECTRON_PROTOCOL_SCHEME = "zcode";
-export const DEV_ELECTRON_APP_NAME = "ZCode Dev";
-export const DEV_ELECTRON_APP_BUNDLE_ID = "dev.zcode.app.development";
+/** The app icon, so the Dock shows it from launch instead of Electron's. */
+const APP_ICON_PATH = fileURLToPath(new URL("../build/icon.icns", import.meta.url));
+
+export const DEV_ELECTRON_PROTOCOL_SCHEME = "xatlas";
+export const DEV_ELECTRON_APP_NAME = "xatlas Dev";
+export const DEV_ELECTRON_APP_BUNDLE_ID = "com.xatlas.desktop.development";
 // 副本布局版本，见 prepareDevElectronAppBundle 中的指纹说明。
 export const DEV_ELECTRON_BUNDLE_FORMAT = 3;
 const execFileAsync = promisify(execFile);
@@ -53,8 +67,8 @@ function appendProtocolDeclaration(plist) {
 }
 
 /**
- * 为 macOS 本地 Dev runtime 写入产品身份和 zcode URL scheme。
- * raw Electron 的 Info.plist 没有 CFBundleURLTypes，系统只能把 zcode 交给
+ * 为 macOS 本地 Dev runtime 写入产品身份和 xatlas URL scheme。
+ * raw Electron 的 Info.plist 没有 CFBundleURLTypes，系统只能把 xatlas 交给
  * com.github.Electron；这里仅修改启动副本，避免污染 node_modules 中的 Electron。
  */
 export function patchDevElectronInfoPlist(plist) {
@@ -125,13 +139,48 @@ export async function prepareDevElectronAppBundle({
     await cp(electronAppPath, appPath, { recursive: true, verbatimSymlinks: true });
     const patchedInfoPlist = patchDevElectronInfoPlist(await readFile(infoPlistPath, "utf8"));
     await writeFile(infoPlistPath, patchedInfoPlist, "utf8");
+    // The icon is part of what the signature seals, so it goes in before signing.
+    await syncDevElectronAppIcon(appPath);
     await signApp(appPath);
     // 指纹最后写：中途失败时下次仍会判定为需要重拷，不会留下半成品缓存。
     if (sourceStamp !== undefined) await writeFile(sourceStampPath, sourceStamp, "utf8");
+  } else if (await syncDevElectronAppIcon(appPath)) {
+    // A new icon in an already signed copy breaks its signature: sign it again.
+    await signApp(appPath);
   }
 
   return {
     appPath,
     executablePath: posix.join(appPath, "Contents", "MacOS", "Electron"),
   };
+}
+
+/**
+ * Puts the app icon in the dev bundle (in place of Electron's), so the Dock
+ * shows it while launching, before the main process sets it at runtime.
+ * Returns whether it changed the bundle.
+ */
+async function syncDevElectronAppIcon(appPath) {
+  const bundleIconPath = posix.join(appPath, "Contents", "Resources", "electron.icns");
+  const [source, current] = await Promise.all([
+    readFile(APP_ICON_PATH).catch(() => undefined),
+    readFile(bundleIconPath).catch(() => undefined),
+  ]);
+  if (!source || (current && source.equals(current))) {
+    return false;
+  }
+  // Only a real Electron bundle has a Resources folder to put it in.
+  if (
+    !(await access(dirname(bundleIconPath)).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    return false;
+  }
+  await copyFile(APP_ICON_PATH, bundleIconPath);
+  // Touch the bundle so LaunchServices notices the new icon.
+  const now = new Date();
+  await utimes(appPath, now, now).catch(() => undefined);
+  return true;
 }

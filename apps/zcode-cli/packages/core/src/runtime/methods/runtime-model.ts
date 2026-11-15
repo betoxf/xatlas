@@ -9,6 +9,7 @@ import {
   getCurrentModelInvocationContext,
   runWithModelInvocationContext,
   type Model,
+  type ModelAgentConversation,
   type ModelInvocationContext,
   type ModelRequest,
 } from "../deps.js";
@@ -87,8 +88,28 @@ function withRuntimeInvocationLayer(
     return {
       ...layer,
       modelRequestSessionFeatures: features.length === 0 ? undefined : features,
+      // 权限模式在会话中途可变，必须在每次调用时读取，不能绑定在句柄上。
+      agentConversation: {
+        sessionId: runtime.sessionId,
+        workingDirectory: runtime.workingDirectory,
+        // 根因：Plan 是叠加在基础模式上的开关，getMode() 仍是基础模式，CLI 会按它取得写权限。
+        mode: runtime.getPlanEnabled() ? "plan" : runtime.getMode(),
+        ...agentToolApproval(runtime),
+      },
     };
   });
+}
+
+/** 审批归属本次调用的 turn：trace 在调用入口取得，回调发生在 CLI 的行读取链上。 */
+function agentToolApproval(
+  runtime: AgentRuntimeInternal,
+): Pick<ModelAgentConversation, "requestToolApproval"> {
+  const { executor } = runtime;
+  if (!executor.requestAgentToolApproval) return {};
+  const traceContext = getCurrentModelInvocationContext()?.traceContext;
+  return {
+    requestToolApproval: (request) => executor.requestAgentToolApproval!(request, traceContext),
+  };
 }
 
 /**

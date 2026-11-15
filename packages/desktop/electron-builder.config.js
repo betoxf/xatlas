@@ -239,7 +239,7 @@ function assertPackagedCuaHelper(context) {
     HELPER_APP_NAME,
   );
   if (!existsSync(appPath)) {
-    throw new Error(`Packaged ZCode is missing bundled Computer Use Helper: ${appPath}`);
+    throw new Error(`Packaged xatlas is missing bundled Computer Use Helper: ${appPath}`);
   }
 }
 const shouldEnableWindowsVsign =
@@ -339,7 +339,7 @@ async function runTimedAsync(label, fn) {
 
 function resolveAppAsarPath(context) {
   if (context.electronPlatformName === "darwin") {
-    const appName = `${context.packager?.appInfo?.productFilename ?? "ZCode"}.app`;
+    const appName = `${context.packager?.appInfo?.productFilename ?? "xatlas"}.app`;
     return resolve(context.appOutDir, appName, "Contents", "Resources", "app.asar");
   }
 
@@ -348,7 +348,7 @@ function resolveAppAsarPath(context) {
 
 function resolvePackagedResourcesDir(context) {
   if (context.electronPlatformName === "darwin") {
-    const appName = `${context.packager?.appInfo?.productFilename ?? "ZCode"}.app`;
+    const appName = `${context.packager?.appInfo?.productFilename ?? "xatlas"}.app`;
     return resolve(context.appOutDir, appName, "Contents", "Resources");
   }
 
@@ -643,10 +643,10 @@ export default {
   extraMetadata: {
     version: buildMetadata.appVersion,
     zcodeProductFlavor: desktopProductIdentity.flavor,
-    homepage: "https://zcode.z.ai",
+    homepage: "https://github.com/betoxf/xatlas",
     author: {
-      name: "ZCode",
-      email: "dev@zcode.z.ai",
+      name: "xatlas",
+      email: "betoxf@users.noreply.github.com",
     },
   },
   // macOS 签名阶段会对 Electron Framework 下每个语言包逐个 codesign。
@@ -832,6 +832,10 @@ export default {
         ]
       : []),
     { from: resolve(workspaceRoot, noticesFileName), to: noticesFileName },
+    // The phone page each Mac serves to its own phones (`pnpm build:phone-remote`).
+    ...(existsSync(resolve(desktopPackageRoot, "resources/phone-remote/index.html"))
+      ? [{ from: "resources/phone-remote", to: "phone-remote" }]
+      : []),
     ...(targetPlatform.os === "darwin"
       ? [
           ...(shouldPackageComputerUseHelper
@@ -940,10 +944,9 @@ export default {
   // OAuth deep link 协议注册（macOS 打包后需要 Info.plist 中声明 CFBundleURLTypes）
   protocols: [
     {
-      // 协议处理器的展示名之前使用小写 scheme，打包产物里的协议描述无法体现产品名。
-      // 展示名跟随安装包身份；scheme 仍保持 zcode，因此两个应用中最后注册者会成为默认 handler。
+      // 协议处理器的展示名跟随安装包身份；xatlas 使用自己的 scheme，不与 ZCode 争抢 zcode://。
       name: desktopProductIdentity.productName,
-      schemes: ["zcode"],
+      schemes: ["xatlas"],
     },
   ],
   mac: {
@@ -1015,7 +1018,7 @@ export default {
     // 与 /usr/share/icons/hicolor/*/apps/zcode.png 保持一致。
     executableName: desktopProductIdentity.linuxExecutableName,
     category: "Development",
-    maintainer: "ZCode <dev@zcode.z.ai>",
+    maintainer: "xatlas <betoxf@users.noreply.github.com>",
   },
   deb: {
     // 生产版与 Preview 必须是两个 dpkg package；只改可执行名仍会让安装器把另一版本当成升级替换。

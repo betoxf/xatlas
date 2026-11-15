@@ -9,6 +9,7 @@ import {
   parseConversationSharePathname,
   type ConversationShareErrorKind,
   type ConversationSharePreview,
+  PRODUCT_URL_SCHEME,
 } from "@zcode/shared";
 
 const SHARE_CODE_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/u;
@@ -66,7 +67,7 @@ export function buildShareImportDeepLink(shareCode: string): string {
   if (!isSafeConversationShareCode(shareCode)) {
     throw new TypeError("Invalid conversation share code");
   }
-  return `zcode://share/import?code=${encodeURIComponent(shareCode)}`;
+  return `${PRODUCT_URL_SCHEME}://share/import?code=${encodeURIComponent(shareCode)}`;
 }
 
 export interface ConversationSharePreviewClientOptions {

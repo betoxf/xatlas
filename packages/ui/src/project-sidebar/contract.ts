@@ -165,6 +165,9 @@ export interface ProjectSidebarProps {
   onOpenPluginStore?: () => void;
   automationsActive?: boolean;
   pluginStoreActive?: boolean;
+  /** Opens the Task Stack home view (xatlas). */
+  onOpenTaskStack?: () => void;
+  taskStackActive?: boolean;
   /** 「插件市场」之后的扩展导航条目（docs/plugins/extension-host.md §16.4）；Shell 提供打开入口。 */
   navPrimarySlot?: import("@/extension-slots/contract.js").NavPrimarySlotHost;
   onFileTreeOpenChange?: (open: boolean) => void;

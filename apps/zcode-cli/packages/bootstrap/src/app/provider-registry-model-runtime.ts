@@ -1,4 +1,4 @@
-import type { AiSdkModelAdapter } from "@zcode/adapters/model";
+import { createCliAgentModel, type AiSdkModelAdapter } from "@zcode/adapters/model";
 import type { Model } from "@zcode/contracts";
 import type { AgentRuntimeDeps } from "@zcode/core";
 import {
@@ -8,6 +8,7 @@ import {
   type ProviderModel,
   type ProviderRegistryView,
 } from "@zcode/provider";
+import { parseCliAgentEndpoint } from "@zcode/shared/cli-agents";
 import { createRegistrySelectionProtocolError } from "./provider-registry-selection.js";
 
 export type RuntimeModelFactory = NonNullable<AgentRuntimeDeps["modelFactory"]>;
@@ -71,6 +72,17 @@ export class ApiProviderModelRuntime {
     // 输出预算属于单次请求，由 Agent 执行链显式决定，不能在 ModelFactory 中静默绑定。
     // Selection 已在上面的 Registry 边界完成校验，Factory 不再承担任何缺省修复。
     const normalReasoningLevel = target.selection.options!.reasoningLevel!;
+    const cliAgent = parseCliAgentEndpoint(provider.config.api.baseUrl);
+    if (cliAgent) {
+      return createCliAgentModel({
+        agent: cliAgent,
+        providerId: provider.providerId,
+        modelId: registryModel.modelId,
+        properties: config.properties,
+        optionSpecs: config.optionSpecs,
+        options: { reasoningLevel: normalReasoningLevel },
+      });
+    }
     return this.#modelAdapter.createModel({
       providerId: provider.providerId,
       modelId: registryModel.modelId,

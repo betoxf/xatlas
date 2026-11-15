@@ -131,3 +131,14 @@ TUI 作为第一版交互客户端时，只实现 `ask` 请求的最小可用 UI
 ## Group session isolation (2026-09)
 
 The project-only restriction above has one scoped extension: a trusted group input initializes `SessionInfo.permission.scope = "session"` before tools execute. Executor rule loading and remembered updates use that session's permission object, never `ProjectPermission`. Initialization drops inherited rules once; subsequent turns and cold resumes keep the task's own grants. Normal tasks without this marker retain project behavior. The marker is protocol metadata, not interpreted prompt text. See the root `docs/permission-project-approval.md` and `docs/bots-feishu-group-collaboration.md` for group authorization and client boundaries.
+
+## CLI agent tool calls (2026-10)
+
+A CLI agent (`docs/xatlas/connect.md`) runs its own tools, so there is no `ToolEntry`, schema or `PermissionService` decision on this side: the CLI has already decided to ask. Its requests reach the same approval through `ModelInvocationContext.agentConversation.requestToolApproval`, which the runtime binds to `ToolExecutor.requestAgentToolApproval` for each model call.
+
+- It reuses `requestPermissionResponse` with one `ask`, so registration, `PermissionRequested`, abort and timeout behave as for any tool, and it emits `PermissionResolved` exactly once on every path.
+- `PermissionRequest` hooks don't run (`runHooks: false`): the CLI has its own, and xatlas's are for its own agent.
+- `optionsPolicy: "no-always-allow"`: `permissionUpdates` would write a rule nothing here reads. That also removes the Full access option.
+- `allow` returns the original input and `modify` the replacement (the answers to `AskUserQuestion`). `deny`, `escalate`, a timeout, a cancellation or a broker failure all return "refused" with a reason, and the adapter also refuses if the port itself fails.
+- No tool row exists, so `anchorRowId` is `null` and the projection only touches `pendingInteractions`.
+- A port is absent when the executor doesn't offer it; the adapter then keeps the CLI read-only.

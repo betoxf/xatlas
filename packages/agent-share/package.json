@@ -1,0 +1,23 @@
+{
+  "name": "@zcode/agent-share",
+  "private": true,
+  "type": "module",
+  "description": "Keeps Claude Code, Codex, Gemini CLI, OpenCode and xatlas on one shared set of MCP servers, skills, instructions and memory.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "share": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
+  },
+  "dependencies": {
+    "smol-toml": "^1.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.2"
+  }
+}

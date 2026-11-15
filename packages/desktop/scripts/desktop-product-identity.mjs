@@ -5,21 +5,23 @@
  */
 export const ZCODE_PREVIEW_IDENTITY_ENV = "ZCODE_PREVIEW_IDENTITY";
 
+// xatlas's own identity, distinct from ZCode (`dev.zcode.app`) and from the earlier Swift
+// xatlas app (`com.xatlas.app`).
 const PRODUCTION_IDENTITY = Object.freeze({
   flavor: "production",
-  appId: "dev.zcode.app",
-  productName: "ZCode",
-  linuxExecutableName: "zcode",
-  linuxPackageName: "zcode",
+  appId: "com.xatlas.desktop",
+  productName: "xatlas",
+  linuxExecutableName: "xatlas",
+  linuxPackageName: "xatlas",
   cuaHelperInstallVariant: null,
 });
 
 const PREVIEW_IDENTITY = Object.freeze({
   flavor: "preview",
-  appId: "dev.zcode.app.preview",
-  productName: "ZCode Preview",
-  linuxExecutableName: "zcode-preview",
-  linuxPackageName: "zcode-preview",
+  appId: "com.xatlas.desktop.preview",
+  productName: "xatlas Preview",
+  linuxExecutableName: "xatlas-preview",
+  linuxPackageName: "xatlas-preview",
   cuaHelperInstallVariant: "preview",
 });
 
@@ -84,7 +86,7 @@ export function resolveDesktopArtifactSuffix(env = process.env) {
  */
 export function resolveWindowsAppUserModelIdForFlavor(flavor, runtime = { isPackaged: true }) {
   if (runtime.isPackaged === false) {
-    return "cn.aminer.zcode";
+    return "com.xatlas.desktop.development";
   }
   return desktopProductIdentities[flavor === "preview" ? "preview" : "production"].appId;
 }

@@ -1,0 +1,26 @@
+{
+  "name": "@zcode/relay",
+  "private": true,
+  "type": "module",
+  "description": "The xatlas relay: pairs a desktop with a phone for web remote control.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix"
+  },
+  "dependencies": {
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.2",
+    "@zcode/shared": "workspace:*"
+  }
+}

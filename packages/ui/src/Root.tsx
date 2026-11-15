@@ -59,6 +59,7 @@ import {
   type LoginCompleteReason,
 } from "@/WelcomeScreen.js";
 import { useCredentialStoreRecovery } from "@/hooks/useCredentials.js";
+import { useConnectionsStartupSync } from "@/connect/useConnectionsStartupSync.js";
 import { setDefaultFileDisplayBasePath } from "@/lib/fileDisplay.js";
 import { readRendererLaunchTimings, shouldReportLaunchToInput } from "@/lib/launchToInputReport.js";
 import { reportUiLaunchToInput } from "@/lib/uiPerfArmsTelemetry.js";
@@ -651,6 +652,7 @@ function RootInner({
   }, [services]);
 
   useBotBroadcastEffects(services, tabStoreApi);
+  useConnectionsStartupSync(services.connectionsService);
 
   const handleOpenRemoteConnection = useCallback(
     (preference?: RemoteConnectionOpenPreference) => {
@@ -1552,7 +1554,13 @@ function RootInner({
         {requestSecurityBridgeNode}
         {remoteConnectionDialog}
         {directoryBrowserDialog}
-        <WelcomeScreen onComplete={handleWelcomeScreenComplete} />
+        <WelcomeScreen
+          onComplete={handleWelcomeScreenComplete}
+          connectFirst={
+            welcomeScreenOpenReason === "startup-provider-required" ||
+            welcomeScreenOpenReason === "manual-login"
+          }
+        />
       </RootShell>
     );
   }

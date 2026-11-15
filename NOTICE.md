@@ -1,3 +1,26 @@
+# xatlas
+
+xatlas is based on [ZCode](https://github.com/zai-org/ZCode) by Z.ai, licensed under Apache-2.0,
+and modified by betoxf. It is an independent project, not affiliated with or endorsed by Z.ai,
+Anthropic, OpenAI or Google. Product names and logos belong to their owners and are used only
+to identify the tools you connect.
+
+This version is based on ZCode v3.18.2, upstream commit
+`fec975905a2abd4c07e35c40d51fa097a2258ec9`. Upstream's history up to that commit is part of
+this repository's history, and every commit after it is a change made by xatlas. To list the
+files that differ from upstream, run `git diff --stat fec97590 HEAD`.
+
+The changes include the Stack, the floating workspace, the release queue, the Connect window,
+CLI agents, the orchestrator and its engines, the parliament (swarm), agent sharing, the phone
+apps and relay, and xatlas's own name, identifiers and artwork.
+
+The ZCode notice below applies to the code xatlas inherits. Where it describes Z.ai's own
+services, those are what a Z.ai sign-in or the upstream configuration reaches; xatlas works
+without them. `packages/zcode-cua` remains a placeholder: computer use in xatlas comes from
+[UCU](https://github.com/betoxf/universal-computer-use), a separate, optional project.
+
+---
+
 # ZCode 相关功能说明与第三方组件声明
 
 本声明适用于本仓库公开的源码及其构建产物。各运行形态的功能、权限、存储位置和网络行为不同，不能将其中一种形态的默认设置理解为整个项目的统一设置。

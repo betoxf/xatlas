@@ -39,7 +39,12 @@ export function useWorkspaceMainViewSettingsExit({
         return;
       }
 
-      if (workspaceMainView === settingsEntryMainViewRef.current) {
+      // xatlas fork: the Stack view is the home surface — becoming visible again
+      // (leaving Settings, or the first reveal at startup) keeps it.
+      if (
+        workspaceMainView === settingsEntryMainViewRef.current &&
+        workspaceMainView !== "task-stack"
+      ) {
         // Settings 只是覆盖 workspace，底层 App 不卸载，进入前的
         // automations 主视图会一直保留。设置层退出时统一回到对话，
         // 让 Back、插件提示词、创建 Skill 和设置页快捷键共享同一导航语义。

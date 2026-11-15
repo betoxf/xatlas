@@ -3,6 +3,7 @@ import { logger } from "@/logger.js";
 
 export type SettingsSectionId =
   | "general"
+  | "connections"
   | "agentBehavior"
   | "appearance"
   | "migration"
@@ -48,6 +49,8 @@ const HIDDEN_SETTINGS_SECTIONS = new Set<SettingsSectionId>([
   "automations",
   // 旧插件市场已迁出设置页；保留 id 只用于迁移历史偏好和旧调用。
   "plugins",
+  // The bundled package is a placeholder; computer use comes from UCU, under Connections.
+  "computerUse",
   // 工作区搜索（.zcodeignore）设置入口先隐藏：规则文件仍生效并可手动编辑，
   // 编辑页代码保留，放开时从这里移除即可。
   "workspaceFileSearch",
@@ -93,6 +96,7 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
     value === "hooks" ||
     value === "workspaceFileSearch" ||
     value === "computerUse" ||
+    value === "connections" ||
     value === "automations" ||
     value === "shortcuts"
   );
@@ -107,6 +111,7 @@ export function resolveSettingsSection(
   fallbackSection: SettingsSectionId = "general",
 ): SettingsSectionId {
   if (section === "plugins") return "plugin";
+  if (section === "computerUse") return "connections";
   return isSettingsSectionEnabled(section) ? section : fallbackSection;
 }
 

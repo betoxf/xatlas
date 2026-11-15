@@ -1,4 +1,4 @@
-import { Blocks, CalendarClock } from "lucide-react";
+import { Blocks, CalendarClock, Layers } from "lucide-react";
 import { memo } from "react";
 import { TID_AUTOMATIONS_OPEN } from "@zcode/shared/test-ids";
 import type { ProjectSidebarProps } from "@/project-sidebar/contract.js";
@@ -21,6 +21,8 @@ export const ProjectSidebarNavigation = memo(function ProjectSidebarNavigation({
     | "automationsActive"
     | "onOpenPluginStore"
     | "pluginStoreActive"
+    | "onOpenTaskStack"
+    | "taskStackActive"
     | "webRemoteControlWorkspaceSwitcher"
     | "navPrimarySlot"
     | "workspacePath"
@@ -39,6 +41,19 @@ export const ProjectSidebarNavigation = memo(function ProjectSidebarNavigation({
       {/* Relay V2 远控：当前电脑是项目与任务的上一级，放在导航首行；手机端占用原顶部留白。 */}
       {deviceNavigation ? <WebRemoteControlDeviceHeader navigation={deviceNavigation} /> : null}
       <NewTaskButtonGroup onCreateTask={onCreate} />
+      {!props.isWebRemoteControl && props.onOpenTaskStack ? (
+        <Button
+          variant="ghost"
+          size="lg"
+          className={`w-full justify-start gap-2 ${props.taskStackActive ? "bg-selected text-foreground" : ""}`}
+          aria-pressed={props.taskStackActive ?? false}
+          data-testid="task-stack-sidebar-open"
+          onClick={() => props.onOpenTaskStack?.()}
+        >
+          <Layers className="size-4" />
+          {intl.formatMessage({ id: "workspace.openTaskStack" })}
+        </Button>
+      ) : null}
       {/* 远控主视图会把自动化和插件市场重置为聊天；入口必须一同隐藏，避免点击无效。 */}
       {!props.isWebRemoteControl && props.onOpenAutomations ? (
         <Button

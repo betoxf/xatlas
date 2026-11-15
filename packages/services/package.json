@@ -17,6 +17,9 @@
     "lint:fix": "oxlint --fix"
   },
   "dependencies": {
+    "@zcode/agent-share": "workspace:*",
+    "@zcode/orchestrator": "workspace:*",
+    "@zcode/swarm": "workspace:*",
     "@agentclientprotocol/sdk": "^0.21.1",
     "@larksuiteoapi/node-sdk": "1.64.0",
     "@zcode/provider": "workspace:*",

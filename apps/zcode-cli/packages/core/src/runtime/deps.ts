@@ -141,6 +141,7 @@ export type {
   ModelAnomalyGuardConfig,
   Model,
   ModelEvent,
+  ModelAgentConversation,
   ModelInvocationContext,
   ModelOptions,
   ModelProperties,

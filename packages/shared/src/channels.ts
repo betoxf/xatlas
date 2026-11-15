@@ -114,6 +114,12 @@ export const ServiceChannels = {
   Git: "git",
   /** Git checkpoint 服务 */
   GitCheckpoint: "git-checkpoint",
+  /** Release queue: open pull requests analysed for shipping (xatlas). */
+  ReleaseQueue: "release-queue",
+  Swarm: "swarm",
+  /** The orchestrator: routes messages and runs big jobs as a team of agents (xatlas). */
+  Orchestrator: "orchestrator",
+  Connections: "connections",
   Setting: "setting",
   /** 凭据管理（从 main IPC 迁移到 host RPC） */
   Credential: "credential",

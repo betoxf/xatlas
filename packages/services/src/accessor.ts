@@ -14,6 +14,10 @@ import type { IMediaPreviewService } from "./media-preview/mediaPreview.js";
 import type { ICloudContentService } from "#src/cloud-content/cloudContent.js";
 import type { IMarketingTouchService } from "#src/marketing-touch/marketingTouch.js";
 import type { IGitService } from "./git/git.js";
+import type { IReleaseQueueService } from "./release-queue/releaseQueue.js";
+import type { IOrchestratorService } from "./orchestrator/orchestrator.js";
+import type { ISwarmService } from "./swarm/swarm.js";
+import type { IConnectionsService } from "./connections/connections.js";
 import type { IGitCheckpointService } from "./git/gitCheckpoint.js";
 import type { ISystemService } from "./system/system.js";
 import type { ITerminalService } from "./terminal/terminal.js";
@@ -76,6 +80,14 @@ export interface IServiceAccessor {
   readonly cloudContentService?: ICloudContentService;
   readonly marketingTouchService?: IMarketingTouchService;
   readonly gitService: IGitService;
+  /** Open pull requests analysed for shipping; absent where there is no host. */
+  readonly releaseQueueService?: IReleaseQueueService;
+  /** Multi-model planning debates; absent where there is no host. */
+  readonly swarmService?: ISwarmService;
+  /** Routes messages and runs big jobs as a team of agents; absent where there is no host. */
+  readonly orchestratorService?: IOrchestratorService;
+  /** The tools people connect from the Connect window; absent where there is no host. */
+  readonly connectionsService?: IConnectionsService;
   readonly gitCheckpointService: IGitCheckpointService;
   readonly systemService: ISystemService;
   readonly terminalService: ITerminalService;

@@ -24,6 +24,7 @@ declare module "node-forge" {
     keyEncipherment?: boolean;
     serverAuth?: boolean;
     clientAuth?: boolean;
+    altNames?: Array<{ type: number; value?: string; ip?: string }>;
   }
   interface ForgeMessageDigest {
     update(msg: string): ForgeMessageDigest;

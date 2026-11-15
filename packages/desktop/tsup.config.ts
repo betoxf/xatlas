@@ -267,6 +267,9 @@ export default defineConfig([
     external: desktopNodeRuntimeExternals,
     noExternal: [
       "@zcode/server",
+      "@zcode/relay",
+      "@zcode/agent-share",
+      "@zcode/swarm",
       "@zcode/shared",
       "@zcode/rpc",
       "@zcode/services",
@@ -360,6 +363,8 @@ export default defineConfig([
     external: desktopNodeRuntimeExternals,
     noExternal: [
       "@zcode/server",
+      "@zcode/agent-share",
+      "@zcode/swarm",
       "@zcode/shared",
       "@zcode/rpc",
       "@zcode/services",
@@ -391,6 +396,8 @@ export default defineConfig([
     external: desktopNodeRuntimeExternals,
     noExternal: [
       "@zcode/server",
+      "@zcode/agent-share",
+      "@zcode/swarm",
       "@zcode/shared",
       "@zcode/rpc",
       "@zcode/services",

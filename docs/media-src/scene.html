@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  html, body { margin: 0; width: 1100px; height: 520px; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  body { position: relative; background:
+    radial-gradient(900px 600px at 10% 0%, #c7d2fe 0%, transparent 60%),
+    radial-gradient(800px 600px at 100% 100%, #ddd6fe 0%, transparent 60%),
+    linear-gradient(135deg, #eef2ff, #f5f3ff 55%, #faf5ff); }
+  body.dark { background:
+    radial-gradient(900px 600px at 10% 0%, #312e81 0%, transparent 60%),
+    radial-gradient(800px 600px at 100% 100%, #4c1d95 0%, transparent 60%),
+    linear-gradient(135deg, #0b1023, #140f2e 55%, #1a0f2b); }
+  .caption { position: absolute; left: 64px; top: 112px; width: 380px; color: #0d0d0f; }
+  body.dark .caption { color: #f5f5f7; }
+  .caption h2 { font-size: 44px; letter-spacing: -.035em; line-height: 1.06; margin: 0 0 18px; font-weight: 760; }
+  .caption p { font-size: 18px; line-height: 1.5; margin: 0; opacity: .7; }
+  .window { position: absolute; left: 470px; top: 56px; width: 760px; height: 507px; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(30,20,80,.28), 0 0 0 .5px rgba(0,0,0,.14); background: #f8f8f8; }
+  body.dark .window { box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 .5px rgba(255,255,255,.14); }
+  .window img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; }
+  .lights { position: absolute; top: 14px; left: 16px; display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+</style></head><body>
+<div class="caption"><h2>Every project.<br>Every agent.<br>Ship together.</h2>
+<p>Your conversations stack up per project. Open one, and it grows into a floating window. Bring Claude, Codex, Gemini, OpenCode or any API model, and ship the pull requests that are ready, together.</p></div>
+<div class="window"><img src="shots/stack.png" alt=""><div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div></div>
+<script>if (location.search.includes('dark')) document.body.classList.add('dark');</script>
+</body></html>

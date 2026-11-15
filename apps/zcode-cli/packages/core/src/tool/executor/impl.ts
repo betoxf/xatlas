@@ -1,4 +1,10 @@
-import type { CoreError, TraceContext, TurnId } from "@zcode/contracts";
+import type {
+  CoreError,
+  ModelAgentToolApproval,
+  ModelAgentToolApprovalRequest,
+  TraceContext,
+  TurnId,
+} from "@zcode/contracts";
 import { CoreErrorType, createCoreError, createRootTraceContext } from "@zcode/contracts";
 import { createDenyPermissionBroker } from "../../permission/broker.js";
 import type { ToolSchedule } from "../scheduler.js";
@@ -8,6 +14,7 @@ import type {
   ToolEntry,
   ToolExecutionResult,
 } from "../types.js";
+import { requestAgentToolApproval } from "./agent-tool-approval.js";
 import { BackgroundTaskTracker } from "./background-tasks.js";
 import { executeToolBatch, executeToolSchedule } from "./batch-runner.js";
 import { executeToolCall } from "./call-runner.js";
@@ -154,6 +161,19 @@ export class ToolExecutorImpl implements ToolExecutor {
         decision.result.error?.message ?? "Tool denied by host policy",
       );
     return decision.executionInput;
+  }
+
+  requestAgentToolApproval(
+    request: ModelAgentToolApprovalRequest,
+    traceContext?: TraceContext,
+  ): Promise<ModelAgentToolApproval> {
+    return requestAgentToolApproval(
+      this.deps,
+      request,
+      traceContext ??
+        this.deps.traceContext ??
+        createRootTraceContext({ sessionId: this.deps.sessionId }),
+    );
   }
 
   areReadsDeniedWithoutPrompt(

@@ -6,7 +6,7 @@ import {
   type ProviderSettingsFormProvider,
   type ProviderSettingsFormModel,
 } from "@/lib/providerSettingsFormTypes.js";
-import type { ModelConnectivityResult } from "@zcode/shared";
+import { parseCliAgentEndpoint, type ModelConnectivityResult } from "@zcode/shared";
 import {
   isApiKeyAccess,
   type ProviderApiType,
@@ -748,6 +748,7 @@ export function InlineEditableProviderCard({
   const headerProviderName = providerDisplayName;
   const isAccountProvider = provider.config.access?.type === "zhipu-account";
   const isApiKeyProvider = isApiKeyAccess(provider.config.access);
+  const isCliAgentProvider = parseCliAgentEndpoint(provider.config.api?.baseUrl) !== undefined;
   const effectiveHeaderVisible = headerVisible && statusSection === undefined;
 
   return (
@@ -808,7 +809,12 @@ export function InlineEditableProviderCard({
       {statusSection}
 
       <div className="space-y-3">
-        {isAccountProvider ? null : (
+        {isCliAgentProvider ? (
+          <p className="text-ui-sm text-foreground-subtle">
+            {intl.formatMessage({ id: "connect.providerNote" })}
+          </p>
+        ) : null}
+        {isAccountProvider || isCliAgentProvider ? null : (
           <ProviderConnectionSection
             provider={provider}
             readOnly={readOnlyEndpoints}
@@ -823,7 +829,7 @@ export function InlineEditableProviderCard({
           />
         )}
 
-        {isApiKeyProvider ? (
+        {isApiKeyProvider && !isCliAgentProvider ? (
           <ProviderApiKeySection
             apiKeyValue={apiKeyValue}
             apiKeyVisible={apiKeyVisible}

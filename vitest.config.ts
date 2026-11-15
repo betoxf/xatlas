@@ -3,6 +3,54 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 import engineeringTestFiles from "./scripts/engineering-test-files.json";
 
+// xatlas: upstream stopped discovering app unit tests (only the engineering list runs). The
+// fork's own tests run as the "unit" project; UI component tests run from packages/ui.
+const xatlasUnitTests = [
+  "packages/swarm/test/**/*.test.ts",
+  "packages/orchestrator/test/**/*.test.ts",
+  "packages/agent-share/test/**/*.test.ts",
+  "packages/relay/test/**/*.test.ts",
+  "packages/shared/test/releaseQueue.test.ts",
+  "packages/shared/test/cliAgents.test.ts",
+  "packages/services/test/cliAgentProviders.test.ts",
+  "packages/services/test/orchestratorNodeHost.test.ts",
+  "packages/services/test/orchestratorService.test.ts",
+  "packages/services/test/orchestratorServiceOversight.test.ts",
+  "packages/ui/test/orchestratorLocales.test.ts",
+  "packages/services/test/connectionsService.test.ts",
+  "packages/services/test/phoneRemoteServerCertificate.test.ts",
+  "packages/services/test/releaseQueueService.test.ts",
+  "packages/services/test/swarmService.test.ts",
+  "packages/desktop/test/desktopPhoneRemoteHost.test.ts",
+  // Identity (app id, name, xatlas:// scheme) and the anonymous device id: upstream retired
+  // these app tests, the fork keeps them because they hold its own behaviour.
+  "packages/desktop/test/about.test.ts",
+  "packages/desktop/test/desktopDeepLinkRegistration.test.ts",
+  "packages/desktop/test/desktopDeepLinkUrl.test.ts",
+  "packages/desktop/test/desktopFinderOpenFolderWorkflow.test.ts",
+  "packages/desktop/test/desktopLinuxDeepLinkRegistration.test.ts",
+  "packages/desktop/test/desktopOAuthDeepLink.test.ts",
+  "packages/desktop/test/desktopRuntimeEnv.test.ts",
+  "packages/desktop/test/desktopTray.test.ts",
+  "packages/services/test/marketingTouchService.test.ts",
+  "packages/services/test/nodeApiClientEndpoint.test.ts",
+  "packages/web/test/conversationSharePreviewClient.test.ts",
+  "packages/ui/test/conversationSummarySources.test.ts",
+  "packages/ui/test/floatingPane.test.ts",
+  "packages/ui/test/releaseFixPrompt.test.ts",
+  "packages/ui/test/swarmContinuePrompt.test.ts",
+  "packages/ui/test/taskStackEntries.test.ts",
+  // Icons, Codex-style menus and floating overlays.
+  "packages/ui/test/automationsMainDragRegion.test.ts",
+  "packages/ui/test/floatingOverlayLayering.test.ts",
+  "packages/ui/test/menuRadius.test.ts",
+  "packages/ui/test/providerLogo.test.ts",
+  "packages/ui/test/providerLogoAssets.test.ts",
+  "packages/ui/test/rootStartupLoading.test.ts",
+  "packages/ui/test/settingsConnections.test.ts",
+  "packages/ui/test/v4ConversationDraftEmptyStateLogo.test.ts",
+];
+
 export default defineConfig({
   // 测试固定注入事件上报端点，使遥测上报链路在单测中可验证；真实构建由 scripts/build-time-config.mjs 决定。
   define: {
@@ -69,6 +117,13 @@ export default defineConfig({
         },
       },
       "packages/zcode-cua/vitest.config.ts",
+      {
+        extends: true,
+        test: {
+          name: "unit",
+          include: xatlasUnitTests,
+        },
+      },
     ],
   },
 });

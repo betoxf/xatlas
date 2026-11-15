@@ -1,239 +1,254 @@
-# ZCode
-
 <div align="center">
-  <img src="public/logo/icons/1024x1024.png" alt="ZCode" width="128" height="128" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/xatlas-logo-dark.png">
+    <img src="assets/brand/xatlas-logo.png" alt="xatlas: every project, agent and release on one desk" width="760">
+  </picture>
+
+  <p><strong>Every project, agent and release on one desk.</strong></p>
+  <p>A desktop home for AI-assisted development. Your conversations stack up per project, any coding agent or model works in them, and a big request can become a job that a team of agents plans, builds and reviews.</p>
+  <p>Built on <a href="https://github.com/zai-org/ZCode">ZCode</a> by Z.ai. Free and open source under Apache-2.0.</p>
+
+  <p>
+    <img src="https://img.shields.io/badge/macOS-14%2B-111827" alt="macOS 14 or newer">
+    <img src="https://img.shields.io/badge/Electron-44-47848F" alt="Electron 44">
+    <img src="https://img.shields.io/badge/TypeScript-6-3178C6" alt="TypeScript 6">
+    <a href="NOTICE.md"><img src="https://img.shields.io/badge/based%20on-ZCode%20v3.18.2-7C3AED" alt="Based on ZCode v3.18.2"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2563EB" alt="License: Apache-2.0"></a>
+    <a href="#where-it-stands"><img src="https://img.shields.io/badge/status-early%2C%20build%20from%20source-F59E0B" alt="Status: early, build from source"></a>
+  </p>
+
+  <p>
+    <a href="#build-from-source">Build</a> ·
+    <a href="#quick-start">Quick start</a> ·
+    <a href="#the-orchestrator">Orchestrator</a> ·
+    <a href="#how-it-works">How it works</a> ·
+    <a href="#where-it-stands">Where it stands</a> ·
+    <a href="#xatlas-and-zcode">xatlas and ZCode</a> ·
+    <a href="#faq">FAQ</a> ·
+    <a href="docs/xatlas/pipeline-vision.md">Roadmap</a> ·
+    <a href="CONTRIBUTING.md">Contributing</a> ·
+    <a href="SECURITY.md">Security</a>
+  </p>
 </div>
+
 <p align="center">
-  <a href="https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=47ag983c-8fcb-4d6d-814b-5395193a712c&amp;qr_code=true">飞书社群</a> ·
-  <a href="https://discord.gg/z9aBcQXZQ3">Discord</a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/hero-dark.png">
+    <img src="images/hero-light.png" alt="The xatlas Stack: projects as stacks of conversation cards" width="880">
+  </picture>
 </p>
-<p align="center">
-  简体中文 | <a href="README.en.md">English</a>
-</p>
 
-ZCode 是 AI 编程工作台，提供桌面应用、浏览器界面和终端 Agent。本仓库包含客户端、后端服务、共享 UI，以及 Agent CLI 与运行时源码。
+## Why xatlas
 
-## 更新
+You run many projects, many conversations and more than one AI. xatlas puts them on one calm surface: every project is a stack of its conversations, the ones that need you come to the front, and opening one grows it into a floating window you can dismiss with a click. When a request is too big for one conversation, it becomes a job for a team of agents. When the pull requests pile up, the release queue shows which ones can ship together, and why the others can't.
 
-- **2026-11-12**：更新至 ZCode v3.18.2 版本。
-- 2026-11-12：更新至 ZCode v3.18.1 版本。
-- 2026-11-11：更新至 ZCode v3.18.0 版本。
-- 2026-11-03：更新至 ZCode v3.17.2 版本。
-- 2026-10-30：更新至 ZCode v3.17.1 版本。
-- 2026-10-29：更新至 ZCode v3.17.0 版本。
-- 2026-10-19：更新至 ZCode v3.16.2 版本。
-- 2026-10-16：更新至 ZCode v3.16.1 版本。
-- 2026-10-16：更新至 ZCode v3.15.4 版本。
-- 2026-10-10：更新至 ZCode v3.15.1 版本。
-- 2026-9-23：更新至 ZCode v3.14.3 版本。
+| Capability | What it gives you |
+| --- | --- |
+| **The Stack** | A grid of projects, each a stack of its conversations, most urgent in front. Fan a stack open to see the rest; click a card and the conversation grows out of it. |
+| **Floating workspace** | Conversations open as a window over your projects. Terminal and side pane (browser, review, files) float above it; move and resize them freely. |
+| **Orchestrator** | Send a message with **Orchestrate** and it becomes a job: a plan, divided into steps, each step built by an agent in its own worktree and reviewed by a different one. The job shows on the Stack and asks you when it needs a decision. Experimental. |
+| **Parliament and swarm** | For a big job, several models open with what they found, answer each other and settle on one plan, with the dissent kept. Nobody votes; a split goes to outside advisors, then to you. The swarm button in the composer runs the quicker contest on any message: plan, debate, vote. |
+| **Release queue** | Open pull requests sorted into Ship together, Needs a fix, Waiting and Drafts. Catches migration numbers that collide, merges the queue in a scratch copy to find exactly what ships cleanly together, and writes the fix brief for an agent. |
+| **Bring your own agents** | Connect Claude Code, Codex, Gemini CLI and OpenCode with their own sign-ins and they appear in the model picker. Conversations run in the CLI, on your plan. API keys work too (OpenRouter, Anthropic, OpenAI, Z.ai, DeepSeek, xAI and more). |
+| **One setup for every agent** | One set of MCP servers, skills, instructions and memory for every CLI. |
+| **Summary at a glance** | One click shows the project, branch, changes, subagents and sources of a conversation. |
+| **Yours, and local** | No xatlas account and no xatlas server. The orchestrator and the release queue never merge, push or deploy. |
+| **Built on ZCode** | Skills, plugins, MCP servers, subagents, hooks and automations come from the ZCode agent runtime. |
 
-## 初始化
+## Build from source
 
-准备 Git、Node.js **24.14.0** 和 pnpm **10.33.2**，版本以 [mise.toml](mise.toml) 为准。以下开发和打包命令均在仓库根目录执行。
+xatlas doesn't ship installers yet. To run it:
 
 ```bash
+git clone https://github.com/betoxf/xatlas.git
+cd xatlas
 pnpm bootstrap
+pnpm dev:desktop:sandbox
 ```
 
-`pnpm bootstrap` 安装 workspace 依赖、准备桌面本地运行资源，再执行 `build:bootstrap`。
+> [!NOTE]
+> `dev:desktop:sandbox` keeps all app data in `~/.zcode-xatlas-dev`, away from any installed ZCode. `dev:desktop:demo` does the same and starts signed out, for UI work with demo data.
 
-Agent CLI 与运行时源码位于 [apps/zcode-cli/](apps/zcode-cli/)，作为普通目录随本仓库一起克隆，无需单独拉取或初始化 Git submodule。
+### Requirements
 
-根据需要选择其他初始化或构建入口：
+- macOS 14 or later. Windows and Linux builds come from upstream and aren't tested here yet.
+- Node.js 24.14 and pnpm 10.33 (see [mise.toml](mise.toml))
+- The CLIs you want to use. The [GitHub CLI](https://cli.github.com) (`gh`) powers the release queue.
 
-| 命令                           | 用途                                                              |
-| ------------------------------ | ----------------------------------------------------------------- |
-| `pnpm install`                 | 安装依赖                                                          |
-| `pnpm prepare:desktop-runtime` | 准备桌面运行资源，默认包含远程资源准备                            |
-| `pnpm prepare:remote-assets`   | 单独准备远程运行资源                                              |
-| `pnpm bootstrap:with-remote`   | 初始化依赖、本地与远程资源，并串行构建相关包；跳过桌面应用 bundle |
-| `pnpm build`                   | 递归执行各 workspace 包的构建脚本，包括包内的资源准备步骤         |
+## Quick start
 
-默认 `bootstrap` 跳过远程资源准备，适合本地桌面开发。使用远程工作区或验证远程发行资源时，再运行对应准备命令。
+1. **Connect your tools.** xatlas opens on one list of tools with one button each. Sign in with the tool's own login and its row turns to **Connected**. There's no xatlas account and no server to set up. See [Connect](docs/xatlas/connect.md).
+2. **Open a project.** It appears as a stack on the home screen; its conversations are the cards.
+3. **Start or open a conversation.** Pick a connected agent in the model picker. Click a front card, or fan the stack open by clicking the cards behind it.
+4. **Bring tools in.** Toggle the terminal or side pane from the conversation header; drag them by their top edge, resize from any edge.
+5. **Hand over a bigger job.** Switch the composer from **Direct** to **Orchestrate** and send. The job appears as a card on the Stack.
+6. **Ship.** Open **Releases** in the top bar, pick the project, and press **Check merge train**.
 
-## 开发与运行
+### Computer use, if you want it
 
-### 桌面版
+[UCU (Universal Computer Use)](https://github.com/betoxf/universal-computer-use) lets agents use your Mac's apps in the background, without moving your pointer. It's optional: **Set Up** in the Connect window installs it, and **Use in all my agents** turns it on for Claude Code, Gemini CLI, OpenCode and xatlas's own agent.
 
-```bash
-pnpm dev:desktop
+## The orchestrator
 
-# 使用测试环境
-pnpm dev:desktop:test
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="images/how-it-works-dark.png">
+    <img src="images/how-it-works.png" alt="How a job travels: message, triage, plan, steps, build, review, final read" width="880">
+  </picture>
+</p>
+
+Every message has a route, chosen in the composer:
+
+<p align="center">
+  <img src="images/orchestrator-route.png" alt="The composer's route menu: Auto, Direct and Orchestrate" width="620">
+</p>
+
+- **Direct** sends it to the conversation, as always. It's the default.
+- **Orchestrate** makes it a job.
+- **Auto** lets a quick read decide between the two.
+
+A job goes through the same steps a small team would:
+
+1. **Triage** says what it understood, asks what is unclear, and sizes the work. Not everything needs a meeting.
+2. **Plan.** Small work gets one planner. Big work goes to the parliament: the models open with their findings and sources, answer each other, and one of them writes the plan the others amend. It stays on what you asked: ideas beyond the request are listed apart and never reach the builders. If the parliament splits, outside advisors read both positions; if they can't settle it either, you do.
+3. **Steps.** The plan is divided. Each step owns its files and knows which steps it waits for.
+4. **Build.** One agent per step, side by side, each in its own git worktree and branch.
+5. **Review.** A different agent reviews each step. Findings go back to the builder, up to three rounds; a dispute goes to the chair.
+6. **Final read.** The chair reads the whole job. It ends as done, or as a question for you on the job's card.
+
+<p align="center">
+  <img src="images/orchestrator-job.png" alt="A job on the Stack, waiting on a decision, next to ordinary project stacks" width="880">
+</p>
+
+Along the way every agent can read the board (the plan, the steps and each other's notes), and code checks run at the end of every turn: a step that edits files it doesn't own is paused until you say so. Who plays each role is stored per project (there is no screen for it yet). The details are in [orchestrator-wiring.md](docs/xatlas/orchestrator-wiring.md) and [orchestrator-engines.md](docs/xatlas/orchestrator-engines.md).
+
+> [!IMPORTANT]
+> The orchestrator is new. It has run whole jobs on a demo project, and several paths have only been exercised by tests. Read [Where it stands](#where-it-stands) before you rely on it.
+
+## How it works
+
+- **Desktop shell:** Electron main process plus a host process for services (files, git, terminals, the release queue, the orchestrator), talking to the React UI over typed RPC channels.
+- **Agent runtime:** the ZCode agent (`zcode app-server`) runs each workspace's conversations; the UI renders its conversation protocol (rows, tool calls, plans, permissions).
+- **CLI agents:** a connected CLI is a model provider. Each turn runs the CLI headless in your project and streams its reply into the conversation, so its own tools, instructions and permissions apply. See [Connect](docs/xatlas/connect.md).
+- **Orchestrator:** a loop in the host that moves on events (a turn ended, you decided). Its only state is an append-only ledger per project, so a job can be rebuilt from the ledger alone. Builders are ordinary conversations in managed worktrees; their commits carry trailers naming the run, the task, the agent and the model.
+- **Release queue:** reads open pull requests with your `gh` login, analyses them (lanes, migrations, overlaps), and checks the merge train by merging each pull request, in order, onto the latest base in a temporary detached worktree. Nothing is pushed and your checkout is never touched.
+
+## Where it stands
+
+xatlas is early, and this section says so plainly.
+
+| Area | State |
+| --- | --- |
+| Stack, floating workspace, Connect, CLI agents | Work in the development build on macOS. |
+| Orchestrator | Experimental. Whole jobs have run on a demo project: a plan, two steps built side by side, reviews, the chair's final read. Not yet exercised in the app: the parliament as a job's planner, Auto, a second review round, a dispute, and carrying on after a restart (a restart makes the job wait for you). |
+| Parliament | The discussion runs from the command line (`pnpm swarm --mode deliberate`) and has settled real questions. A sitting is several top models and about fifteen calls, so it costs more than one planner. |
+| Autonomous builders | Claude Code and Codex run in their own sandboxes: they can write their worktree, temp folders and the repository's git data, and read anything. Gemini CLI and OpenCode have no sandbox, so they can't run commands unattended. |
+| Release queue | Reads, analyses and dry-runs the merge train. It doesn't open, merge or deploy anything. |
+| Phone | The iOS and Android apps and the relay are in the repository, but the phone remote is switched off: upstream changed its relay protocol and xatlas hasn't moved to it yet. |
+| Installers, Windows, Linux | No installers. Windows and Linux are untested. |
+| Checks | On a fresh clone: install, type check and lint pass, and 820 of 821 unit tests pass (the failure and one file that doesn't load are the relay's). Upstream's pre-push hook doesn't pass on this fork yet (see [CONTRIBUTING.md](CONTRIBUTING.md)), and there is no CI. |
+
+The full list of limits is in [orchestrator-wiring.md](docs/xatlas/orchestrator-wiring.md#what-the-app-cant-do-yet).
+
+## xatlas and ZCode
+
+xatlas is a fork of [ZCode](https://github.com/zai-org/ZCode), Z.ai's open-source coding agent harness, and most of the code in this repository is theirs. This version is based on ZCode v3.18.2 (upstream commit `fec97590`), and upstream's history is kept in this repository's history.
+
+| From ZCode | Added by xatlas |
+| --- | --- |
+| The agent runtime: tools, subagents, workflows, hooks, automations | The Stack and the floating workspace |
+| Skills, plugins and MCP servers | The Connect window and conversations through Claude Code, Codex, Gemini CLI and OpenCode |
+| The desktop shell, the conversation UI and the design system | The orchestrator, its engines and the parliament |
+| The provider registry and API-key models | The release queue |
+| Packaging for macOS, Windows and Linux | One shared setup for every CLI |
+| | The phone apps and their relay |
+| | xatlas's own name, identifiers and artwork |
+
+xatlas is an independent project. It is not affiliated with or endorsed by Z.ai, and the ZCode and Z.ai names appear here only to say where the code comes from. [NOTICE.md](NOTICE.md) records the changes and carries ZCode's own notice; [docs/upstream](docs/upstream/README.md) keeps ZCode's README.
+
+## FAQ
+
+### Is this ZCode?
+
+It's a fork of it with a different home screen and a team of agents on top. Anything ZCode's runtime can do (skills, plugins, MCP servers, subagents, hooks) works here. See [xatlas and ZCode](#xatlas-and-zcode).
+
+### Do I need a Z.ai account, or any account?
+
+No. There's no xatlas account. You sign in to the tools you already use (Claude Code, Codex, Gemini CLI, OpenCode) with their own logins, or add an API key.
+
+### What does it cost?
+
+xatlas is free. Conversations and jobs run on your own plans and keys, so a job costs what its agents use. A parliament sitting is the expensive part: several top models, about fifteen calls. Outside advisors are asked only when the parliament splits, and the one that goes through OpenRouter needs your own key.
+
+### Can a job merge, push or deploy by itself?
+
+It isn't built to. A job ends as reviewed branches in their own worktrees, merging is yours, and the release queue only tells you what can ship together. Builders are told to commit and nothing more, but they are agents with a shell: their sandbox limits where they write, and whether it blocks the network hasn't been checked.
+
+### Where does my code go?
+
+To the CLIs and model providers you connect. xatlas has no server of its own. [Privacy and security](#privacy-and-security) says what the code inherited from ZCode sends to Z.ai.
+
+### Does it work on Windows or Linux?
+
+Upstream ZCode builds for both, and xatlas keeps that code, but only macOS has been tested.
+
+## Privacy and security
+
+- There's no xatlas account or server. Your projects, conversations and keys stay on your machine; model calls go to the CLIs and providers you connect.
+- Each CLI keeps its own sign-in. xatlas runs its status and login commands, and never reads or stores the credentials.
+- xatlas adds no telemetry of its own. The code it inherits from ZCode still contacts Z.ai's servers, for example for the provider catalog, the plugin list and help content, and some of those requests can carry a device identifier. ZCode's own notice, kept in [NOTICE.md](NOTICE.md), says what is sent and when; xatlas has not audited that line by line.
+- Agents act with your account's permissions. Unattended builders are confined to their worktree for writing, not for reading, and only with Claude Code and Codex. Review what you run in projects you don't trust.
+- The release queue uses your own GitHub CLI login and never merges or deploys on its own.
+
+Report suspected vulnerabilities privately as described in the [security policy](SECURITY.md).
+
+## Repository map
+
+```text
+packages/desktop        Electron main, preload, renderer entry, packaging
+packages/ui             React UI (Stack, conversation, jobs, releases, settings)
+packages/services       Host services (git, terminals, release queue, orchestrator loop)
+packages/orchestrator   The orchestrator's engines: ledger, routing, division, board, oversight, worktrees
+packages/swarm          The parliament: discussion protocol, advisors, command line
+packages/agent-share    One setup (MCP servers, skills, instructions, memory) for every CLI
+packages/shared         Protocol types and pure logic shared by host and UI
+packages/relay          Relay for the phone apps (switched off for now)
+packages/ios            iOS app (XcodeGen project)
+packages/android        Android app
+packages/provider*      Model provider registry and resolution
+apps/zcode-cli          The agent runtime (app-server, tools, subagents, workflows)
+docs/xatlas             xatlas design notes and roadmap
+docs/upstream           Upstream ZCode README (full developer and packaging guide)
 ```
 
-`pnpm dev:desktop` 默认等同于 `pnpm dev:desktop:prod`，使用生产服务配置。启动脚本会准备本地运行资源、构建桌面 Agent，再启动 Electron 和源码监听。
+## Project documentation
 
-需要独立开发数据目录时，可设置 `ZCODE_DATA_BASE_DIR`。例如在 macOS / Linux 中：
+| Document | Purpose |
+| --- | --- |
+| [Connect](docs/xatlas/connect.md) | Connecting your tools, conversations through the CLIs, and UCU |
+| [Orchestrator: wiring](docs/xatlas/orchestrator-wiring.md) | How a message becomes a job, the team's rules, and what the app can't do yet |
+| [Orchestrator: engines](docs/xatlas/orchestrator-engines.md) | The ledger, routing, division, the board, oversight and worktrees |
+| [Swarm and parliament](docs/xatlas/swarm.md) | Several models plan one task: a contest with a vote, or a discussion without one |
+| [Shared agents](docs/xatlas/shared-agents.md) | One setup for every coding agent |
+| [Roadmap](docs/xatlas/pipeline-vision.md) | What is built and what comes next |
+| [Phone and releases](docs/xatlas/mobile-and-releases.md) | The phone apps and one release for desktop and mobile |
+| [Upstream guide](docs/upstream/README.md) | ZCode's development, configuration and packaging guide |
+| [Contributing](CONTRIBUTING.md) | Setup, checks and pull requests |
+| [Security](SECURITY.md) | Boundaries and private reporting |
 
-```bash
-ZCODE_DATA_BASE_DIR="$HOME/.zcode-dev-home" pnpm dev:desktop:test
-```
+## Contributing
 
-### 远程功能（SSH/WSL）
+Issues and focused pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
-先执行 `pnpm bootstrap:with-remote` 准备远程资源（mock-cdn），再 `pnpm dev:desktop`；连接远程项目时资源选择「本地下载后上传」。开发态资源取自本地 `packages/desktop/mock-cdn` 和本地构建产物，经 SFTP 上传到远程，不访问 CDN。
+## Acknowledgements
 
-### Web 开发
+- [ZCode](https://github.com/zai-org/ZCode) by Z.ai, which xatlas is built on and which did the hardest parts first
+- [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli) and [OpenCode](https://github.com/anomalyco/opencode), the agents xatlas runs
+- [UCU](https://github.com/betoxf/universal-computer-use) and [agent-desktop](https://github.com/vercel-labs/agent-desktop), for computer use
+- The open-source projects listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 
-修改 Web 或后端源码时，使用开发模式：
+xatlas is an independent project by betoxf and is not affiliated with, endorsed by, or sponsored by Z.ai, Anthropic, OpenAI or Google. Product names and logos belong to their owners and are used only to identify the tools you connect.
 
-```bash
-pnpm dev:web
+## License
 
-# 指定后端工作区（macOS / Linux）
-ZCODE_SERVER_WORKSPACE=/path/to/project pnpm dev:web
-```
-
-该命令同时启动 Web 开发服务器（默认 `http://localhost:5173`）和后端（默认 `http://localhost:3030`）；浏览器访问前者。`/ws` 和一般 `/api` 请求代理到本地后端，`/api/v1/oauth/token` 单独代理到当前配置的产品服务。
-
-Agent 源码修改后，执行 `pnpm --filter @zcode/cli... build` 并重启服务。需要验证完整发行包时，按下方“ZCode 命令行版”打包章节解压运行。
-
-### ZCode 命令行版
-
-命令行发行包包含 TUI、Web 和 Agent，统一使用 `zcode` 启动：无参数进入 TUI；第一个参数为 `--web` 时启动 Web；其他参数交给现有 Agent CLI 处理。两种模式都在本机运行，无需 Electron。
-
-```bash
-# 默认进入终端交互界面
-zcode
-
-# 启动 Web 界面
-zcode --web
-
-# 指定项目和端口，不自动打开浏览器
-zcode --web --workspace /path/to/project --port 3030 --no-open
-
-# 查看 CLI 或 Web 参数
-zcode --help
-zcode --web --help
-```
-
-Web 模式默认工作目录为当前目录，监听 `127.0.0.1`，默认不启用访问令牌，自动选择空闲端口并打开浏览器。访问终端输出的地址，按 `Ctrl+C` 停止服务。局域网访问可使用 `--host 0.0.0.0`；监听非本机地址时默认生成访问令牌，使用终端输出的带令牌链接。可通过 `--token` 指定令牌或 `--no-token` 关闭令牌认证。
-
-直接启动通用 Web 服务的 HTTP 入口时，通过 `ZCODE_SERVER_AUTH_TOKEN` 配置 API／WebSocket 认证；通过程序接口创建服务时，使用 `authToken` 选项。
-
-构建方式见下方打包章节。`pnpm build:zcode` 只生成发行包，不会替换 `PATH` 中已有的 `zcode`。如果命令仍指向旧安装或其他源码目录，macOS / Linux 可用 `command -v zcode` 检查，Windows 可用 `where.exe zcode` 检查。
-
-### CLI 源码开发
-
-CLI 的模型配置、非交互调用、工具与扩展、批量评测和轨迹记录见 [CLI 使用指南](apps/zcode-cli/docs/usage/README.md)。
-
-直接开发 TUI 或 Agent 时，运行源码入口：
-
-```bash
-pnpm --filter @zcode/cli dev --help
-pnpm --filter @zcode/cli dev
-
-# 构建 CLI 及其 workspace 依赖
-pnpm --filter @zcode/cli... build
-node apps/zcode-cli/packages/cli/dist/zcode.cjs --help
-```
-
-这个入口直接运行 Agent CLI，不经过发行包的 `--web` 分流。开发 Web 用 `pnpm dev:web`；验证统一的 `zcode` 命令，用下方解压后的 `bin/zcode.mjs`。
-
-### UI Plugin 开发
-
-参见 [UI Plugin：能力、API 与调试](UI_PLUGIN.md)，从 Excalidraw 的画布协作示例开始，了解插件安装更新、页面 API 和宿主联调入口。
-
-**向 `zcode-plugins` 提交插件 PR 时，必须在 PR 模板中声明是否为 UI Plugin，并填写插件名称。** 判断标准见[提交 PR 时声明插件类型](UI_PLUGIN.md#提交-pr-时声明插件类型)。
-
-## 配置
-
-根目录 [.env.example](.env.example) 提供服务地址与构建配置示例，可按需复制到 `.env`，本地覆盖放入 `.env.local`。Desktop 的开发环境通过 `dev:desktop:test` / `dev:desktop:prod` 选择。
-
-| 配置                                 | 用途                                             |
-| ------------------------------------ | ------------------------------------------------ |
-| `ZCODE_DATA_BASE_DIR`                | 应用数据基目录，数据写入其下的 `.zcode/`         |
-| `ZCODE_SERVER_WORKSPACE`             | Web 后端的工作区路径                             |
-| `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` | 本地 Provider 配置文件路径；未设置时使用内置配置 |
-| `ZCODE_DIST_BASE_URL`                | 命令行安装脚本使用的下载根地址                   |
-
-运行时变量可在启动命令的环境中显式设置。随客户端发布的默认配置见 [config/README.md](config/README.md)。
-
-## 打包
-
-第三方声明生成、发行校验流程及声明在发行物中的位置见 [third-party/README.md](third-party/README.md)。
-
-### 桌面版
-
-```bash
-pnpm bundle:desktop
-
-# 指定目标平台与 CPU 架构
-pnpm bundle:desktop -- --os win --arch x64
-
-pnpm bundle:desktop -- --help
-```
-
-默认目标为 macOS arm64，默认输出目录为 `packages/desktop/dist/`。`--os` 支持 `mac`、`win`、`linux`，`--arch` 支持 `x64`、`arm64`；实际打包与签名需要目标平台对应的工具和配置。
-
-安装：双击打开产物 DMG，将 ZCode 拖入"应用程序"。本地构建未签名，首次打开若被 macOS 拦截，执行：
-
-```bash
-sudo xattr -rd com.apple.quarantine /Applications/ZCode.app
-```
-
-### ZCode 命令行版
-
-构建入口为 `pnpm build:zcode`。脚本会依次构建 CLI/TUI、后端和 Web，收集 TUI 的原生库、worker 与运行时依赖，再组装发行包；运行发行包仍需要 Node.js，版本以 `mise.toml` 为准。
-
-打包前必须设置下载根地址 `ZCODE_DIST_BASE_URL`（可放在 `.env`、`.env.local` 或环境变量中），也可以通过 `--base-url` 传入。以下地址是占位示例，发布时替换为实际托管地址：
-
-```bash
-pnpm build:zcode --base-url https://downloads.example.com/zcode/
-
-# 已配置 ZCODE_DIST_BASE_URL 时
-pnpm build:zcode
-
-# 仅重新组包，复用已有的 Agent、后端和 Web 构建产物
-pnpm build:zcode --skip-build
-
-# 查看版本、输出目录等可选参数
-pnpm build:zcode --help
-```
-
-默认版本取根目录 `package.json`，输出目录为 `dist/zcode/`：
-
-- `releases/<version>/zcode-<version>.tar.gz`：运行包。
-- `releases/<version>/sha256.txt`：校验摘要。
-- `latest.json`、`install.sh`：版本索引和安装脚本。
-
-完整目录可上传到配置的下载根地址。安装脚本从该地址下载运行包，默认安装到 `~/.zcode/runtime`，并在 `~/.local/bin` 创建 `zcode` 命令。安装目录可通过 `ZCODE_DIST_HOME` 修改，命令目录可通过 `ZCODE_DIST_BIN_DIR` 修改。
-
-旧 Lite 用户需要改用上述构建命令、环境变量和新的安装脚本。新安装不会删除旧 Lite 目录，也不会迁移或删除已有会话数据。
-
-本地调试打包产物时，可直接解压运行，无需上传或安装：
-
-```bash
-zcode_version=$(node -p "require('./dist/zcode/latest.json').version")
-mkdir -p dist/zcode/debug
-tar -xzf "dist/zcode/releases/$zcode_version/zcode-$zcode_version.tar.gz" \
-  -C dist/zcode/debug
-# 默认启动 TUI
-node dist/zcode/debug/zcode/bin/zcode.mjs
-
-# 启动 Web
-node dist/zcode/debug/zcode/bin/zcode.mjs --web \
-  --workspace "$PWD" --port 3030 --no-open
-```
-
-浏览器打开 `http://127.0.0.1:3030`，即可验证同一后端服务托管 Web 页面和 Agent 的完整链路。该端口需要空闲；如正在运行 `pnpm dev:web`，可改用其他 `--port`。
-
-## 仓库结构
-
-| 目录                                                 | 职责                                       |
-| ---------------------------------------------------- | ------------------------------------------ |
-| `packages/desktop`                                   | Electron Main、Host、Renderer 与桌面打包   |
-| `packages/web`                                       | Web 客户端                                 |
-| `packages/server`                                    | HTTP / WebSocket 服务与远程连接            |
-| `packages/zcode-server-cli`                          | 独立 Server 启动与进程管理                 |
-| `packages/ui`                                        | 共享 React 组件、hooks 与 Zustand 状态     |
-| `packages/services`                                  | 业务服务与持久化                           |
-| `packages/shared`、`packages/rpc`、`packages/client` | 共享协议和类型、RPC 框架、Agent 客户端 SDK |
-| `packages/provider`、`packages/provider-node`        | Provider 公共能力与 Node 实现              |
-| `apps/zcode-cli`                                     | Agent CLI、TUI、运行时与工具               |
-| `scripts`、`config`、`third-party`                   | 构建维护脚本、内置配置与第三方声明材料     |
-
-## 项目声明
-
-功能与优惠范围、维护规则、执行与数据风险，以及许可和第三方版权说明，详见 [NOTICE.md](NOTICE.md)。
+Apache-2.0, the same license as ZCode. See [LICENSE](LICENSE), [NOTICE.md](NOTICE.md) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

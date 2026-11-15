@@ -63,6 +63,43 @@ export type { MediaPreviewPreparation } from "./media-preview/mediaPreview.js";
 
 // Git service — IGitService is both a type (interface) and value (descriptor)
 export { IGitService } from "./git/git.js";
+export { IReleaseQueueService } from "./release-queue/releaseQueue.js";
+export { ISwarmService } from "./swarm/swarm.js";
+export { IOrchestratorService } from "./orchestrator/orchestrator.js";
+export type {
+  OrchestratorDecision,
+  OrchestratorJobPhase,
+  OrchestratorJobsSnapshot,
+  OrchestratorJobView,
+  OrchestratorNote,
+  OrchestratorProject,
+  OrchestratorRouteRequest,
+  OrchestratorRouteResult,
+  OrchestratorStepView,
+} from "./orchestrator/orchestrator.js";
+export { IConnectionsService } from "./connections/connections.js";
+export type {
+  ConnectionAccount,
+  ConnectionId,
+  ConnectionStatus,
+  UsageWindow,
+} from "./connections/connections.js";
+export type {
+  AvailableAgent,
+  SwarmEvent,
+  SwarmMember,
+  SwarmMode,
+  SwarmResult,
+  SwarmRunSnapshot,
+  SwarmStartRequest,
+} from "./swarm/swarm.js";
+export type {
+  ReleaseQueueRequest,
+  ReleaseQueueResult,
+  ReleaseQueueUnavailableReason,
+  ReleaseTrainOutcome,
+  ReleaseTrainRequest,
+} from "./release-queue/releaseQueue.js";
 export { IGitCheckpointService } from "./git/gitCheckpoint.js";
 
 // System service — ISystemService is both a type (interface) and value (descriptor)

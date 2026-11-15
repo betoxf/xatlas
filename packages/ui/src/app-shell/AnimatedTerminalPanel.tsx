@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { RefObject } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import type { IServiceAccessor } from "@zcode/services";
 import { Terminal } from "@/Terminal.js";
@@ -16,6 +16,9 @@ export function AnimatedTerminalPanel({
   isVisible,
   isWindowsDesktop,
   frameClassName = "rounded-xl border border-border",
+  panelClassName,
+  frameStyle,
+  frameOverlay,
   panelRef,
   panelElementRef,
   onClose,
@@ -28,6 +31,11 @@ export function AnimatedTerminalPanel({
   isVisible: boolean;
   isWindowsDesktop?: boolean;
   frameClassName?: string;
+  /** Classes on the resizable panel itself, e.g. an inset that floats the frame. */
+  panelClassName?: string;
+  /** Style and extra children for the frame, e.g. to float it as a window. */
+  frameStyle?: CSSProperties;
+  frameOverlay?: ReactNode;
   panelRef: RefObject<PanelImperativeHandle | null>;
   panelElementRef: RefObject<HTMLDivElement | null>;
   onClose: () => void;
@@ -117,11 +125,13 @@ export function AnimatedTerminalPanel({
         className={cn(
           "transition-opacity duration-200 ease-out",
           isVisible ? "opacity-100" : "pointer-events-none opacity-0",
+          panelClassName,
         )}
       >
         <div
           data-workspace-terminal-frame="true"
           className={cn("h-full overflow-hidden bg-background", frameClassName)}
+          style={frameStyle}
         >
           {hasRenderedTerminal ? (
             <div aria-hidden={!isVisible} className="h-full">
@@ -147,6 +157,7 @@ export function AnimatedTerminalPanel({
               </ScopedErrorBoundary>
             </div>
           ) : null}
+          {frameOverlay}
         </div>
       </ResizablePanel>
     </>

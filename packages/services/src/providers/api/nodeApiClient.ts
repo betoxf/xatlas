@@ -31,6 +31,8 @@ interface NodeApiClientOptions {
     headers: Headers,
   ) => Promise<{ url: string; authorization: string; emptyBodyMeansInvalid: boolean } | null>;
   resolveZCodeEndpointOrigin?: () => Promise<string> | string;
+  /** True when nobody is signed in to the endpoint, so requests shouldn't identify the device. */
+  isAnonymous?: () => Promise<boolean>;
   /** 宿主内存里的实时界面语言；同步读取，未注入或无值时 X-Client-Language 回退进程 Intl locale。 */
   resolveClientLanguage?: () => string | undefined;
 }
@@ -183,6 +185,7 @@ export class NodeApiClient implements ApiClient {
   private readonly fetchImpl?: typeof fetch;
   private readonly resolveAssociatedCredentialRefresh?: NodeApiClientOptions["resolveAssociatedCredentialRefresh"];
   private readonly resolveZCodeEndpointOrigin?: () => Promise<string> | string;
+  private readonly isAnonymous?: () => Promise<boolean>;
   private readonly resolveClientLanguage?: NodeApiClientOptions["resolveClientLanguage"];
   private readonly onZcodeJwtInvalid?: (input: string | URL, headers: Headers) => void;
   private readonly isZcodeJwtRequest?: NodeApiClientOptions["isZcodeJwtRequest"];
@@ -210,6 +213,7 @@ export class NodeApiClient implements ApiClient {
       options.businessUnauthorizedObservationTimeoutMs ??
       DEFAULT_BUSINESS_UNAUTHORIZED_OBSERVATION_TIMEOUT_MS;
     this.resolveZCodeEndpointOrigin = options.resolveZCodeEndpointOrigin;
+    this.isAnonymous = options.isAnonymous;
     this.resolveClientLanguage = options.resolveClientLanguage;
   }
 
@@ -328,6 +332,7 @@ export class NodeApiClient implements ApiClient {
         ),
       );
       if (isRequestForEndpoint(requestInput, activeEndpointOrigin)) {
+        if (await this.isAnonymous?.()) requestHeaders.delete("X-Device-Mid");
         // 调试说明：这里只记录 header key，避免 Authorization / token 等敏感值落盘。
         log.debug(undefined, "zcode endpoint request headers prepared", {
           headerKeys: readHeaderKeys(requestHeaders),

@@ -108,6 +108,10 @@ export { createTopicResourceRelayChannel } from "./zcode-agent/topicResourceRela
 
 export { createFileService } from "./file/fileService.js";
 export {
+  ensurePhoneRemoteServerCertificate,
+  type PhoneRemoteServerCertificate,
+} from "./phone-remote/serverCertificate.js";
+export {
   attributeHostProcessTree,
   createProcessResourceSampler,
   createProcessResourceTableReader,
@@ -416,6 +420,16 @@ import { ServiceCollection } from "./collection.js";
 import { IFileService } from "./file/file.js";
 import { IMediaPreviewService } from "./media-preview/mediaPreview.js";
 import { IGitService } from "./git/git.js";
+import { IReleaseQueueService } from "./release-queue/releaseQueue.js";
+import { createReleaseQueueService } from "./release-queue/releaseQueueService.js";
+import { ISwarmService } from "./swarm/swarm.js";
+import { IConnectionsService } from "./connections/connections.js";
+import { createConnectionsService } from "./connections/connectionsService.js";
+import { createSwarmService } from "./swarm/swarmService.js";
+import { observeAppOperation } from "#src/app-control/observation.js";
+import { createNodeOrchestratorHost } from "./orchestrator/nodeHost.js";
+import { IOrchestratorService } from "./orchestrator/orchestrator.js";
+import { createOrchestratorService } from "./orchestrator/orchestratorService.js";
 import { IGitCheckpointService } from "./git/gitCheckpoint.js";
 import { ISystemService } from "./system/system.js";
 import { ITerminalService } from "./terminal/terminal.js";
@@ -1475,6 +1489,8 @@ export function createLocalServices(options: {
       | null;
   } = { current: null };
   const apiClient = createNodeApiClient({
+    // Without a Z.ai sign-in the device id stays here: catalog requests don't need it.
+    isAnonymous: async () => !(await credentialService.load("zcodejwttoken"))?.trim(),
     fetchImpl: hostApiNetworkTransport.fetch,
     resolveAssociatedCredentialRefresh: async (input, headers) => {
       const material = await resolveAssociatedOAuthCredentialRequest({
@@ -2965,6 +2981,7 @@ export function createLocalServices(options: {
       createMarketingTouchService({
         apiClient,
         getToken: () => credentialService.load("zcodejwttoken"),
+        requireAccount: true,
         getDeviceMid: () => options?.agentTelemetry?.getDeviceMid?.(),
         baseUrl: buildRuntimeZCodeApiUrl(process.env, "/"),
         appVersion: ZCODE_VERSION,
@@ -2990,6 +3007,35 @@ export function createLocalServices(options: {
       }),
     )
     .register(IGitService, gitService)
+    .register(IReleaseQueueService, createReleaseQueueService())
+    .register(ISwarmService, createSwarmService())
+    .register(
+      IOrchestratorService,
+      createOrchestratorService({
+        dataDir: join(resolveAppConfigDir(), "orchestrator"),
+        host: createNodeOrchestratorHost({
+          isLocalHost: isLocalProjectHost,
+          worktrees: managedWorktreeService,
+          agent: zcodeAgentService,
+          observe: (operation, signal) =>
+            observeAppOperation(zcodeAgentService, operation, signal, "xatlas-orchestrator"),
+          providerSettings: providerRuntime.providerSettings,
+          tasks: {
+            reserve: async (input) => {
+              (await taskIndexRepo.getProjectRepository()).reserveCreatedTask(input);
+            },
+            release: async (task) => {
+              (await taskIndexRepo.getProjectRepository()).releaseReservedTask({ task });
+            },
+            rename: (task) => zcodeTaskService.renameTask(task),
+          },
+        }),
+      }),
+    )
+    .register(
+      IConnectionsService,
+      createConnectionsService({ providerSettings: providerRuntime.providerSettings }),
+    )
     .register(IManagedWorktreeService, managedWorktreeService)
     .register(IGitCheckpointService, gitCheckpointService)
     .register(ISystemService, systemService)

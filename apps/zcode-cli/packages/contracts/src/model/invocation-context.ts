@@ -1,6 +1,7 @@
 import type { RequestVerificationReason } from "@zcode/shared";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ZCodeProviderAccountAccess } from "@zcode/shared";
+import type { CollaborationMode } from "../interfaces/session.port.js";
 import type { ModelApiCallObservation } from "../telemetry/index.js";
 import type { TraceContext } from "../tracing/tracer.js";
 import type {
@@ -62,6 +63,8 @@ export function isModelRequestSessionFeature(value: unknown): value is ModelRequ
  */
 export interface ModelInvocationContext {
   metadata?: Record<string, unknown>;
+  /** The conversation this call serves; models that are CLI agents run inside it. */
+  agentConversation?: ModelAgentConversation;
   modelCall?: ModelApiCallObservation;
   modelRequestSessionType?: ModelRequestSessionType;
   /**
@@ -93,6 +96,34 @@ export interface ModelInvocationContext {
     requestAuth?: ModelRequestAuth;
   }>;
 }
+
+export interface ModelAgentConversation {
+  sessionId: string;
+  workingDirectory: string;
+  mode: CollaborationMode;
+  /** Puts a tool call the agent wants to make to the person; absent where nobody can answer. */
+  requestToolApproval?: ModelAgentToolApprovalPort;
+}
+
+export interface ModelAgentToolApprovalRequest {
+  /** The agent's own id for the call. */
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  /** Why the agent asks, when it says. */
+  reason?: string;
+  signal?: AbortSignal;
+}
+
+/** `input` is what the person approved, which may differ from what was asked. */
+export type ModelAgentToolApproval =
+  | { allowed: true; input: unknown }
+  | { allowed: false; reason: string };
+
+/** Whatever stops the question from being answered is a refusal, not an approval. */
+export type ModelAgentToolApprovalPort = (
+  request: ModelAgentToolApprovalRequest,
+) => Promise<ModelAgentToolApproval>;
 
 /** Adapter 为单个物理请求 attempt 使用的动态鉴权材料。 */
 export interface ModelRequestAuth {

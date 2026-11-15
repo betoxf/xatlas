@@ -1,3 +1,4 @@
+export * from "./cli-agents.js";
 export { cloudContentPayloadSchema, contentBundleSchema } from "./cloudContent.js";
 export * from "./networkCapture.js";
 export type {
@@ -337,6 +338,7 @@ export * from "./process-names.js";
 export * from "./mcp.js";
 export * from "./runtime-tool-runtime.js";
 export * from "./git.js";
+export * from "./release-queue.js";
 export * from "./bots.js";
 export * from "./assistant-message-parts.js";
 export * from "./zcodePersistedMessageMerge.js";
@@ -418,5 +420,6 @@ export {
   isRequestSecurityFailure,
 } from "./request-security-edition/policy.js";
 export * from "./request-security-edition/verification-policy.js";
+export * from "./productIdentity.js";
 
 export * from "./conversation-share-tool-presentation.js";
