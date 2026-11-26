@@ -19,8 +19,8 @@ Agents         built-in agent (API models) · CLI agents (Claude Code, Codex, Ge
 
 Done: Claude Code, Codex, Gemini CLI and OpenCode run conversations with your own sign-ins.
 Approving a single command works with Claude Code and Codex. See [connect.md](connect.md).
-Claude Code's and Codex's tool calls show as cards with their results.
-Next: attachments, and tool cards for Gemini CLI and OpenCode.
+Every CLI agent's tool calls show as cards with their results.
+Next: attachments.
 
 ## Router: roles, not one model
 

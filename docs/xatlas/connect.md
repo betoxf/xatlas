@@ -44,11 +44,12 @@ A connected agent appears in the model picker as a provider: its default model p
 it offers. Claude Code and Codex list their models themselves, so the list follows their updates. Choosing one runs the turn in that CLI, in the project's folder, on your plan.
 
 - **It's the CLI's own agent.** Its tools, instructions, skills, MCP servers and permissions
-  apply, exactly as in a terminal. With Claude Code and Codex, each tool call it makes is a
-  card in the conversation with its result (cut to 4,000 characters), saved and replayed like
-  any other card but never run by xatlas. Codex's cards are Shell, Edit, its MCP tools and
-  WebSearch; Claude Code's calls inside a subagent stay in the thinking block. Gemini CLI's and
-  OpenCode's work still appears in the thinking block. Its answer is the reply.
+  apply, exactly as in a terminal. Each tool call it makes is a card in the conversation, named
+  for the agent and what the call touched, with its result (cut to 4,000 characters), saved and
+  replayed like any other card but never run by xatlas. Codex's cards are Shell, Edit, its MCP
+  tools and WebSearch; Claude Code's calls inside a subagent stay in the thinking block. OpenCode
+  reports a call once it has finished, so its card appears with the result. Its answer is the
+  reply.
 - **Permissions.** The conversation's mode decides what the agent may do, and the CLI's own
   rules and sandbox enforce it:
 
@@ -75,9 +76,7 @@ it offers. Claude Code and Codex list their models themselves, so the list follo
   and leave no session behind. A CLI takes one prompt, so a call's system message goes at the top
   of it. Calls that replay the conversation (compaction, memory extraction, goal checks) leave it
   out: there it's xatlas's own system prompt, which a CLI doesn't use.
-- **Not yet:** attachments, and tool cards for Gemini CLI and OpenCode. The cards are
-  labelled as an MCP server's, because they reuse the runtime's cards for provider-run tools.
-  Stop ends the CLI and the commands it started.
+- **Not yet:** attachments. Stop ends the CLI and the commands it started.
 
 ### Asking from a CLI
 
