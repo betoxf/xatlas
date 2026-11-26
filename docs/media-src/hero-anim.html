@@ -1,0 +1,43 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+  /* The frame around the animated hero. Rendered three ways by query string:
+     (none) / ?dark = background, text and an empty window; ?mask = the window's shape in white on
+     black; ?lights = only the window's three dots on a transparent page. The recorded app frames
+     are laid into the window with ffmpeg; ?lights draws the dots on top. */
+  html, body { margin: 0; width: 1100px; height: 790px; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  body { position: relative; color: #0d0d0f; background:
+    radial-gradient(900px 600px at 10% 0%, #c7d2fe 0%, transparent 60%),
+    radial-gradient(800px 600px at 100% 100%, #ddd6fe 0%, transparent 60%),
+    linear-gradient(135deg, #eef2ff, #f5f3ff 55%, #faf5ff); }
+  body.dark { color: #f5f5f7; background:
+    radial-gradient(900px 600px at 10% 0%, #312e81 0%, transparent 60%),
+    radial-gradient(800px 600px at 100% 100%, #4c1d95 0%, transparent 60%),
+    linear-gradient(135deg, #0b1023, #140f2e 55%, #1a0f2b); }
+  h2 { position: absolute; left: 50px; top: 34px; margin: 0; font-size: 40px; letter-spacing: -.035em; line-height: 1.05; font-weight: 760; }
+  .sub { position: absolute; left: 50px; top: 88px; width: 620px; margin: 0; font-size: 16px; line-height: 1.45; opacity: .72; }
+  .steps { position: absolute; right: 50px; top: 44px; display: flex; flex-direction: column; gap: 7px; align-items: flex-end; }
+  .steps span { font-size: 12.5px; font-weight: 600; padding: 5px 11px; border-radius: 999px; background: rgba(255,255,255,.7);
+    box-shadow: 0 0 0 .5px rgba(0,0,0,.1); letter-spacing: -.01em; }
+  body.dark .steps span { background: rgba(255,255,255,.08); box-shadow: 0 0 0 .5px rgba(255,255,255,.16); }
+  .steps b { opacity: .45; font-weight: 650; margin-right: 6px; }
+  .window { position: absolute; left: 50px; top: 168px; width: 1000px; height: 617px; border-radius: 14px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(30,20,80,.28), 0 0 0 .5px rgba(0,0,0,.14); background: #f8f8f8; }
+  body.dark .window { box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 .5px rgba(255,255,255,.14); }
+  .lights { position: absolute; left: 66px; top: 185px; display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  body.mask { background: #000; } body.mask h2, body.mask .sub, body.mask .steps, body.mask .lights { display: none; }
+  body.mask .window { background: #fff; box-shadow: none; }
+  body.dots { background: transparent; } body.dots h2, body.dots .sub, body.dots .steps, body.dots .window { display: none; }
+  body.bg .lights { display: none; }
+</style></head><body class="bg">
+<h2>The full engineering harness.</h2>
+<p class="sub">All your AI subscriptions in one place. Open a conversation, pick Claude Code, Codex, Gemini or OpenCode, or hand the job to a team of agents that plans, builds and reviews it.</p>
+<div class="steps"><span><b>1</b>Open a conversation</span><span><b>2</b>Pick any agent you pay for</span><span><b>3</b>Ask, or make it a job</span></div>
+<div class="window"></div>
+<div class="lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+<script>
+  const q = location.search;
+  if (q.includes('dark')) document.body.classList.add('dark');
+  if (q.includes('mask')) document.body.className = 'mask';
+  if (q.includes('lights')) document.body.className = 'dots';
+</script>
+</body></html>

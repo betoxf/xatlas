@@ -17,6 +17,9 @@ import { persistTextBlockParts } from "../methods/message-persistence.js";
 
 /** 卡片走 MCP 渲染器：服务端本身就是以 MCP 执行这些内置工具。 */
 const PROVIDER_TOOL_DISPLAY_SERVER_NAME = "server";
+/** 由编码 CLI（Claude Code、Codex）执行的调用：界面按此前缀显示 CLI 名称而不是 MCP。 */
+const PROVIDER_TOOL_EXECUTOR_PREFIX = "agent:";
+const PROVIDER_TOOL_SUBJECT_MAX_CHARS = 240;
 
 /** 结果到达前流就结束、失败或被取消时写入的结果；语义与本地工具的中断结果一致。 */
 export const PROVIDER_TOOL_INTERRUPTED_RESULT =
@@ -96,7 +99,7 @@ export async function startProviderToolCard(
   startedAt: number,
 ): Promise<void> {
   const toolCallId = toolCall.id as ToolCallId;
-  const display = providerToolDisplay(toolCall.name);
+  const display = providerToolDisplay(toolCall);
   await appendEvent(runtime, context, SessionEventType.ToolCallScheduled, {
     toolCallId,
     assistantMessageId: context.assistantMessageId,
@@ -124,7 +127,7 @@ export async function finishProviderToolCard(
   const { toolCall, result } = round;
   const toolCallId = toolCall.id as ToolCallId;
   const endedAt = Date.now();
-  const display = providerToolDisplay(toolCall.name);
+  const display = providerToolDisplay(toolCall);
   const input = toRecord(toolCall.input);
   await runtime.persistPart(
     {
@@ -169,8 +172,17 @@ export async function finishProviderToolCard(
   });
 }
 
-function providerToolDisplay(toolName: string) {
-  return { kind: "mcp_tool" as const, serverName: PROVIDER_TOOL_DISPLAY_SERVER_NAME, toolName };
+function providerToolDisplay(toolCall: Pick<ModelToolCall, "name" | "executor">) {
+  const executor = toolCall.executor?.name.trim();
+  const subject = toolCall.executor?.subject?.trim().slice(0, PROVIDER_TOOL_SUBJECT_MAX_CHARS);
+  return {
+    kind: "mcp_tool" as const,
+    serverName: executor
+      ? `${PROVIDER_TOOL_EXECUTOR_PREFIX}${executor}`
+      : PROVIDER_TOOL_DISPLAY_SERVER_NAME,
+    toolName: toolCall.name,
+    ...(executor && subject ? { description: subject } : {}),
+  };
 }
 
 function toRecord(value: unknown): Record<string, unknown> {

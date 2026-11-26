@@ -346,6 +346,11 @@ export interface ModelToolCall {
   name: string;
   input: unknown;
   providerExecuted?: boolean;
+  /**
+   * For a provider-executed call: who ran it (a coding CLI such as "Claude Code") and what it was
+   * about (a path, a command). The card shows these instead of a generic server label.
+   */
+  executor?: { readonly name: string; readonly subject?: string };
   /** 本次模型响应内的块到达序号，与 text / reasoning 块共用序号空间；旧数据可缺失。 */
   blockIndex?: number;
 }

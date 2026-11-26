@@ -1,10 +1,10 @@
 <div align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/brand/xatlas-logo-dark.png">
-    <img src="assets/brand/xatlas-logo.png" alt="xatlas: every project, agent and release on one desk" width="760">
+    <img src="assets/brand/xatlas-logo.png" alt="xatlas: the full engineering harness" width="760">
   </picture>
 
-  <p><strong>Every project, agent and release on one desk.</strong></p>
+  <p><strong>The full engineering harness. All your AI subscriptions in one place.</strong></p>
   <p>A desktop home for AI-assisted development. Your conversations stack up per project, any coding agent or model works in them, and a big request can become a job that a team of agents plans, builds and reviews.</p>
   <p>Built on <a href="https://github.com/zai-org/ZCode">ZCode</a> by Z.ai. Free and open source under Apache-2.0.</p>
 
@@ -33,8 +33,8 @@
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="images/hero-dark.png">
-    <img src="images/hero-light.png" alt="The xatlas Stack: projects as stacks of conversation cards" width="880">
+    <source media="(prefers-color-scheme: dark)" srcset="images/hero-dark.gif">
+    <img src="images/hero.gif" alt="xatlas in use: open a conversation from the Stack, switch it from Codex to Claude Code, type a request, make it an orchestrated job, and open a finished job" width="880">
   </picture>
 </p>
 

@@ -4,9 +4,8 @@ import {
   type CliAgentDialogueOptions,
   type CliAgentQuestion,
 } from "./dialogue.js";
-import { record, string, type CliAgentEvent, type JsonRecord } from "./events.js";
+import { codexCommandLine, record, string, type CliAgentEvent, type JsonRecord } from "./events.js";
 import {
-  codexCommandLine,
   decodeCodexAppServerNotification,
   describeCodexFileChanges,
 } from "./codex-app-server-events.js";

@@ -26,7 +26,7 @@ import {
   type CliAgentRun,
 } from "./commands.js";
 import type { CliAgentDialogue } from "./dialogue.js";
-import { decodeCliAgentLine } from "./events.js";
+import { decodeCliAgentLine, describeToolUse, toolSubject } from "./events.js";
 import { CLAUDE_STAGING_EXCLUDE, excludeFromGit, readCliAgentGitDirs } from "./git.js";
 import { runCliAgentProcess, type CliAgentSpawn, type CliAgentStdin } from "./process.js";
 import { createCliAgentSessionStore, type CliAgentSessionStore } from "./sessions.js";
@@ -58,6 +58,21 @@ export interface CliAgentModelOptions {
 }
 
 let defaultSessions: CliAgentSessionStore | undefined;
+
+/** A path inside the project shown from the project's folder, as the person knows it. */
+function projectRelative(subject: string | undefined, cwd: string): string | undefined {
+  if (!subject) return undefined;
+  const root = cwd.endsWith("/") ? cwd : `${cwd}/`;
+  return subject.split(root).join("");
+}
+
+/** How each CLI is named on the cards of the calls it makes. */
+const CLI_AGENT_NAMES: Record<CliAgentId, string> = {
+  claude: "Claude Code",
+  codex: "Codex",
+  gemini: "Gemini CLI",
+  opencode: "OpenCode",
+};
 
 function conversationTurns(messages: readonly ModelInputMessage[]): ModelInputMessage[] {
   return messages.filter(
@@ -187,6 +202,9 @@ async function* streamCliAgent(
 
   yield { type: "start" };
   let wroteText = false;
+  // Calls shown as cards, by id: a result is only sent for a card that was opened.
+  const cards = new Map<string, string>();
+  let sawCards = false;
   const lines = runCliAgentProcess(
     buildCliAgentCommand(run),
     {
@@ -209,6 +227,46 @@ async function* streamCliAgent(
             break;
           case "error":
             throw new Error(event.message);
+          case "tool_call":
+            // Only a conversation's turn shows cards; side calls stream nothing the person sees.
+            if (!isTurn) {
+              yield* switchBlock("reasoning");
+              yield {
+                type: "reasoning_delta",
+                id: block!.id,
+                text: `${describeToolUse(event.name, event.input)}\n`,
+              };
+              break;
+            }
+            if (cards.has(event.id)) break;
+            cards.set(event.id, event.name);
+            sawCards = true;
+            // The text or thinking before the call is its own round.
+            yield* closeBlock();
+            yield {
+              type: "tool_call",
+              toolCall: {
+                id: event.id,
+                name: event.name,
+                input: event.input,
+                providerExecuted: true,
+                executor: { name: CLI_AGENT_NAMES[options.agent], subject: projectRelative(toolSubject(event.input), cwd) },
+              },
+            };
+            break;
+          case "tool_result": {
+            const name = cards.get(event.id);
+            if (name === undefined) break;
+            cards.delete(event.id);
+            yield {
+              type: "provider_tool_result",
+              toolCallId: event.id,
+              toolName: name,
+              output: event.output,
+              isError: event.isError,
+            };
+            break;
+          }
           case "thinking":
           case "activity":
             yield* switchBlock("reasoning");
@@ -240,7 +298,9 @@ async function* streamCliAgent(
     await dialogue?.end();
   }
   yield* closeBlock();
-  if (!wroteText) throw new Error("The CLI finished without a reply.");
+  // A turn that ended on its tool calls has said what it did through them.
+  if (!wroteText && !sawCards)
+    throw new Error("The CLI finished without a reply.");
   yield { type: "finish", finishReason: "stop", usage };
 }
 

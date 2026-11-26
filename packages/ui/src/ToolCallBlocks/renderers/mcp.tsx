@@ -159,16 +159,35 @@ export function formatMcpToolLabel(toolName: string, serverLabel: string): strin
     : formattedToolName;
 }
 
+/** The runtime marks a call a coding CLI ran itself (Claude Code, Codex) with this server prefix. */
+const AGENT_EXECUTOR_PREFIX = "agent:";
+
+/** The CLI that ran the call, when it was one, for the card's label instead of "MCP". */
+export function readAgentExecutor(presentation: McpToolPresentation | null): string | undefined {
+  const serverName = presentation?.serverName;
+  if (!serverName?.startsWith(AGENT_EXECUTOR_PREFIX)) return undefined;
+  return serverName.slice(AGENT_EXECUTOR_PREFIX.length).trim() || undefined;
+}
+
 export function McpToolCallBlock(context: ToolCallBlockRenderContext) {
   const { intl } = useZCodeIntl();
   const presentation = readMcpToolPresentation(context);
   const { toolCall } = context.toolCallNode;
-  const serverLabel = presentation?.serverName
-    ? formatMcpServerLabel(presentation.serverName)
-    : undefined;
+  const agentExecutor = readAgentExecutor(presentation);
+  const serverLabel =
+    presentation?.serverName && !agentExecutor
+      ? formatMcpServerLabel(presentation.serverName)
+      : undefined;
   const toolLabel = presentation
-    ? formatMcpToolLabel(presentation.toolName, serverLabel ?? "")
+    ? agentExecutor
+      ? presentation.toolName
+      : formatMcpToolLabel(presentation.toolName, serverLabel ?? "")
     : toolCall.title;
+  // An agent's call says what it touched (a path, a command) beside its name.
+  const agentSubject =
+    agentExecutor && presentation?.description ? (
+      <span className="min-w-0 truncate text-foreground-subtle">{presentation.description}</span>
+    ) : undefined;
   const callDetailsLabel = intl.formatMessage({ id: "chat.toolCall.mcp.callDetails" });
   const resultLabel = intl.formatMessage({ id: "chat.toolCall.mcp.result" });
   const copyResultLabel = intl.formatMessage({ id: "chat.toolCall.mcp.copyResult" });
@@ -336,14 +355,14 @@ export function McpToolCallBlock(context: ToolCallBlockRenderContext) {
       // 即使父层请求 forceOpen，也必须遵守这两个生命周期的 summary-only 语义。
       canToggle={!isSummaryOnlyLifecycle && (context.canToggle ?? true)}
       forceOpen={!isSummaryOnlyLifecycle && (context.forceOpen ?? false)}
-      kindLabel="MCP"
+      kindLabel={agentExecutor ?? "MCP"}
       kindDetail={
         serverLabel ? <span className="text-foreground-subtle">{serverLabel}</span> : undefined
       }
       primaryText={toolLabel}
       // Pending/Running/Completed 都是正常生命周期，不在摘要重复状态；Stopped 是异常终态，
       // 状态作为独立节点交给公共 gap 分隔；Failed 使用专用错误状态槽位。
-      secondaryText={stoppedSummaryStatus}
+      secondaryText={stoppedSummaryStatus ?? agentSubject}
       statusLabel={failedSummaryStatus}
       statusTooltip={toolCall.status === "failed" ? context.errorText : undefined}
       showFailureStatus={toolCall.status === "failed"}
